@@ -5,6 +5,7 @@ export default defineConfig({
   esbuildPlugins: [wasmLoader()],
   entry: {
     'index': 'src/index.ts',
+    'transports': 'src/transports/index.ts',
   },
   format: ['cjs', 'esm'],
   // Inject cjs and esm shims:https://tsup.egoist.dev/#inject-cjs-and-esm-shims

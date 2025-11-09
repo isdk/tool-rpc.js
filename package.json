@@ -14,9 +14,9 @@
       "import": "./dist/index.mjs"
     },
     "./transports": {
-      "types": "./dist/transports/index.d.ts",
-      "require": "./dist/transports/index.js",
-      "import": "./dist/transports/index.mjs"
+      "types": "./dist/transports.d.ts",
+      "require": "./dist/transports.js",
+      "import": "./dist/transports.mjs"
     }
   },
   "files": [
