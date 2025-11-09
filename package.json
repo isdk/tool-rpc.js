@@ -1,6 +1,6 @@
 {
   "name": "@isdk/tool-rpc",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Client-server RPC and RESTful communication tools based on @isdk/tool-func.",
   "author": "Riceball LEE <snowyu.lee@gmail.com>",
   "license": "MIT",
