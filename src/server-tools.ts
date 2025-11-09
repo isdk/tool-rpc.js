@@ -35,9 +35,7 @@ export interface ServerFuncItem extends RemoteFuncItem {
   allowExportFunc?: boolean
 }
 
-/**
- * Declaration merging to extend the `ServerTools` class with `ServerFuncItem` properties.
- */
+// * Declaration merging to extend the `ServerTools` class with `ServerFuncItem` properties.
 export declare interface ServerTools extends ServerFuncItem {
   [name: string]: any;
 }

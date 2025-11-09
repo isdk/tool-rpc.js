@@ -4,9 +4,7 @@ import { RemoteToolFuncSchema, type RemoteFuncItem, type ActionName } from "./co
 import type { IClientToolTransport } from "./transports/client";
 import { defaultsDeep } from "lodash-es";
 
-/**
- * Declaration merging to extend the `ClientTools` class with `ClientFuncItem` properties.
- */
+// * Declaration merging to extend the `ClientTools` class with `ClientFuncItem` properties.
 export declare interface ClientTools extends ClientFuncItem {
   [name: string]: any;
 }
