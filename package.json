@@ -30,10 +30,11 @@
     "access": "public"
   },
   "dependencies": {
-    "@isdk/tool-func": "workspace:^",
     "@isdk/common-error": "^0.2.0",
-    "lodash-es": "^4.17.21",
-    "util-ex": "^2.4.0"
+    "@isdk/tool-func": "workspace:^",
+    "@mboxlabs/mailbox": "workspace:^",
+    "lodash-es": "^4.17.23",
+    "util-ex": "^2.5.1"
   },
   "devDependencies": {
     "@antfu/eslint-config": "^4.10.1",
