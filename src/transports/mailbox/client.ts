@@ -2,6 +2,7 @@ import { ClientTools } from '../../client-tools';
 import { ClientToolTransport } from '../client';
 import { Mailbox, MailMessage } from '@mboxlabs/mailbox';
 import { ActionName } from '../../consts';
+import { RemoteError } from './error';
 
 /**
  * Configuration options for the MailboxClientTransport.
@@ -13,8 +14,13 @@ export interface MailboxClientOptions {
    */
   mailbox?: Mailbox;
   /**
-   * The server's physical address (discovery/RPC entry point).
+   * The server's physical address (gateway/RPC entry point).
    * E.g., 'mem://api@server/api'.
+   */
+  serverAddress?: string;
+  /**
+   * The root path for the API (logical placeholder). Default is '/'.
+   * @deprecated Use serverAddress for the physical endpoint.
    */
   apiRoot?: string;
   /**
@@ -51,26 +57,36 @@ interface PendingRequest {
  */
 export class MailboxClientTransport extends ClientToolTransport {
   protected mailbox: Mailbox;
+  protected serverAddress: string;
   protected clientAddress: string;
   protected pendingRequests: Map<string, PendingRequest> = new Map();
   protected subscription: any;
   protected timeout: number;
+  protected isInternalMailbox = false;
 
   constructor(options: MailboxClientOptions) {
-    if (!options.apiRoot) {
-      throw new Error('apiRoot (server address) is required for MailboxClientTransport');
+    const serverAddress = options.serverAddress || options.apiRoot;
+    if (!serverAddress) {
+      throw new Error('serverAddress (physical server address) is required for MailboxClientTransport');
     }
     if (!options.clientAddress) {
       throw new Error('clientAddress is required for MailboxClientTransport to receive responses');
     }
-    super(options.apiRoot);
-    this.mailbox = options.mailbox || new Mailbox();
+    super(options.apiRoot || '/');
+    if (options.mailbox) {
+      this.mailbox = options.mailbox;
+    } else {
+      this.mailbox = new Mailbox();
+      this.isInternalMailbox = true;
+    }
+    this.serverAddress = serverAddress;
     this.clientAddress = options.clientAddress;
     this.timeout = options.timeout || 30000;
     this.options = options;
   }
 
   async _mount(clientTools: typeof ClientTools, apiPrefix: string, options?: any) {
+    await this.mailbox.start?.();
     if (!this.subscription) {
       this.subscription = this.mailbox.subscribe(this.clientAddress, this.onResponse.bind(this));
     }
@@ -87,31 +103,23 @@ export class MailboxClientTransport extends ClientToolTransport {
       this.pendingRequests.delete(reqId);
 
       if (body && typeof body === 'object' && 'error' in body) {
-        // Handle structured error from MailboxServerTransport
-        const error: any = new Error(body.error);
-        if (body.code) { error.code = body.code; }
-        if (body.data) { error.data = body.data; }
-        reject(error);
+        reject(RemoteError.fromJSON(body));
       } else {
         resolve(body);
       }
+    } else if (reqId) {
+      console.warn(`[MailboxClientTransport] Received response for unknown or timed-out request ID: ${reqId}`);
     }
   }
 
-  /**
-   * Connects to the server's discovery endpoint to get the list of available tools.
-   * @returns A promise that resolves to a map of tool function metadata.
-   */
   async loadApis(): Promise<any> {
-    // Note: this.fetch will call _fetch and then toObject
     return this.fetch('', {}, 'list');
   }
 
   public async _fetch(fnId: string, args?: any, act?: ActionName | string, resId?: any, fetchOptions?: any): Promise<any> {
     const reqId = crypto.randomUUID();
-    const targetAddressStr = this.apiRoot; // Strictly use the apiRoot as physical address
+    const targetAddressStr = this.serverAddress;
 
-    // Default action logic
     if (!act) {
       act = (this.Tools as any)?.action || 'post';
     }
@@ -119,19 +127,16 @@ export class MailboxClientTransport extends ClientToolTransport {
       act = 'get';
     }
 
-    const messageBody = {
-      ...(args || {}),
-    };
-
-    const messageHeaders = {
+    const messageBody = { ...(args || {}) };
+    const messageHeaders: any = {
       'mbx-req-id': reqId,
       'mbx-reply-to': this.clientAddress,
-      'mbx-fn-id': fnId || '',
-      'mbx-act': act,
+      'mbx-fn-id': fnId || undefined,
+      'mbx-act': act || undefined,
       ...fetchOptions?.headers,
     };
 
-    if (resId) {
+    if (resId !== undefined && resId !== null) {
       messageHeaders['mbx-res-id'] = typeof resId === 'string' ? resId : JSON.stringify(resId);
     }
 
@@ -172,5 +177,8 @@ export class MailboxClientTransport extends ClientToolTransport {
       reject(new Error('Transport stopped'));
     }
     this.pendingRequests.clear();
+    if (this.isInternalMailbox) {
+      await this.mailbox.stop?.();
+    }
   }
 }

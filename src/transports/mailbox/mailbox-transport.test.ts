@@ -51,7 +51,7 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
     // 3. Setup client transport
     clientTransport = new MailboxClientTransport({
       mailbox,
-      apiRoot: serverAddress,
+      serverAddress: serverAddress,
       clientAddress: clientAddress,
       timeout: 1000,
     });
@@ -152,7 +152,7 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
 
     const pullClient = new MailboxClientTransport({
       mailbox,
-      apiRoot: pullServerAddress,
+      serverAddress: pullServerAddress,
       clientAddress: 'mem://pull-client/inbox',
       timeout: 2000,
     });
@@ -402,7 +402,7 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
   it('should reject pending requests when transport is stopped', async () => {
     const stopTransport = new MailboxClientTransport({
       mailbox,
-      apiRoot: 'mem://nobody-listener/api',
+      serverAddress: 'mem://nobody-listener/api',
       clientAddress: 'mem://stopper@client/inbox',
       timeout: 5000,
     });
