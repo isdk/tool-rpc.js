@@ -87,31 +87,53 @@ export class MailboxClientTransport extends ClientToolTransport {
       this.pendingRequests.delete(reqId);
 
       if (body && typeof body === 'object' && 'error' in body) {
-        reject(new Error(body.error));
+        // Handle structured error from MailboxServerTransport
+        const error: any = new Error(body.error);
+        if (body.code) { error.code = body.code; }
+        if (body.data) { error.data = body.data; }
+        reject(error);
       } else {
         resolve(body);
       }
     }
   }
 
-  public async _fetch(name: string, args?: any, act?: ActionName | string, subName?: any, fetchOptions?: any): Promise<any> {
+  /**
+   * Connects to the server's discovery endpoint to get the list of available tools.
+   * @returns A promise that resolves to a map of tool function metadata.
+   */
+  async loadApis(): Promise<any> {
+    // Note: this.fetch will call _fetch and then toObject
+    return this.fetch('', {}, 'list');
+  }
+
+  public async _fetch(fnId: string, args?: any, act?: ActionName | string, resId?: any, fetchOptions?: any): Promise<any> {
     const reqId = crypto.randomUUID();
-    const targetAddressStr = this.apiRoot;
+    const targetAddressStr = this.apiRoot; // Strictly use the apiRoot as physical address
+
+    // Default action logic
+    if (!act) {
+      act = (this.Tools as any)?.action || 'post';
+    }
+    if (act === 'res') {
+      act = 'get';
+    }
 
     const messageBody = {
-      ...args,
-      name,
-      act: act || (this.Tools ? (this.Tools as any).action : undefined) || 'post',
+      ...(args || {}),
     };
-
-    if (subName) {
-      messageBody.subName = subName;
-    }
 
     const messageHeaders = {
       'mbx-req-id': reqId,
+      'mbx-reply-to': this.clientAddress,
+      'mbx-fn-id': fnId || '',
+      'mbx-act': act,
       ...fetchOptions?.headers,
     };
+
+    if (resId) {
+      messageHeaders['mbx-res-id'] = typeof resId === 'string' ? resId : JSON.stringify(resId);
+    }
 
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
