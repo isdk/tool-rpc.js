@@ -29,9 +29,13 @@ export interface MailboxClientOptions {
    */
   clientAddress?: string;
   /**
-   * Request timeout in milliseconds. Default is 30000 (30 seconds).
+   * Request timeout. Can be a number (milliseconds) or an object. Default is 30000 (30 seconds).
    */
-  timeout?: number;
+  timeout?: number | {
+    value: number;
+    streamIdleTimeout?: number;
+    keepAliveOnTimeout?: boolean;
+  };
   /**
    * Additional transport-specific options.
    */
@@ -61,7 +65,7 @@ export class MailboxClientTransport extends ClientToolTransport {
   protected clientAddress: string;
   protected pendingRequests: Map<string, PendingRequest> = new Map();
   protected subscription: any;
-  protected timeout: number;
+  protected timeout: any;
   protected isInternalMailbox = false;
 
   constructor(options: MailboxClientOptions) {
@@ -82,7 +86,7 @@ export class MailboxClientTransport extends ClientToolTransport {
     this.serverAddress = serverAddress;
     this.clientAddress = options.clientAddress;
     this.timeout = options.timeout || 30000;
-    this.options = options;
+    this.options = { ...options, timeout: this.timeout };
   }
 
   async _mount(clientTools: typeof ClientTools, apiPrefix: string, options?: any) {
@@ -112,11 +116,12 @@ export class MailboxClientTransport extends ClientToolTransport {
     }
   }
 
-  async loadApis(): Promise<any> {
-    return this.fetch('', {}, 'list');
+  async loadApis(options?: any): Promise<any> {
+    console.log('[MailboxClient] loadApis called with options:', JSON.stringify(options));
+    return this.fetch('', {}, 'list', undefined, options);
   }
 
-  public async _fetch(fnId: string, args?: any, act?: ActionName | string, resId?: any, fetchOptions?: any): Promise<any> {
+  public async _fetch(fnId: string, args?: any, act?: ActionName | string, resId?: any, fetchOptions?: any, toolTimeout?: any): Promise<any> {
     const reqId = crypto.randomUUID();
     const targetAddressStr = this.serverAddress;
 
@@ -136,19 +141,68 @@ export class MailboxClientTransport extends ClientToolTransport {
       ...fetchOptions?.headers,
     };
 
+    let timeoutVal: number = 30000;
+    if (fetchOptions?.timeout) {
+      timeoutVal = typeof fetchOptions.timeout === 'number' ? fetchOptions.timeout : fetchOptions.timeout.value;
+      messageHeaders['x-rpc-timeout'] = timeoutVal.toString();
+    }
+    console.log(`[MailboxClient] _fetch timeoutVal: ${timeoutVal}ms`);
+    if (fetchOptions?.expectedDuration) {
+      messageHeaders['x-rpc-expected-duration'] = fetchOptions.expectedDuration.toString();
+    }
+
     if (resId !== undefined && resId !== null) {
       messageHeaders['mbx-res-id'] = typeof resId === 'string' ? resId : JSON.stringify(resId);
     }
 
+    const clientLocalTimeout = timeoutVal + 200;
     return new Promise((resolve, reject) => {
+      const abortHandler = () => {
+        if (this.pendingRequests.has(reqId)) {
+          clearTimeout(timer);
+          this.pendingRequests.delete(reqId);
+          const err: any = new Error('The operation was aborted');
+          err.name = 'AbortError';
+          err.code = 20;
+          reject(err);
+        }
+      };
+
+      if (fetchOptions?.signal?.aborted) {
+        return abortHandler();
+      }
+
       const timer = setTimeout(() => {
         if (this.pendingRequests.has(reqId)) {
+          if (fetchOptions?.signal) {
+            fetchOptions.signal.removeEventListener('abort', abortHandler);
+          }
           this.pendingRequests.delete(reqId);
-          reject(new Error(`Request timeout after ${this.timeout}ms`));
+          const err: any = new Error(`Request timeout after ${clientLocalTimeout}ms`);
+          err.code = 504;
+          reject(err);
         }
-      }, this.timeout);
+      }, clientLocalTimeout);
 
-      this.pendingRequests.set(reqId, { resolve, reject, timer });
+      if (fetchOptions?.signal) {
+        fetchOptions.signal.addEventListener('abort', abortHandler, { once: true });
+      }
+
+      this.pendingRequests.set(reqId, { 
+        resolve: (val: any) => {
+          if (fetchOptions?.signal) {
+            fetchOptions.signal.removeEventListener('abort', abortHandler);
+          }
+          resolve(val);
+        }, 
+        reject: (err: any) => {
+          if (fetchOptions?.signal) {
+            fetchOptions.signal.removeEventListener('abort', abortHandler);
+          }
+          reject(err);
+        }, 
+        timer 
+      });
 
       this.mailbox.post({
         from: this.clientAddress,

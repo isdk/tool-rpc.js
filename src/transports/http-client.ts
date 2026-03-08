@@ -11,15 +11,15 @@ export class HttpClientToolTransport extends ClientToolTransport {
 
   /**
    * Connects to the server's discovery endpoint to get the list of available tools.
+   * @param options Additional options for the discovery call.
    * @returns A promise that resolves to a map of tool function metadata.
    */
-  async loadApis(): Promise<Funcs> {
-    const res = await fetch(this.apiRoot, {
+  async loadApis(options?: any): Promise<Funcs> {
+    const fetchOptions = {
       headers: { 'Content-Type': 'application/json' },
-    });
-    if (!res.ok) {
-      throw new Error(`Failed to load tools from ${this.apiRoot}: ${res.statusText}`);
-    }
+      ...options,
+    };
+    const res = await this._fetch('', undefined, 'get', undefined, fetchOptions);
     const items = await res.json();
     return items;
   }
@@ -68,12 +68,90 @@ export class HttpClientToolTransport extends ClientToolTransport {
       delete fetchOptions.headers['Content-Type']
     }
 
-    const res = await fetch(`${this.apiRoot}/${urlPart}`, fetchOptions)
+    const fullUrl = urlPart ? `${this.apiRoot}/${urlPart}` : this.apiRoot;
+
+    let timeoutVal: number | undefined;
+    if (fetchOptions.timeout) {
+      timeoutVal = typeof fetchOptions.timeout === 'number' ? fetchOptions.timeout : fetchOptions.timeout.value;
+      if (timeoutVal) {
+        if (!fetchOptions.headers) { fetchOptions.headers = {}; }
+        fetchOptions.headers['x-rpc-timeout'] = timeoutVal.toString();
+
+        if (!fetchOptions.signal) {
+          const controller = new AbortController();
+          fetchOptions.signal = controller.signal;
+          // Add a small buffer to client local timeout to receive server 504
+          const clientLocalTimeout = timeoutVal + 200;
+          setTimeout(() => {
+            if (!controller.signal.aborted) {
+              controller.abort();
+            }
+          }, clientLocalTimeout);
+        }
+      }
+    }
+
+    const res = await fetch(fullUrl, fetchOptions)
     if (!res.ok) {
       const err = await this.errorFrom(name, res)
       throw err
     }
+
+    if (args?.stream && fetchOptions.timeout?.streamIdleTimeout) {
+      return this.wrapStreamWithIdleTimeout(res, fetchOptions.timeout.streamIdleTimeout);
+    }
     return res
+  }
+
+  /**
+   * Wraps a response with a stream idle timeout.
+   * @param res - The response to wrap.
+   * @param idleTimeout - The idle timeout in milliseconds.
+   * @returns A response with a wrapped stream.
+   */
+  private wrapStreamWithIdleTimeout(res: any, idleTimeout: number) {
+    if (!res.body) return res;
+
+    const reader = res.body.getReader();
+    const stream = new ReadableStream({
+      async start(controller) {
+        let timer: any;
+
+        const resetTimer = () => {
+          if (timer) clearTimeout(timer);
+          timer = setTimeout(() => {
+            const err: any = new Error('Stream Idle Timeout');
+            err.code = 'TIMEOUT';
+            controller.error(err);
+            reader.cancel();
+          }, idleTimeout);
+        };
+
+        resetTimer();
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) {
+              if (timer) clearTimeout(timer);
+              controller.close();
+              break;
+            }
+            resetTimer();
+            controller.enqueue(value);
+          }
+        } catch (err) {
+          if (timer) clearTimeout(timer);
+          controller.error(err);
+        }
+      }
+    });
+
+    return new Response(stream, {
+      status: res.status,
+      statusText: res.statusText,
+      headers: res.headers,
+    });
   }
 
   /**

@@ -88,7 +88,7 @@ export class MailboxServerTransport extends ServerToolTransport {
       const act = headers?.['mbx-act'] || undefined;
 
       if (!fnId && this.discoveryHandlerInfo && (act === 'list' || act === 'get')) {
-        result = this.discoveryHandlerInfo.handler();
+        result = await this.discoveryHandlerInfo.handler();
         if (typeof result?.toJSON === 'function') {
           result = result.toJSON();
         }
@@ -105,7 +105,62 @@ export class MailboxServerTransport extends ServerToolTransport {
         if (resId) { params.id = resId; }
         if (act) { params.act = act; }
 
-        result = await func.run(params);
+        // Calculate timeout
+        const clientTimeoutHeader = headers?.['x-rpc-timeout'];
+        const clientRequestedTimeout = clientTimeoutHeader ? parseInt(clientTimeoutHeader as string, 10) : undefined;
+        const toolTimeout = func.timeout;
+        const serverGlobalTimeout = this.options?.timeout;
+
+        const getVal = (t: any) => typeof t === 'number' ? t : t?.value;
+        const t1 = getVal(clientRequestedTimeout);
+        const t2 = getVal(toolTimeout);
+        const t3 = getVal(serverGlobalTimeout);
+
+        let effectiveTimeoutVal: number | undefined;
+        const vals = [t1, t2, t3].filter(v => v !== undefined) as number[];
+        if (vals.length > 0) {
+          effectiveTimeoutVal = Math.min(...vals);
+        }
+
+        if (effectiveTimeoutVal) {
+          const controller = new AbortController();
+          const signal = controller.signal;
+          params._signal = signal;
+
+          const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => {
+              const currentKeepAlive = typeof toolTimeout === 'object' && toolTimeout?.keepAliveOnTimeout;
+              if (!currentKeepAlive) {
+                controller.abort();
+              }
+              const err: any = new Error('Execution Timeout');
+              err.code = 504; // Gateway Timeout
+              reject(err);
+            }, effectiveTimeoutVal);
+          });
+
+          // We don't await the race result directly in a way that blocks the background task's errors
+          const taskPromise = func.run(params, { req: message, reply: undefined, signal });
+          
+          try {
+            result = await Promise.race([
+              taskPromise,
+              timeoutPromise
+            ]);
+          } catch (err: any) {
+            if (err.message === 'Execution Timeout') {
+              // If it's a timeout and keepAlive is true, the taskPromise is still running.
+              // We catch its eventual result/error to avoid unhandled rejections.
+              taskPromise.catch(
+                (e) => console.error(`[MailboxServer] Background task ${fnId} failed eventually:`, e)
+              );
+              throw err; // Re-throw to be handled by the outer catch
+            }
+            throw err;
+          }
+        } else {
+          result = await func.run(params, { req: message, reply: undefined });
+        }
       } else {
         const err: any = new Error(`Invalid request to ${to.href}: missing 'mbx-fn-id' in headers`);
         err.code = 400;

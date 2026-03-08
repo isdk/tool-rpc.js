@@ -1,7 +1,6 @@
-// src/transports/http-server.ts
-
 import http from 'http';
 import { URL } from 'url';
+import { Readable } from 'stream';
 import { ServerToolTransport } from './server';
 import { defaultsDeep } from 'lodash-es';
 import { ServerTools } from '../server-tools';
@@ -38,7 +37,6 @@ export class HttpServerToolTransport extends ServerToolTransport {
         res.setHeader('Content-Type', 'application/json');
         res.statusCode = 200;
         res.end(JSON.stringify(result));
-        console.log(`[HttpServerTransport] Handled GET ${url} for discovery`);
       } catch (e: any) {
         res.statusCode = 500;
         res.setHeader('Content-Type', 'application/json');
@@ -60,7 +58,6 @@ export class HttpServerToolTransport extends ServerToolTransport {
 
   public addDiscoveryHandler(apiPrefix: string, handler: () => any): void {
     this.discoveryHandlerInfo = { prefix: apiPrefix, handler };
-    console.log(`[HttpServerTransport] Mapped GET ${apiPrefix} for discovery`);
   }
 
   public addRpcHandler(serverTools: typeof ServerTools, apiPrefix: string, options?: any) {
@@ -68,7 +65,6 @@ export class HttpServerToolTransport extends ServerToolTransport {
       apiPrefix += '/';
     }
     this.apiRoot = apiPrefix;
-    console.log(`[HttpServerTransport] Mapped RPC calls for prefix ${apiPrefix}`);
   }
 
   private async handleRpcRequest(request: http.IncomingMessage, reply: http.ServerResponse) {
@@ -111,15 +107,58 @@ export class HttpServerToolTransport extends ServerToolTransport {
         params._res = reply;
         if (id !== undefined) { params.id = id; }
 
-        let result = await func.run(params);
+        // Calculate timeout
+        const clientTimeoutHeader = request.headers['x-rpc-timeout'];
+        const clientRequestedTimeout = clientTimeoutHeader ? parseInt(clientTimeoutHeader as string, 10) : undefined;
+        const toolTimeout = func.timeout;
+        const serverGlobalTimeout = this.options?.timeout;
 
-        if (func.isStream(params)) {
+        const getVal = (t: any) => typeof t === 'number' ? t : t?.value;
+        const t1 = getVal(clientRequestedTimeout);
+        const t2 = getVal(toolTimeout);
+        const t3 = getVal(serverGlobalTimeout);
+
+        let effectiveTimeoutVal: number | undefined;
+        const vals = [t1, t2, t3].filter(v => v !== undefined) as number[];
+        if (vals.length > 0) {
+          effectiveTimeoutVal = Math.min(...vals);
+        }
+
+        let result: any;
+        if (effectiveTimeoutVal) {
+          const controller = new AbortController();
+          const signal = controller.signal;
+          params._signal = signal;
+
+          const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => {
+              const keepAlive = typeof toolTimeout === 'object' && toolTimeout?.keepAliveOnTimeout;
+              if (!keepAlive) {
+                controller.abort();
+              }
+              const err: any = new Error('Execution Timeout');
+              err.code = 504; // Gateway Timeout
+              reject(err);
+            }, effectiveTimeoutVal);
+          });
+
+          result = await Promise.race([
+            func.run(params, { req: request, reply, signal }),
+            timeoutPromise
+          ]);
+        } else {
+          result = await func.run(params, { req: request, reply });
+        }
+
+        const isStream = func.isStream(params);
+
+        if (isStream) {
             if (result && typeof result.pipe === 'function') {
                 result.pipe(reply);
+            } else if (result && typeof (Readable as any).fromWeb === 'function' && result instanceof ReadableStream) {
+                (Readable as any).fromWeb(result).pipe(reply);
             } else if (!reply.writableEnded) {
-                // If it's a stream but no result, or result is not a stream, just end.
-                // The function might have handled the response itself.
-                // reply.end();
+                // ...
             }
         } else {
             reply.setHeader('Content-Type', 'application/json');
@@ -161,13 +200,9 @@ export class HttpServerToolTransport extends ServerToolTransport {
     const { port, host = '0.0.0.0' } = defaultsDeep(options, { port: 3000 });
     return new Promise((resolve, reject) => {
         this.server.on('error', (err) => {
-            console.error('[HttpServerTransport] Server error:', err);
             reject(err);
         });
         this.server.listen(port, host, () => {
-            const address = this.server.address();
-            const addressString = typeof address === 'string' ? address : `${address?.address}:${address?.port}`;
-            console.log(`[HttpServerTransport] Server listening on ${addressString}`);
             resolve();
         });
     });

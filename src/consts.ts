@@ -37,6 +37,20 @@ export const RemoteToolFuncSchema = {
    * This is a server-side setting.
    */
   allowExportFunc: { type: 'boolean' },
+  /**
+   * The timeout configuration for the remote call.
+   * Can be a number (milliseconds) or an object for fine-grained control.
+   */
+  timeout: { type: ['number', 'object'] },
+  /**
+   * The expected duration of the remote call in milliseconds.
+   * Used for UX improvements like progress bars.
+   */
+  expectedDuration: { type: 'number' },
+  /**
+   * If true, indicate the tool function will return a stream.
+   */
+  stream: { type: 'boolean' },
 }
 
 /**
@@ -61,4 +75,23 @@ export interface RemoteFuncItem extends BaseFuncItem {
    * @type {any}
    */
   fetchOptions?: any
+  /**
+   * The timeout configuration for the remote call.
+   */
+  timeout?: number | {
+    /** The hard timeout in milliseconds. */
+    value: number;
+    /** The idle timeout for streaming responses in milliseconds. */
+    streamIdleTimeout?: number;
+    /** Whether to keep the server-side function running after a timeout. */
+    keepAliveOnTimeout?: boolean;
+  };
+  /**
+   * The expected duration of the remote call in milliseconds.
+   */
+  expectedDuration?: number;
+  /**
+   * Whether the tool returns a stream.
+   */
+  stream?: boolean;
 }

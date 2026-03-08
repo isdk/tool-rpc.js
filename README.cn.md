@@ -10,8 +10,10 @@
 - **🌐 RESTful 接口:** 使用 `ResServerTools` 快速创建符合 REST 风格的 API，自动处理 `get`, `list`, `post`, `put`, `delete` 等标准操作。
 - **🔧 RPC 方法分组:** 使用 `RpcMethodsServerTool` 将多个相关函数（方法）捆绑在单个工具下，通过 `act` 参数进行调用。
 - **🔌 客户端自动代理:** 客户端 (`ClientTools` 及其子类) 能从服务器自动加载工具定义，并动态生成类型安全的代理函数，使远程调用如本地调用般简单。
-- **🚀 内置 HTTP 传输:** 提供基于 Node.js `http` 模块的 `HttpServerToolTransport` 和基于 `fetch` 的 `HttpClientToolTransport`，开箱即用。
-- **🌊 支持流式响应:** 服务器和客户端均支持 `ReadableStream`，可轻松实现流式数据传输。
+- **⏱️ 生产级超时控制:** 支持硬超时强制中断、预估耗时 (UX 优化)、流式空闲超时监控以及后台持续运行模式。
+- **🧠 执行上下文 (Context):** 采用“影子实例”机制，通过 `.with(ctx)` 链式调用轻松配置超时、信号 (AbortSignal) 及业务元数据。
+- **🚀 内置传输层:** 提供基于 Node.js `http` 模块的服务器和基于 `fetch` / `mailbox` 的客户端，支持插件化扩展。
+- **🌊 深度流式支持:** 服务器和客户端均支持 `ReadableStream` (Web & Node)，可轻松实现跨环境流式数据传输。
 
 ## 📦 安装
 
@@ -180,6 +182,48 @@ graph TD
 
 简而言之：**类是工具的集合，实例是单个工具。** 这种设计将工具的管理（静态）与工具的定义（实例）清晰地分离开来。
 
+## ⏱️ 超时机制 (Timeout Strategy)
+
+`@isdk/tool-rpc` 特别针对分布式 AI 代理场景优化了超时控制，遵循“最小超时原则”。
+
+### 1. 配置格式
+
+`timeout` 属性支持简写和详写：
+
+- **简写 (number)**: 毫秒数，代表硬超时时间。
+- **详写 (Object)**:
+  - `value`: 硬超时时长。
+  - `streamIdleTimeout`: 流式传输的空闲超时（首字节或数据块间隔）。
+  - `keepAliveOnTimeout`: 默认为 `false`。若设为 `true`，服务端在返回超时错误后会允许任务在后台继续运行。
+
+### 2. 预估耗时 (expectedDuration)
+
+这是一个 UX 友好型指标（非强制约束）。客户端可以利用它优化加载体验：
+
+- **UI 模拟进度**: 在 `expectedDuration` 期间平滑移动进度条。
+- **智能重试**: 若超过预期耗时且任务幂等，客户端可选择发起并发冗余请求。
+
+## 🧠 执行上下文 (Context) 与 影子实例
+
+为了确保并发安全并解耦业务逻辑与环境信息，项目采用了“原型链影子实例”机制。
+
+### 1. this.ctx 访问
+
+在工具内部，请通过 `this.ctx` 访问执行环境信息，而不是将环境参数混入业务 `params`：
+
+- `this.ctx.signal`: 自动注入的 `AbortSignal`。
+- `this.ctx._req` / `this.ctx._res`: 原始传输层请求/响应对象。
+- 自定义字段: 如 `traceId` 或 `userId`。
+
+### 2. .with(ctx) 链式调用
+
+客户端可以通过 `.with()` 为单次或一系列调用预设环境：
+
+```typescript
+const runner = tool.with({ timeout: 2000, traceId: 'T123' });
+await runner.run(params);
+```
+
 ### 第 1 层：`ServerTools` / `ClientTools` - 基础远程函数
 
 这是最基础的层，代表一个单一的、可远程调用的函数。
@@ -205,7 +249,7 @@ graph TD
 
 ### 第 2 层：`RpcMethodsServerTool` / `RpcMethodsClientTool` - 面向对象的服务
 
-这一层将多个相关的函数组织成一个类似“对象”或“服务”的集合。
+这一层将多个相关的函数组织成一个类似“对象”或“服务”的集合。继承自上一层的 `ServerTools`。
 
 - **`RpcMethodsServerTool`**:
   - **概念**: 一个包含多个可调用方法的“服务”对象。它充当一个分发器。
@@ -241,7 +285,7 @@ graph TD
 
 ### 第 3 层：`ResServerTools` / `ResClientTools` - RESTful 资源
 
-这是最高级的抽象，它在 RPC 的基础上提供了一个以资源为中心的 RESTful 风格 API。
+这是最高级的抽象，它在 RPC 的基础上提供了一个以资源为中心的 RESTful 风格 API。继承自 `RpcMethodsServerTool`。
 
 - **`ResServerTools`**:
   - **概念**: 代表一个 RESTful 资源，内置了对标准 HTTP 动词（GET, POST, PUT, DELETE）的映射。
@@ -364,6 +408,22 @@ console.log('生成的 UUID:', uuid);
 ### 客户端方法别名
 
 为了方便起见，当您在服务器上用 `$` 前缀定义一个方法时（例如 `$promoteUser`），客户端代理会自动创建一个不带前缀的更清晰的别名。这允许您在客户端上调用 `myTool.promoteUser(...)`，使代码更具可读性和惯用性。
+
+### 🛡️ 跨进程清理 (Cleanup)
+
+当超时发生或客户端主动断开且 `keepAliveOnTimeout` 为 `false` 时：
+
+1. 服务端会自动触发 `this.ctx.signal` 的 `abort` 事件。
+2. 工具函数内部应监听此信号以停止耗时操作（如 AI 模型推理、长查询）。
+3. 传输层会确保关闭所有关联的连接。
+
+```typescript
+async func(params) {
+  this.ctx.signal.addEventListener('abort', () => {
+    // 停止本地耗时任务
+  });
+}
+```
 
 ## 🤝 贡献
 

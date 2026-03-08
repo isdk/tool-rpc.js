@@ -18,6 +18,11 @@ export interface ServerFuncParams {
    * @type {any}
    */
   _res?: any
+  /**
+   * The AbortSignal to monitor for cancellation or timeout.
+   * @type {AbortSignal}
+   */
+  _signal?: AbortSignal
   [name: string]: any
 }
 
@@ -86,19 +91,20 @@ export class ServerTools extends ToolFunc {
 
   /**
    * Overrides the base `run` method to inject transport-specific context.
-   * If a `context` object containing `req` and `reply` is provided, these are
-   * added to the parameters as `_req` and `_res` before execution.
+   * If a `context` object containing `req`, `reply`, and `signal` is provided,
+   * these are added to the parameters as `_req`, `_res`, and `_signal` before execution.
    *
    * @param {ServerFuncParams} params - The parameters for the function.
-   * @param {{ req: any, reply: any }} [context] - The transport-level context.
+   * @param {any} [options] - The transport-level context or options.
    * @returns The result of the function execution.
    */
-  run(params: ServerFuncParams, context?: { req: any, reply: any }) {
-    if (context) {
-      params._req = context.req;
-      params._res = context.reply;
+  run(params: ServerFuncParams, options?: any) {
+    if (options) {
+      params._req = options.req;
+      params._res = options.reply;
+      params._signal = options.signal;
     }
-    return super.run(params);
+    return super.run(params, options);
   }
 
   /**

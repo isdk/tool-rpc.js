@@ -9,6 +9,15 @@ export declare interface ClientTools extends ClientFuncItem {
   [name: string]: any;
 }
 
+export declare namespace ClientTools {
+  /**
+   * Gets a registered `ClientTools` instance by name.
+   * @param name - The name of the tool function.
+   * @returns The `ClientTools` instance.
+   */
+  function get(name: string): ClientTools;
+}
+
 /**
  * Alias for `RemoteFuncItem` on the client side.
  */
@@ -63,13 +72,15 @@ export class ClientTools extends ToolFunc {
   /**
    * Loads tool definitions from the remote server via the configured transport.
    * This method populates the local `ToolFunc` registry with `ClientTools` stubs.
+   * @param items - Optional map of tool function metadata.
+   * @param options - Additional options for the discovery call (e.g., timeout).
    */
-  static async loadFrom(items?: Funcs) {
+  static async loadFrom(items?: Funcs, options?: any) {
     if (!items) {
       if (!this._transport) {
         throwError(NoTransportErrorMsg, 'ClientTools');
       }
-      items = await this._transport.loadApis();
+      items = await this._transport.loadApis(options);
     }
     if (items) this.loadFromSync(items);
     return items;
@@ -82,7 +93,7 @@ export class ClientTools extends ToolFunc {
    */
   static loadFromSync(items: Funcs) {
     for (const name in items) {
-      const item = this.get(name);
+      const item: any = this.get(name);
       const funcItem = items[name] as ClientFuncItem;
       if (!item) {
         this.register(funcItem);
@@ -113,8 +124,9 @@ export class ClientTools extends ToolFunc {
   async fetch(objParam?: any, act?: ActionName, subName?: any, fetchOptions?: any) {
     const ctor = this.constructor as typeof ClientTools
     if (ctor._transport) {
-      fetchOptions = defaultsDeep(fetchOptions, this.fetchOptions)
-      return ctor._transport.fetch(this.name!, objParam, act, subName, fetchOptions)
+      // Merge fetchOptions with this.ctx (from tool-func)
+      fetchOptions = defaultsDeep(fetchOptions, this.ctx, this.fetchOptions)
+      return ctor._transport.fetch(this.name!, objParam, act, subName, fetchOptions, this.timeout)
     } else {
       throwError(NoTransportErrorMsg, 'ClientTools');
     }
@@ -126,17 +138,11 @@ export class ClientTools extends ToolFunc {
    * configured transport, which handles the network communication.
    *
    * @param objParam - The parameters to send to the remote tool.
-   * @param objParam.stream [boolean] - the optional stream flag. if true, the tool will return a stream(ReadableStream).
    * @returns The result from the remote tool.
    */
   async func(objParam: any) {
     const res = await this.fetch(objParam)
     return res
-    // if (objParam?.stream) {
-    //   return res
-    // }
-    // const result = await res.json()
-    // return result
   }
 }
 
