@@ -81,7 +81,7 @@ export class RpcMethodsServerTool extends ServerTools {
     for (const name in this.items) {
       let item: any = this.items[name];
       // 只导出当前层级（即：使用了当前 toJSON 逻辑）的实例，且未显式禁用 isApi
-      if ((item instanceof this) && (item.constructor.toJSON === this.toJSON) && item.isApi !== false) {
+      if ((item instanceof this) && ((item.constructor as any).toJSON === this.toJSON) && item.isApi !== false) {
         if (!item.allowExportFunc) {
           item = item.toJSON()
           delete item.func;

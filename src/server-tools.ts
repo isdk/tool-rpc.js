@@ -82,7 +82,7 @@ export class ServerTools extends ToolFunc {
       // Only export if it's an instance of this class AND its class uses this exact toJSON method
       // This allows subclasses (like TestResTool) to be discovered by their base class (ResServerTools)
       // while preventing specialized subclasses (like RpcMethodsServerTool) from leaking into parent discovery.
-      const isExactType = (item instanceof this) && (item.constructor.toJSON === this.toJSON) && item.isApi !== false;
+      const isExactType = (item instanceof this) && ((item.constructor as any).toJSON === this.toJSON) && item.isApi !== false;
       const isBaseApi = item.isApi && !(item instanceof ServerTools);
 
       if (isExactType || isBaseApi) {
