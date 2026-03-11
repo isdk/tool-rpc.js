@@ -73,6 +73,24 @@ export class RpcMethodsServerTool extends ServerTools {
       return this[method](params)
     } else {throw new NotFoundError(method!, this.name)}
   }
+
+  // RpcMethodsServerTool 和 后续的 ResServerTools 都必须是确认的子类才可以导出
+  // 而且 isApi 修改为默认为 true, 可以设置为 false 来取消导出
+  static toJSON() {
+    const result:{[name:string]: ServerTools} = {}
+    for (const name in this.items) {
+      let item: any = this.items[name];
+      // 只导出当前层级（即：使用了当前 toJSON 逻辑）的实例，且未显式禁用 isApi
+      if ((item instanceof this) && (item.constructor.toJSON === this.toJSON) && item.isApi !== false) {
+        if (!item.allowExportFunc) {
+          item = item.toJSON()
+          delete item.func;
+        }
+        result[name] = item;
+      }
+    }
+    return result
+  }
 }
 
 export const RpcMethodsServerToolSchema = {

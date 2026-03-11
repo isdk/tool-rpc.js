@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { Mailbox, MemoryProvider, MailMessage } from '@mboxlabs/mailbox';
 
+import { ToolFunc, Funcs } from '@isdk/tool-func';
 import { ServerTools } from '../../server-tools';
 import { ResServerTools } from '../../res-server-tools';
 import { ClientTools } from '../../client-tools';
@@ -11,21 +12,30 @@ import { MailboxClientTransport } from './client';
 describe('MailboxServerTransport / MailboxClientTransport Test', () => {
   let mailbox: Mailbox;
   let serverTransport: MailboxServerTransport;
+  let resServerTransport: MailboxServerTransport;
   let clientTransport: MailboxClientTransport;
+  let resClientTransport: MailboxClientTransport;
 
   const serverAddress = 'mem://api@server/api';
+  const resServerAddress = 'mem://api@server/res';
   const clientAddress = 'mem://user@client/inbox';
+  const resClientAddress = 'mem://user@client/res-inbox';
 
   beforeAll(async () => {
-    // Reset registries to avoid test interference
-    ServerTools.items = {};
-    ClientTools.items = {};
-    ResClientTools.items = ClientTools.items; // Ensure shared items
+    // 1. Isolate Server side items (Shared among server classes)
+    const serverItems: any = Object.create(ToolFunc.items);
+    (ServerTools as any).items = serverItems;
+    (ResServerTools as any).items = serverItems;
+
+    // 2. Isolate Client side items (Shared among client classes, start empty)
+    const clientItems: Funcs = {};
+    (ClientTools as any).items = clientItems;
+    (ResClientTools as any).items = clientItems;
 
     mailbox = new Mailbox();
     mailbox.registerProvider(new MemoryProvider());
 
-    // 1. Register tools on server
+    // 3. Register tools on server items
     new ServerTools({
       name: 'calculator',
       isApi: true,
@@ -43,27 +53,46 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
       },
     }).register();
 
-    // 2. Setup server transport (default Push mode)
+    // 4. Setup server transports
     serverTransport = new MailboxServerTransport({ mailbox, address: serverAddress });
     serverTransport.mount(ServerTools);
     await serverTransport.start();
 
-    // 3. Setup client transport
+    resServerTransport = new MailboxServerTransport({ mailbox, address: resServerAddress });
+    resServerTransport.mount(ResServerTools);
+    await resServerTransport.start();
+
+    // 5. Setup client transports
     clientTransport = new MailboxClientTransport({
       mailbox,
       serverAddress: serverAddress,
       clientAddress: clientAddress,
       timeout: 1000,
     });
-
     // Mount the transport to activate the client subscription
     await clientTransport.mount(ClientTools);
-    ResClientTools.setTransport(clientTransport);
+
+    resClientTransport = new MailboxClientTransport({
+      mailbox,
+      serverAddress: resServerAddress,
+      clientAddress: resClientAddress,
+      timeout: 2000,
+    });
+    // Mount the transport to activate the client subscription for ResClientTools
+    await resClientTransport.mount(ResClientTools);
+    ResClientTools.setTransport(resClientTransport);
   });
 
   afterAll(async () => {
     await serverTransport.stop();
+    await resServerTransport.stop();
     await clientTransport.stop();
+    await resClientTransport.stop();
+    // Cleanup items
+    delete (ServerTools as any).items;
+    delete (ResServerTools as any).items;
+    delete (ClientTools as any).items;
+    delete (ResClientTools as any).items;
   });
 
   it('should load APIs via discovery', async () => {
@@ -123,13 +152,22 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
         return { resId: params.id, name: 'Alice' };
       }
     }
+    // Register it onto the server items (via the tool class)
     new UserResTool('users', { isApi: true }).register();
+    console.log(`[Test] Registered UserResTool 'users' on server`);
 
     await ResClientTools.loadFrom();
     const userTool = ResClientTools.get('users');
+    console.log(`[Test] UserTool found on client: ${userTool !== undefined}`);
 
-    const user = await userTool!.fetch({ id: '123' }, 'get');
-    expect(user).toEqual({ resId: '123', name: 'Alice' });
+    if (userTool) {
+      console.log(`[Test] Calling userTool.fetch for id 123`);
+      const user = await userTool.fetch({ id: '123' }, 'get');
+      console.log(`[Test] Received user response:`, user);
+      expect(user).toEqual({ resId: '123', name: 'Alice' });
+    } else {
+      expect.fail('UserResTool should be discovered');
+    }
   });
 
   it('should work in Pull mode', async () => {
@@ -141,6 +179,7 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
       pullInterval: 10
     });
 
+    // We can use ServerTools to register it, it will be visible to this server
     new ServerTools({
       name: 'pullTester',
       isApi: true,
@@ -156,16 +195,17 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
       clientAddress: 'mem://pull-client/inbox',
       timeout: 2000,
     });
-    await pullClient.mount(ClientTools);
+
+    // Independent client for pull test
+    const pullClientItems = {};
+    const pullClientToolsClass = class extends ClientTools { static items = pullClientItems } as any;
+    await pullClient.mount(pullClientToolsClass);
 
     const result = await pullClient.fetch('pullTester');
     expect(result).toBe('pull-success');
 
     await pullServer.stop();
     await pullClient.stop();
-    // Restore original transport
-    ClientTools.setTransport(clientTransport);
-    ResClientTools.setTransport(clientTransport);
   });
 
   it('should redirect response to mbx-reply-to address', async () => {
@@ -202,7 +242,6 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
       });
     }
 
-    // Use globalThis to be 'relocation-proof' (serialization safe)
     (globalThis as any).backlogProcessedCount = 0;
     new ServerTools({
       name: 'backlog-adder',
@@ -225,7 +264,6 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
     await new Promise(resolve => setTimeout(resolve, 200));
     expect((globalThis as any).backlogProcessedCount).toBe(msgCount);
 
-    // Cleanup
     delete (globalThis as any).backlogProcessedCount;
     await pullServer.stop();
   });

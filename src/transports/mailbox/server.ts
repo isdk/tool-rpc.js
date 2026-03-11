@@ -81,26 +81,34 @@ export class MailboxServerTransport extends ServerToolTransport {
     const replyTo = headers?.['mbx-reply-to'] || message.from.href;
     const fromAddr = this.listenAddress || to.href;
 
+    // console.log(`[MailboxServer] Receiving message ${msgId} at ${this.listenAddress} for ${to.href}`);
+
     try {
       let result: any;
       const fnId = headers?.['mbx-fn-id'] || undefined;
       const resId = headers?.['mbx-res-id'] || undefined;
       const act = headers?.['mbx-act'] || undefined;
 
+      // console.log(`[MailboxServer] Processing headers: fnId=${fnId}, resId=${resId}, act=${act}`);
+
       if (!fnId && this.discoveryHandlerInfo && (act === 'list' || act === 'get')) {
+        // console.log(`[MailboxServer] Handled as discovery list/get`);
         result = await this.discoveryHandlerInfo.handler();
         if (typeof result?.toJSON === 'function') {
           result = result.toJSON();
         }
       } else if (fnId) {
+        // console.log(`[MailboxServer] Searching tool ${fnId} in ${this.Tools.name}`);
         const func: any = this.Tools.get(fnId);
         if (!func) {
+          // console.log(`[MailboxServer] Tool ${fnId} NOT FOUND in ${this.Tools.name}`);
           const err: any = new Error(`Tool ${fnId} not found`);
           err.code = 404;
           err.data = { what: fnId };
           throw err;
         }
 
+        // console.log(`[MailboxServer] Found tool ${fnId}, running...`);
         const params = { ...(body || {}), _req: message };
         if (resId) { params.id = resId; }
         if (act) { params.act = act; }

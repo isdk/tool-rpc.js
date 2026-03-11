@@ -141,9 +141,20 @@ async function main() {
 main();
 ```
 
-## 核心概念：分层抽象
+### 核心概念：分层抽象
 
 `@isdk/tool-rpc` 的核心设计思想是分层抽象，将网络通信与业务逻辑清晰分离。您可以根据需求的复杂度选择合适的抽象层级。
+
+#### 🛡️ 发现隔离与层级兼容 (Discovery Isolation)
+
+为了确保客户端在自动发现（Discovery）阶段加载到的是精准且协议匹配的工具定义，项目实现了一套**基于层级的发现隔离机制**。
+
+*   **物理隔离**：虽然所有工具类共享底层的 `items` 注册表以实现功能的继承和 `get` 的便利性，但它们的导出逻辑 (`toJSON`) 是物理隔离的。
+*   **各司其职**：
+    *   `ServerTools.toJSON()`：仅导出直接属于 `ServerTools` 的实例，以及标记为 `isApi: true` 的基础 `ToolFunc`。它**绝对不会**导出 RPC 或 Resource 类型的工具，从而避免基础客户端加载到无法处理的复杂协议。
+    *   `RpcMethodsServerTool.toJSON()`：仅导出 RPC 类型的工具。由于层级兼容性，它**包含**其子类 `ResServerTools` 的实例，但不包含父类 `ServerTools` 的普通函数。
+    *   `ResServerTools.toJSON()`：实现向上隔离，仅导出 Resource 类型的工具，不包含父类 `RpcMethodsServerTool` 的通用 RPC 方法。
+*   **设计初衷**：这种设计确保了当您将 Transport 挂载到特定层级（如 `server.mount(ResServerTools)`) 时，客户端只会看到它该看到的资源，保持了 API 边界的纯粹性。
 
 ```mermaid
 graph TD

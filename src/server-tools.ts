@@ -69,7 +69,8 @@ export class ServerTools extends ToolFunc {
    * Serializes all registered `ServerTools` instances into a JSON object.
    * This method is typically called by a transport's discovery endpoint.
    *
-   * It filters for tools that are instances of `ServerTools` or marked as `isApi`.
+   * It filters for tools that are instances of `this` (the current class)
+   * or marked as `isApi` but NOT an instance of `ServerTools` (e.g., base ToolFunc).
    * It omits the `func` body from the output unless `allowExportFunc` is true.
    *
    * @returns A map of serializable tool definitions.
@@ -78,7 +79,13 @@ export class ServerTools extends ToolFunc {
     const result:{[name:string]: ServerTools} = {}
     for (const name in this.items) {
       let item: any = this.items[name];
-      if ((item instanceof ServerTools) || item.isApi) {
+      // Only export if it's an instance of this class AND its class uses this exact toJSON method
+      // This allows subclasses (like TestResTool) to be discovered by their base class (ResServerTools)
+      // while preventing specialized subclasses (like RpcMethodsServerTool) from leaking into parent discovery.
+      const isExactType = (item instanceof this) && (item.constructor.toJSON === this.toJSON) && item.isApi !== false;
+      const isBaseApi = item.isApi && !(item instanceof ServerTools);
+
+      if (isExactType || isBaseApi) {
         if (!item.allowExportFunc) {
           item = item.toJSON()
           delete item.func;

@@ -87,7 +87,7 @@ describe('res server api', () => {
     await sleep(100)
     const port = await findPort(3003)
     server = new HttpServerToolTransport()
-    await server.mount(ServerTools, '/api')
+    await server.mount(ResServerTools, '/api')
     await sleep(100)
     server.start({ port, host: 'localhost' })
 

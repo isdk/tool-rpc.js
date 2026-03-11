@@ -91,11 +91,11 @@ describe('FastifyRestfulToolTransport', () => {
     const res = new TestResTool('resTest')
     res.register()
     const rpc = new TestRpcTool('rpcTest')
-    ResServerTools.register(rpc)
+    RpcMethodsServerTool.register(rpc)
 
     // 2. Use the new, specialized transport to mount all tools
     serverTransport = new HttpServerToolTransport();
-    serverTransport.mount(ResServerTools, '/api');
+    serverTransport.mount(RpcMethodsServerTool, '/api');
 
     const port = await findPort(3003);
     await serverTransport.start({ port, host: 'localhost' });

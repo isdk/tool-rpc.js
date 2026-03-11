@@ -144,6 +144,17 @@ main();
 
 The core design of `@isdk/tool-rpc` is a layered architecture that cleanly separates network communication from business logic. You can choose the right level of abstraction based on the complexity of your needs.
 
+#### 🛡️ Discovery Isolation & Layered Compatibility
+
+To ensure clients load accurate, protocol-matching tool definitions during the Discovery phase, the project implements a **hierarchical isolation mechanism**.
+
+*   **Logical Isolation**: While all tool classes share the underlying `items` registry for easy inheritance and lookup, their discovery logic (`toJSON`) is isolated at each level.
+*   **Role-Based Exporting**:
+    *   `ServerTools.toJSON()`: Exports only direct instances of `ServerTools` or raw `ToolFunc` items marked as `isApi: true`. It **never** exports RPC or Resource tools, preventing basic clients from seeing complex dispatchers they cannot handle.
+    *   `RpcMethodsServerTool.toJSON()`: Exports RPC tools and **includes** its subclasses like `ResServerTools` for compatibility, but excludes parent `ServerTools`.
+    *   `ResServerTools.toJSON()`: Implements upward isolation, exporting only Resource tools and excluding general RPC methods from its parent.
+*   **Design Intent**: This ensures that when you mount a transport on a specific level (e.g., `server.mount(ResServerTools)`), the discovery endpoint provides a clean, protocol-appropriate set of tools.
+
 ```mermaid
 graph TD
     subgraph Client-Side
