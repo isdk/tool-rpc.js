@@ -144,16 +144,38 @@ main();
 
 The core design of `@isdk/tool-rpc` is a layered architecture that cleanly separates network communication from business logic. You can choose the right level of abstraction based on the complexity of your needs.
 
-#### 🛡️ Discovery Isolation & Layered Compatibility
+## 🏛️ Deep Architecture: Containers, Business, and Isolation
+
+The architecture of `@isdk/tool-rpc` is built on a core philosophy: **Static classes as Containers, Instances as Business Functions.** This design balances global tool management with concrete business logic implementation.
+
+### 1. The Duality Model
+
+* **Container Classes (Plural 'Tools')**: e.g., `ServerTools`, `RpcMethodsServerTool`, `ResServerTools`.
+  * **Role**: They act as static **Registries** and **Discovery Protocol Filters**.
+  * **Responsibility**: Define level specifications, manage tool collections, and implement the `toJSON()` discovery algorithm. At the code level, they maintain global state via static properties (like `items`).
+* **Business Instances (Singular 'Tool'/'Func')**: Instances created via `new ServerTools(...)` or its subclasses.
+  * **Role**: They are the concrete **Functional Units**.
+  * **Responsibility**: Host business logic (via the `func` method or `$`-prefixed RPC methods), and define parameter schemas (`params`) and metadata.
+
+> **Naming Convention**: Class names use the plural (Tools) to reflect their container nature, while instances or derived business logic are conceptually singular (Tool/Func).
+
+### 2. Discovery Isolation & Layered Compatibility
 
 To ensure clients load accurate, protocol-matching tool definitions during the Discovery phase, the project implements a **hierarchical isolation mechanism**.
 
-*   **Logical Isolation**: While all tool classes share the underlying `items` registry for easy inheritance and lookup, their discovery logic (`toJSON`) is isolated at each level.
-*   **Role-Based Exporting**:
-    *   `ServerTools.toJSON()`: Exports only direct instances of `ServerTools` or raw `ToolFunc` items marked as `isApi: true`. It **never** exports RPC or Resource tools, preventing basic clients from seeing complex dispatchers they cannot handle.
-    *   `RpcMethodsServerTool.toJSON()`: Exports RPC tools and **includes** its subclasses like `ResServerTools` for compatibility, but excludes parent `ServerTools`.
-    *   `ResServerTools.toJSON()`: Implements upward isolation, exporting only Resource tools and excluding general RPC methods from its parent.
-*   **Design Intent**: This ensures that when you mount a transport on a specific level (e.g., `server.mount(ResServerTools)`), the discovery endpoint provides a clean, protocol-appropriate set of tools.
+* **Isolation Algorithm**: The `toJSON()` method performs triple validation during registry traversal:
+    1. **Type Check**: `item instanceof this` ensures the tool belongs to the current or a sub-level.
+    2. **Protocol Reference Check**: Validates `item.constructor.toJSON === this.toJSON`. This ensures that if a subclass (like `RpcMethodsServerTool`) overrides `toJSON` for a more complex protocol, its instances will **not** be exported by the parent class (like `ServerTools`), preventing basic clients from loading tools they cannot handle.
+    3. **Visibility Check**: `item.isApi !== false`.
+
+* **Export Ranges by Level**:
+  * **`ServerTools.toJSON()`**: Exports only direct instances of `ServerTools` and raw `ToolFunc` items marked as `isApi: true`. It **never** exports RPC or Resource tools.
+  * **`RpcMethodsServerTool.toJSON()`**: Exports all RPC-style tools. Due to downward compatibility, it **includes** instances of subclasses like `ResServerTools`.
+  * **`ResServerTools.toJSON()`**: Implements upward isolation, exporting only Resource tools and excluding general RPC methods from its parent.
+
+* **Default Behavior for `isApi`**:
+  * **For Derived Business Instances (Func)**: Since they are designed for remote exposure, they are **auto-exported** by default unless explicitly set to `isApi: false`.
+  * **For Base `ToolFunc` Instances**: For security, they are **hidden** by default. You must explicitly set `isApi: true` to make them discoverable via `ServerTools`.
 
 ```mermaid
 graph TD
@@ -182,15 +204,67 @@ graph TD
     B -- Returns result to --> A;
 ```
 
-### A Note on Naming: `ServerTools` (Plural) vs. Instance (Singular)
+### 3. 🛡️ Physical Isolation and Single-Process Testing
 
-You might notice that the class names `ServerTools`, `ClientTools`, etc., are plural. This is an intentional design choice that reflects their dual role:
+In a single-process environment (like local integration tests), the Server and Client share the same static `ToolFunc` registry. Running them directly causes the client proxy to attempt to overwrite the server's original instance, triggering an `already registered` error.
 
-- **The Static Class as a Registry (The Plural 'Tools')**: The static part of `ServerTools` (e.g., `ServerTools.register()`, `ServerTools.items`) acts as a **global registry and manager** for all remote tools. It holds the collection of tools and provides static methods to manage them. This is where the "Tools" (plural) in the name comes from.
+* **Solution**: Leverage JavaScript's static **Property Shadowing**.
+* **Operation**: Call `ClientTools.isolateRegistry()` in your test environment. This creates an independent **Hierarchical Registry Scope** for the class, isolating items, aliases, and refCounts. It uses prototype mechanisms to ensure the client proxy has its own namespace while still transparently inheriting from parent tools, perfectly simulating C/S isolation within a single process.
 
-- **An Instance as a Single Tool (The Singular 'Tool')**: When you create an instance (e.g., `new ServerTools({ name: 'myTool', ... })`), you are defining a **single, concrete tool**. The instance encapsulates the logic, metadata, and configuration for one individual function.
+## 🛠️ Advanced Architecture: Hierarchical Registries and Polymorphism
 
-In short: **The class is the collection of tools; an instance is a single tool.** This design provides a clean separation between the management of tools (static) and the definition of a tool (instance).
+For complex systems with plugin architectures or multi-tenant environments, `@isdk/tool-rpc` leverages the **Hierarchical Registries** of the underlying `@isdk/tool-func` to support sophisticated customization.
+
+### 1. Registry Isolation & Inheritance
+
+By calling `Tools.isolateRegistry()`, you branch the current registry into a new scope using prototype inheritance:
+
+- **Inheritance**: Sub-registries can access all tools from the parent.
+- **Locality**: New registrations are local to the current scope (and its descendants) and do not pollute the parent.
+- **Use Case**: Assigning independent tool domains to different AI agent groups or isolating Server/Client registries in unit tests.
+
+### 2. Shadowing & Polymorphism
+
+You can register a tool with the same name as a parent in an isolated registry to create a **Shadow**:
+
+- **Behavior**: Calls within the local scope use the new implementation; calls in the parent scope still use the original.
+- **Use Case**: Allowing specific plugins to replace a standard atomic tool (e.g., changing a notification method from Email to Slack) without modifying core framework code.
+
+### 3. Smart Binding Strategies
+
+When a workflow tool depends on other tools via the `depends` property, the binding strategy determines how those dependencies are resolved:
+
+* **`'auto'` (Default - Context-Aware)**: **The most intuitive mode for business logic.**
+  - **Logic**: Switches to polymorphic late binding only if the caller is a descendant of the tool definer.
+  - **Benefit**: Achieves "Local Customization, Global Stability". It allows plugins to modify a middle step of a workflow without breaking the parent system's internal stability.
+* **`'early'` (Early Binding - Contract Protection)**:
+  - **Logic**: Always uses the original dependency locked at registration time.
+  - **Benefit**: Used for security-critical or core components (e.g., auth, crypto) to prevent them from being "hijacked" by downstream shadows.
+* **`'late'` (Late Binding - Environment-First)**:
+  - **Logic**: Forcefully resolves from the top-level registry of the current caller, ignoring lineage.
+  - **Benefit**: Allows complete runtime injection based on the execution environment.
+
+### 4. Namespace Protection
+
+To prevent accidental shadowing, use `allowOverride: false` during registration. The registry will recursively check the prototype chain and throw an error if the name is already taken, protecting core APIs from being overwritten.
+
+## ⚠️ Common Pitfalls
+
+1. **Defining `func()` in `ResServerTools` subclasses**
+    * **Consequence**: `ResServerTools` relies on `func` for REST/RPC dispatching. Overwriting it without calling `super.func` breaks `get/list/$method` routing.
+    * **Best Practice**: Always implement business logic via `get()`, `list()`, or `$`-prefixed methods in the Resource layer.
+
+2. **Treating `isApi: false` as a Firewall**
+    * **Consequence**: `isApi: false` only affects the "Discovery" phase (hiding it from the client). If an attacker guesses the tool name and crafts a request, the transport layer will still execute it.
+    * **Best Practice**: Implement authentication in your business logic or use the `_req` context for authorization.
+
+3. **Missing Isolation in Single-Process Tests**
+    * **Consequence**: Errors like `[ToolName] already registered as ServerTools`.
+    * **Best Practice**: Use `ClientTools.isolateRegistry()` in your `beforeAll` hooks.
+
+4. **Confusing Static 'Tools' vs. Instance 'Func' Responsibilities**
+    * **Consequence**: Attempting to modify `ServerTools.items` within business logic, leading to global pollution.
+    * **Best Practice**: Static members are for management; business logic should be strictly confined to `this` or `this.ctx` on the instance.
 
 ### Layer 1: `ServerTools` / `ClientTools` - The Basic Remote Function
 

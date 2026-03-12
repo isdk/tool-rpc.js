@@ -145,16 +145,38 @@ main();
 
 `@isdk/tool-rpc` 的核心设计思想是分层抽象，将网络通信与业务逻辑清晰分离。您可以根据需求的复杂度选择合适的抽象层级。
 
-#### 🛡️ 发现隔离与层级兼容 (Discovery Isolation)
+## 🏛️ 深度架构：容器、业务与隔离
+
+`@isdk/tool-rpc` 的架构设计基于一个核心哲学：**静态类作为容器，实例作为业务函数。** 这种设计平衡了全局工具管理与具体业务逻辑的实现。
+
+### 1. 双重身份模型 (The Duality)
+
+* **容器类 (Plural 'Tools')**：如 `ServerTools`, `RpcMethodsServerTool`, `ResServerTools`。
+  * **角色**：它们是静态的**注册表 (Registry)** 和 **发现协议过滤器**。
+  * **职责**：定义层级规范，管理工具集合，实现 `toJSON()` 发现算法。在代码层面上，它们通过静态属性（如 `items`）维护全局状态。
+* **业务实例 (Singular 'Tool'/'Func')**：由 `new ServerTools(...)` 或其子类创建的实例。
+  * **角色**：它们是具体的**功能实现单元 (Functional Unit)**。
+  * **职责**：承载业务逻辑（通过 `func` 方法或以 `$` 开头的 RPC 方法），定义具体的参数模式 (`params`) 和元数据。
+
+> **命名约定**：类名使用复数（Tools）表示其容器属性，实例或其派生业务类逻辑上视为单数（Tool/Func）。
+
+### 2. 发现隔离与层级兼容 (Discovery Isolation)
 
 为了确保客户端在自动发现（Discovery）阶段加载到的是精准且协议匹配的工具定义，项目实现了一套**基于层级的发现隔离机制**。
 
-*   **物理隔离**：虽然所有工具类共享底层的 `items` 注册表以实现功能的继承和 `get` 的便利性，但它们的导出逻辑 (`toJSON`) 是物理隔离的。
-*   **各司其职**：
-    *   `ServerTools.toJSON()`：仅导出直接属于 `ServerTools` 的实例，以及标记为 `isApi: true` 的基础 `ToolFunc`。它**绝对不会**导出 RPC 或 Resource 类型的工具，从而避免基础客户端加载到无法处理的复杂协议。
-    *   `RpcMethodsServerTool.toJSON()`：仅导出 RPC 类型的工具。由于层级兼容性，它**包含**其子类 `ResServerTools` 的实例，但不包含父类 `ServerTools` 的普通函数。
-    *   `ResServerTools.toJSON()`：实现向上隔离，仅导出 Resource 类型的工具，不包含父类 `RpcMethodsServerTool` 的通用 RPC 方法。
-*   **设计初衷**：这种设计确保了当您将 Transport 挂载到特定层级（如 `server.mount(ResServerTools)`) 时，客户端只会看到它该看到的资源，保持了 API 边界的纯粹性。
+* **隔离算法**：`toJSON()` 方法在遍历注册表时，会执行三重校验：
+    1. **类型检查**：`item instanceof this` 确保工具属于当前层级或其子层级。
+    2. **协议引用检查**：校验 `item.constructor.toJSON === this.toJSON`。这确保了如果一个子类（如 `RpcMethodsServerTool`）为了实现更复杂的协议而重写了 `toJSON`，那么它的实例将不会被父类（如 `ServerTools`）导出，从而避免基础客户端加载到无法处理的复杂工具。
+    3. **显示标记检查**：`item.isApi !== false`。
+
+* **各层级导出范围**：
+  * **`ServerTools.toJSON()`**：仅导出直接属于 `ServerTools` 的实例，以及标记为 `isApi: true` 的基础 `ToolFunc`。它**绝对不会**导出 RPC 或 Resource 类型的工具。
+  * **`RpcMethodsServerTool.toJSON()`**：导出所有 RPC 类型的工具。由于层级向下兼容，它**包含**其子类 `ResServerTools` 的实例。
+  * **`ResServerTools.toJSON()`**：实现向上隔离，仅导出 Resource 类型的工具，不包含父类 `RpcMethodsServerTool` 的通用 RPC 方法。
+
+* **`isApi` 的默认行为准则**：
+  * **对于派生自 `ServerTools` 的业务类实例**：由于其设计初衷就是为了远程暴露，因此默认**自动导出**。除非开发者显式设置 `isApi: false` 来实现“包内可见”逻辑。
+  * **对于基础 `ToolFunc` 实例**：出于安全考虑，默认**禁止导出**。必须显式设置 `isApi: true` 才能被 `ServerTools` 容器发现。
 
 ```mermaid
 graph TD
@@ -183,15 +205,67 @@ graph TD
     B -- 将结果返回给 --> A;
 ```
 
-### 命名说明：`ServerTools` (复数) vs. 实例 (单数)
+### 3. 🛡️ 物理隔离与单进程测试 (Isolation in Testing)
 
-您可能会注意到类名 `ServerTools`、`ClientTools` 等是复数形式。这是一个刻意的设计，反映了其双重角色：
+在单进程（如本地集成测试）中，由于服务器端和客户端共享相同的 `ToolFunc` 静态类，直接运行会导致客户端的代理尝试覆盖服务器端的原始实例，引发 `already registered` 错误。
 
-- **静态类作为注册表 (The Plural 'Tools')**: `ServerTools` 的静态部分（例如 `ServerTools.register()`, `ServerTools.items`）充当所有远程工具的**全局注册表和管理器**。它持有一个工具集合，并提供管理这些工具的静态方法。这就是名称中“Tools”（复数）的由来。
+* **解决方案**：利用 JavaScript 静态属性的**遮蔽效应 (Property Shadowing)**。
+* **操作**：在测试环境中调用 `ClientTools.isolateRegistry()`。该方法会为当前类开启一个独立的**分层注册表作用域**，实现项目（items）、别名（aliases）及引用计数的物理隔离。它利用原型链机制确保了客户端代理在拥有独立命名空间的同时，仍能透明地继承父级工具，从而在单进程内完美模拟 C/S 隔离。
 
-- **实例作为单个工具 (The Singular 'Tool')**: 当您创建一个实例时（例如 `new ServerTools({ name: 'myTool', ... })`），您实际上是在定义一个**单一的、具体的工具**。这个实例封装了单个函数的逻辑、元数据和配置。
+## 🛠️ 进阶架构：分层注册表与多态定制
 
-简而言之：**类是工具的集合，实例是单个工具。** 这种设计将工具的管理（静态）与工具的定义（实例）清晰地分离开来。
+在构建复杂的 AI 代理平台、多租户 SaaS 系统或插件化架构时，你可能需要一套“标准工具集”，并允许不同的租户或插件对其进行个性化微调。`@isdk/tool-rpc` 利用底层 `tool-func` 的**分层注册表 (Hierarchical Registries)** 完美支持了这一需求。
+
+### 1. 隔离与继承 (Registry Isolation)
+
+通过调用 `Tools.isolateRegistry()`，你可以从父级容器分支处一个新的作用域。这个作用域利用 JavaScript 原型链实现了“写时拷贝”的效果：
+
+- **继承性**：子容器可以访问父容器中的所有工具。
+- **局部性**：在子容器中注册的新工具仅在当前作用域（及其后代）可见，不会污染父容器。
+- **业务场景**：为不同的 AI 代理组分配独立的工具域，或在单元测试中隔离 Server 和 Client 的注册表。
+
+### 2. 工具影子遮蔽 (Shadowing & Polymorphism)
+
+你可以在隔离的容器中注册一个与父级同名的工具。这会在当前作用域内产生一个“影子（Shadow）”：
+
+- **多态表现**：在当前容器的上下文中，该名称将指向新的实现；而在父容器的上下文中，该名称依然指向原始实现。
+- **业务场景**：在不修改基础框架代码的前提下，允许特定插件替换标准工作流中的某个具体原子工具（如更换通知方式从 Email 到 Slack）。
+
+### 3. 智能依赖绑定策略 (Smart Binding)
+
+当一个复杂的“工作流工具”通过 `depends` 属性依赖其他工具时，如何解析这些依赖项决定了系统的灵活性与稳定性。`tool-rpc` 提供了三种绑定策略：
+
+* **`'auto'` (默认 - 智能感知)**：**最符合直觉的业务模式**。
+  - **逻辑**：系统会智能判断“调用者”与“工具定义者”的关系。只有当调用者属于定义者的“后代作用域”时，才会尝试寻找影子遮蔽版本。
+  - **意义**：它实现了“局部定制，全局稳定”。它允许插件修改工作流的某个中间环节，而不会破坏父级系统自身的稳定性保护。
+* **`'early'` (早绑定 - 契约保护模式)**：
+  - **逻辑**：始终使用注册时锁定的原始依赖实例。
+  - **意义**：用于安全性或一致性要求极高的核心依赖（如加解密、鉴权、底层存储），防止其被下游影子覆盖所“劫持”。
+* **`'late'` (晚绑定 - 运行环境优先)**：
+  - **逻辑**：无视血缘关系，强制从当前最顶层的容器解析依赖。
+  - **意义**：允许完全的运行时注入，适用于需要根据执行环境彻底切换逻辑的场景。
+
+### 4. 命名空间保护 (Protection)
+
+为了防止意外的影子遮蔽，可以在注册时使用 `allowOverride: false`。注册表将递归检查整个原型链，如果名称已被占用（包括在父级中），则会抛出错误，从而保护核心 API 不被覆盖。
+
+## ⚠️ 常见误区与坑点 (Common Pitfalls)
+
+1. **误区：在 `ResServerTools` 子类中定义 `func()`**
+    * **后果**：`ResServerTools` 依赖 `func` 来进行 REST/RPC 分发。如果你手动重写了 `func` 且未调用 `super.func`，所有的 `get/list/$method` 调用都将失效。
+    * **正确做法**：在 Res 层级，应始终通过定义 `get()`, `list()` 或以 `$` 为前缀的方法来实现业务。
+
+2. **误区：认为 `isApi: false` 是防火墙**
+    * **后果**：`isApi: false` 目前仅在“发现”阶段起作用（即客户端看不到它）。如果攻击者猜到了工具名称并直接构造请求，服务器传输层默认仍会执行它。
+    * **正确做法**：对于敏感工具，应在业务逻辑内接入鉴权机制，或利用 `_req` 上下文进行权限校验。
+
+3. **误区：单进程测试时未做隔离**
+    * **后果**：报错 `[ToolName] already registered as ServerTools`。
+    * **正确做法**：在 `beforeAll` 钩子中为 `ClientTools` 开启 `isolateRegistry()`。
+
+4. **误区：混淆静态 Tools 与 实例 Func 的职责**
+    * **后果**：在业务逻辑中尝试修改 `ServerTools.items`，导致全局污染。
+    * **正确做法**：静态成员仅用于管理和配置，业务逻辑应严格限定在实例的 `this` 或 `this.ctx` 上。
 
 ## ⏱️ 超时机制 (Timeout Strategy)
 
