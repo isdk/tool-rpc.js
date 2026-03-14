@@ -1,112 +1,242 @@
-# @isdk/tool-rpc 传输层重构详细设计文档 (v2.1)
+# @isdk/tool-rpc 传输层重构详细设计文档 (v2.3)
 
-本文档详尽记录了 `@isdk/tool-rpc` 传输层（Transport Layer）的重构方案。旨在通过“三权分立”架构（管理、调度、传输），彻底解决协议耦合、静态单例限制及执行生命周期失控等核心问题。
-
-## 1. 架构哲学与核心目标
-
-### 1.1 职责分离 (Separation of Concerns)
-- **管理层 (RpcTransportManager)**：负责传输实例的生命周期、协议注册与基于 `apiUrl` 的逻辑路由。
-- **调度层 (RpcServerDispatcher)**：负责工具的查找、执行上下文装配及死线守卫（Deadline Guard）。
-- **传输层 (IToolTransport)**：作为“翻译官”，负责将协议原始报文翻译为归一化 Request/Response，并执行物理传输。
-
-### 1.2 感知无关性 (Transport Agnosticism)
-`ClientTools` 和 `ServerTools` 业务实例应完全感知不到 Transport 的存在。它们仅通过 `this.ctx.apiUrl` 表达意图，由管理层完成底层的物理适配。
-
-### 1.3 执行确定性 (Execution Determinism)
-引入 `RpcDeadlineGuard` 机制，确保无论是正常完成、响应超时（102/504）还是硬超时（强制终止），每一个 RPC 调用都有明确的生命周期终点。
+本文档详尽规定 `@isdk/tool-rpc` 传输层（Transport Layer）的深度重构方案。旨在通过取消静态单例依赖、引入标准调度引擎，实现多实例并行运行下的物理隔离、执行确定性与全链路安全。
 
 ---
 
-## 2. 核心模型定义 (Core Models)
+## 1. 架构定位与术语 (Architecture & Terms)
 
-### 2.1 ToolRpcRequest
-代表一个归一化的 RPC 请求对象，由 Transport 层构造。
+### 1.1 寻址方式：从 apiRoot 升级为 apiUrl
+**BREAKING CHANGING** 重构后系统全面采用 **`apiUrl`** 作为逻辑寻址标识（包含协议 Scheme，如 `http://srv/v1`）。废弃 `apiRoot` 路径前缀配置项。
 
-| 字段 | 类型 | 说明 |
+### 1.2 核心组件职责 (Trinity Architecture)
+1. **管理中心 (RpcTransportManager)**：协议注册中心与物理连接池。负责根据 `apiUrl` 寻址，管理传输实例的生命周期与架构级策略校验。
+2. **物理传输层 (IToolTransport)**：协议适配器与搬运工。负责协议报文与归一化对象的双向互转，并控制底层物理通信控制。
+3. **执行调度器 (RpcServerDispatcher)**：服务端核心引擎。独立于协议，负责工具查找、能力协商及执行死线裁决。
+4. **任务追踪器 (RpcActiveTaskTracker)**：活跃任务账本。隶属于调度器，支持跨协议的任务可见性与控制。
+
+---
+
+## 2. 核心接口继承体系 (Inheritance Tree)
+
+所有传输实现必须符合以下严密的接口继承规范，以确保多协议间的一致行为：
+
+- **`IToolTransport`** (顶层接口)：定义基础寻址 (`apiUrl`) 及连接管理。
+  - **`mount(tools: any)`**: `@deprecated` 临时保留的工具挂载方法。应使用 `listen(server)` 或通过构造函数注入实现关联。
+  - **`IServerToolTransport`** (服务端协议规范)：
+    - **`HttpServerToolTransport`** (基于 Node.js 原生 http 模块)。
+    - **`MailboxServerToolTransport`** (基于内部分布式信箱)。
+  - **`IClientToolTransport`** (客户端协议规范)：
+    - **`HttpClientToolTransport`** (基于 fetch/http client)。
+    - **`MailboxClientToolTransport`** (基于信箱投递协议)。
+
+---
+
+## 3. 归一化模型定义 (Standardized Data Models)
+
+### 3.1 ToolRpcRequest (RPC 请求对象)
+| 字段 | 类型 | 必填 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `apiUrl` | `string` | 是 | 完整的逻辑寻址 URL，决定协议类型与分发路径。 |
+| `toolId` | `string` | 是 | 目标工具名称（注册名）。 |
+| `traceId` | `string` | 是 | 全链路追踪 ID。用于跨服务日志关联。若为空，调度器需自动生成。 |
+| `requestId` | `string` | 是 | 本次调用唯一 ID。用于任务句柄索引、状态查询及幂等校验。 |
+| `params` | `any` | 是 | 业务参数对象。包含 `stream: boolean` 意图标记。 |
+| `headers` | `Record<string, any>` | 否 | **标准 Header**：`x-rpc-timeout` (限时), `x-rpc-act` (动作), `x-rpc-priority` (优先级)。 |
+| `signal` | `AbortSignal` | 否 | 归一化取消信号，用于同步物理链路的中断状态。 |
+
+### 3.2 ToolRpcResponse (RPC 响应对象)
+| 字段 | 类型 | 必填 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `status` | `number` | 是 | **逻辑状态码**（详见下表）。 |
+| `data` | `any \| ReadableStream` | 否 | 执行结果或流式数据块。 |
+| `headers` | `Record<string, any>` | 否 | **响应元数据**。例如 `x-rpc-retry-after` (102 建议轮询间隔)。 |
+| `error` | `object` | 否 | 结构化错误：`{ code, message, stack }`。 |
+
+**状态码逻辑对照表：**
+| 状态码 | 语义 | 触发场景描述 |
 | :--- | :--- | :--- |
-| `apiUrl` | `string` | **逻辑寻址标识**。包含协议、域名及路径（如 `http://srv/api`）。 |
-| `toolId` | `string` | 目标工具的注册名称。 |
-| `params` | `any` | 业务输入参数。 |
-| `headers` | `Record<string, any>` | 归一化元数据。包含 `x-rpc-timeout`, `x-rpc-act`, `x-rpc-id` 等。 |
-| `signal` | `AbortSignal` | 物理连接断开的原始信号，允许外部用户信号合并注入。 |
-| `raw` | `any` | 保留对底层对象（如 `http.IncomingMessage`）的原始引用。 |
-
-### 2.2 ToolRpcResponse
-代表一个归一化的 RPC 响应结果。
-
-| 字段 | 类型 | 说明 |
-| :--- | :--- | :--- |
-| `status` | `number` | 标准状态码（200: 成功, 102: 处理中, 504: 响应超时, 500: 错误）。 |
-| `data` | `any \| ReadableStream` | 执行结果或流式数据。 |
-| `headers` | `Record<string, any>` | 需要传回客户端的元数据。 |
-| `error` | `string` (可选) | 错误详细消息（仅在 status >= 400 时）。 |
-
-### 2.3 RpcExecutionContext (执行上下文对象)
-作为 Request 与 Dispatcher 之间的桥梁，封装单次执行的环境。包含归一化后的 `timeout`、合并后的 `signal`、影子实例引用及 `apiUrl`。
+| **200** | OK | 任务同步执行成功，或流式输出已成功启动。 |
+| **102** | Processing | 触发响应超时，但由于开启 `keepAliveOnTimeout`，任务转入后台继续执行。 |
+| **400** | Bad Request | **能力冲突**：请求流但工具不支持；或参数校验失败、协议格式非法。 |
+| **408** | Terminated | **强制终止**：触及服务端硬死线（Hard Deadline），任务被强制中止并回收。 |
+| **504** | Gateway Timeout | **响应超时**：触及限时，且任务不具备后台维持能力。 |
+| **500** | Error | 业务代码抛错或调度引擎内部崩溃。 |
 
 ---
 
-## 3. 核心组件设计 (Core Components)
+## 4. 核心组件深度设计 (Component Deep-Dive)
 
-### 3.1 RpcTransportManager (传输管理器)
-采用“双重职能模式”：静态类作为注册管理，实例作为传输调度。
-- **静态职能**：负责 Transport 类型的注册（如 `http`, `mailbox`）。
-- **路由寻址**：根据 `apiUrl` 自动匹配对应的 Transport 实例。提供 `get(apiUrl)` 接口，支持默认路由策略。
-- **连接池**：管理活跃的物理通道实例，实现并发重入。
+### 4.1 RpcTransportManager (逻辑路由与策略中心)
+- **多实例支持**：默认提供全局单例 `RpcTransportManager.instance`，同时也支持通过 `new` 创建独立实例以满足测试隔离或多租户需求。
+- **二级映射寻址算法**：
+    1. **协议层注册 (Static)**：Scheme（如 `mailbox`）映射到具体类。支持多 Scheme 映射到单类。
+    2. **实例层缓存 (Instance)**：按 `apiUrl` 的 Origin 路径缓存 Transport 物理实例，确保连接池隔离。
+- **架构级策略校验 (`validateRpcRequest`)**：在调度前进行最终审计。包括 SSRF 防御（`allowList`）、协议白名单、工具访问权限控制。
 
-### 3.2 RpcServerDispatcher (请求调度器)
-一个无状态、可重入的服务端执行引擎。
-- **职责**：
-    1. **查找与实例化**：根据 `toolId` 从 Registry 查找工具，并使用 `tool.with(ctx)` 创建影子实例。
-    2. **上下文装配**：将 `apiUrl`, `headers` 注入 `this.ctx`，装配 `RpcExecutionContext`。
-    3. **调度执行**：驱动 `tool.run()`，并配合 `RpcDeadlineGuard` 实施生命周期监控。
-    4. **结果归一化**：统一捕获执行异常，并转化为标准 `ToolRpcResponse`。
+### 4.2 RpcServerDispatcher (逻辑执行引擎)
+- **实例协作**：调度器通过构造函数绑定私有的 `RpcActiveTaskTracker` 实例。
+- **能力协商 (Negotiation)**：预检 `tool.stream`能力。若请求意图与能力冲突，Dispatcher 负责拦截并直接返回 `400`。
+- **AoP 装配**：负责将寻址与追踪元数据（`traceId`, `requestId`, `apiUrl`）注入影子实例的 `this.ctx`。
 
-### 3.3 IToolTransport (传输接口)
-传输层的核心职能是**翻译与传输**。
-- 剥离所有业务逻辑（如 `toolId` 解析、超时计算），仅负责协议特定的编解码。
-- 将协议特定的上下文（如 HTTP 的 `req/res`）挂载到 `ToolRpcRequest.raw`。
+### 4.3 RpcActiveTaskTracker (活跃任务追踪器)
+- **任务句柄 (ActiveTaskHandle) 状态机**：
+    - **Cancellable 任务**：持有 `tool-func` 的原生 `Task` 实例。支持物理中止 (`task.abort()`) 与进度查询。
+    - **非可取消任务**：
+        - **逻辑丢弃**：切断响应链，结果不再回传。
+        - **物理断连**：若涉及流，强行调用 `stream.cancel()` 或销毁物理连接，确保服务端资源释放。
+- **跨协议可见性**：Tracker 独立于传输协议，支持在同作用域下通过信道 A 发起、信道 B 监控。
 
----
+### 4.4 RpcDeadlineGuard (执行死线守卫)
+- **两级裁决逻辑**：
+    1. **响应超时**：触发 `102` 或 `504`。
+    2. **硬死线 (Hard Deadline)**：触及服务端资源保护阈值。触发后立即调用 `AbortSignal.abort()`。
+- **优雅退出**：支持 `terminationGracePeriod` 配置，死线触发后给予工具清理时间，随后执行物理资源强制回收。
 
-## 4. 寿命周期与死线管理 (Lifecycle & Guard)
+### 4.5 通用生命周期管理 (Lifecycle Management)
+`RpcTransportManager` 统一负责客户端与服务端 Transport 实例的创建、激活与资源回收：
 
-### 4.1 RpcDeadlineGuard (死线守卫)
-专门负责“执法”，确保任务不逾越边界。
-- **响应超时 (Response Timeout)**：
-    - 到达 `timeout.value` 时触发。
-    - 若 `keepAliveOnTimeout: true`，进入 **“后台维持 (Background Continuation)”** 模式，返回 `102 Processing`。
-    - 若为 `false`，返回 `504` 并触发 `abort()`。
-- **硬超时 (Hard Timeout)**：
-    - 服务端强制终止阈值。一旦触发，必须立即调用 `AbortSignal.abort()` 强制终止。
-- **优雅退出 (Graceful Exit)**：
-    - 支持配置 `terminationGracePeriod`（终止优雅期）。
-    - 触发 `abort()` 后等待清理逻辑执行，期满后强制物理断开流并释放影子实例。
-
----
-
-## 5. 高级功能模块化
-
-### 5.1 状态处理
-- **RpcInterimHandler (中间态处理器)**：客户端 Transport 用于拦截 `102` 状态，并执行轮询或长连等待策略。
-- **RpcStatusObserver (状态观察器)**：侧重于对执行进度的观察和维持。
-
-### 5.2 流处理
-针对不支持原生 Stream 的协议，引入精准命名的模组：
-- **RpcStreamFragmenter (流分片器)**：将 `ReadableStream` 拆解为有序数据包。
-- **RpcStreamReassembler (流重组器)**：在对端重组为标准的 `ReadableStream`。
+- **实例映射与复用**：
+  - **客户端**：Manager 根据目标 `apiUrl` 的 Origin（如域名/端口）查找或创建 Transport 实例。通过实例复用实现连接池共享与 Header 配置统一。
+  - **服务端**：Manager 按协议需求创建并持有 Transport 实例，将其与 `Dispatcher` 关联。
+- **服务激活 (`listen`)**：仅针对服务端 Transport。必须通过此方法将其接入物理载体（如 HTTP Server 或分布式信箱），使其正式开始搬运流量。
+- **全局清理 (`closeAll`)**：Manager 提供统一入口，通过遍历所有托管的 Transport 实例并执行其 `close()` 方法，实现服务端监听资源与客户端物理连接池的批量优雅回收。
 
 ---
 
-## 6. 实施路线图与兼容性策略
+## 5. 与 tool-func 特性深度集成
 
-### 6.1 兼容性设计 (Backward Compatibility)
-- **静态 `setTransport` 适配**：保持 API 存在，但内部改为向 `RpcTransportManager` 注册默认路由。
-- **寻址回退逻辑**：`fetch` 优先查找 `ctx.apiUrl` -> 静态 `apiUrl` -> 静态 `_transport`（若命中后者则发出弃用警告）。
+### 5.1 可取消性集成 (Cancellability)
+- **信号联动**：调度器自动将网络层产生的 `signal` 链接至业务层的 `this.ctx.aborter`。
+- **硬性约束**：同步阻塞任务（如大循环）必须定期显式检查 `this.ctx.signal.aborted` 状态。
 
-### 6.2 实施步骤
-1. **接口先行**：定义 `ToolRpcRequest/Response` 接口及 `RpcExecutionContext`。
-2. **管理层实现**：开发 `RpcTransportManager` 双重职能类。
-3. **引擎实现**：实现 `RpcServerDispatcher` 及其核心组件 `RpcDeadlineGuard`。
-4. **业务层适配**：改造 `ClientTools` 和 `ServerTools` 以支持基于 `ctx` 的动态寻址。
-5. **传输层重构**：瘦身现有的 HTTP 传输实现。
+### 5.2 流式观测器与重组 (Streaming)
+- **全生命周期监控**：利用 `createCallbacksTransformer` 监听流事件。`onFinal` 钩子必须负责注销任务句柄。
+- **重组技术规范**：`RpcStreamReassembler` 必须具备基于 **`sequenceNumber` 的顺序重排能力**，并实现基于流量反馈的 **背压 (Backpressure)** 控制。
+
+---
+
+## 6. 核心工作流伪代码 (Operational Blueprint)
+
+### 6.1 服务端：基类驱动流程 (ServerToolTransport)
+```typescript
+export abstract class ServerToolTransport extends ToolTransport {
+  // 默认会采用单例上的默认实例，允许用户自定义
+  constructor(options? :{manager?: RpcTransportManager, dispatcher?: RpcServerDispatcher}) {
+    super(options);
+  }
+
+  /**
+   * @deprecated 临时保留工具挂载，用于兼容旧版调用。
+   * 在新架构中，工具注册表由 Dispatcher 或其关联的 Registry 实例直接管理。
+   */
+  mount(tools: any) {
+    // 仅做兼容性引用，不再参与核心调度链路
+    this._legacyTools = tools;
+  }
+
+  /**
+   * 模板方法：定义 RPC 请求的标准执行流水线
+   */
+  async processIncomingCall(rawReq: any, rawRes: any) {
+    // 1. 物理层翻译：子类负责将原始报文翻译为归一化对象
+    const rpcReq = await this.toRpcRequest(rawReq, rawRes);
+
+    // 2. 架构层校验：调用所属 Manager 实例进行策略审计
+    this.manager.validateRpcRequest(rpcReq);
+
+    // 3. 执行调度：交给绑定的引擎实例执行（不再由 Transport 传递工具表）
+    const rpcRes = await this.dispatcher.dispatch(rpcReq);
+
+    // 4. 物理层回传：子类负责将结果写回物理通道
+    await this.sendRpcResponse(rpcRes, rawRes);
+  }
+
+  protected abstract toRpcRequest(rawReq: any, rawRes: any): Promise<ToolRpcRequest>;
+  protected abstract sendRpcResponse(rpcRes: ToolRpcResponse, rawRes: any): Promise<void>;
+}
+```
+
+### 6.2 服务端：执行分发流 (RpcServerDispatcher)
+```typescript
+class RpcServerDispatcher {
+  // 通过构造函数绑定追踪器与工具注册表
+  constructor(private tracker: RpcActiveTaskTracker, private registry: typeof ServerTools) {}
+
+  async dispatch(request: ToolRpcRequest) {
+    // 1. 拦截状态查询动作，实现跨信道可见性
+    const activeHandle = this.tracker.get(request.requestId);
+    if (request.headers['x-rpc-act'] === 'status') {
+      return activeHandle ? activeHandle.getStatus() : formatError(404, "Task Not Found");
+    }
+
+    // 2. 从绑定的注册表中查找工具并进行能力协商
+    const tool = this.registry.get(request.toolId);
+
+    const wantsStream = request.params.stream === true;
+    if (wantsStream && !tool.stream) return formatResponse(400, "Streaming not supported");
+
+    const runner = tool.with({ ...request.headers, requestId: request.requestId, traceId: request.traceId || uuid() });
+    const promise = runner.run(request.params);
+
+    // 3. 注册任务句柄至追踪器
+    const handle = new ActiveTaskHandle(promise, {
+      task: (promise as any).task, // 自动捕获可取消句柄
+      isStream: wantsStream,
+      onCleanup: () => this.tracker.remove(request.requestId)
+    });
+    this.tracker.add(request.requestId, handle);
+
+    // 4. 挂载死线守卫
+    const guard = new RpcDeadlineGuard(request.timeout, {
+      onResponseTimeout: () => handle.sendInterim(102),
+      onHardDeadline: () => handle.terminate("Physical Timeout Triggered")
+    });
+
+    try {
+      const result = await Promise.race([promise, guard.start()]);
+      if (wantsStream) {
+        const observer = createCallbacksTransformer({ onFinal: () => handle.cleanup() });
+        return formatResponse(200, result.pipeThrough(observer));
+      }
+      return formatResponse(200, result);
+    } catch (err) {
+      return formatError(err.status || 500, err.message);
+    }
+  }
+}
+```
+
+### 6.3 客户端：中间态轮询 (RpcInterimHandler)
+```typescript
+async handleInterim(response: ToolRpcResponse, originalRequest: ToolRpcRequest) {
+  if (response.status === 102) {
+    // 按照服务端建议的 retry-after 间隔进行退避
+    const waitTime = response.headers['x-rpc-retry-after'] || 5000;
+    await sleep(waitTime);
+
+    // 构造显式的状态查询请求，严禁重发原请求，保证非幂等安全
+    const pollRequest = {
+      ...originalRequest,
+      headers: { ...originalRequest.headers, 'x-rpc-act': 'status' }
+    };
+
+    // 通过物理传输层发送查询，并递归处理后续状态
+    const nextResponse = await this.poll(pollRequest);
+    return this.handleInterim(nextResponse, originalRequest);
+  }
+  return response;
+}
+```
+
+---
+
+## 7. 兼容性与迁移策略
+- **apiRoot 自动映射**：系统将其包装为 `http://localhost/apiRoot` 格式。
+- **setTransport 适配器**：将 Transport 实例注册至 `RpcTransportManager.instance` 全局单例。
+- **旧版 mount 迁移**：原有 `mount(ServerTools)` 调用将被路由至关联的 `Dispatcher` 实例。
+
+---
+
+## 8. 评估结论
+本方案通过移除静态依赖、引入显式的执行句柄追踪与双级死线控制，彻底实现了传输协议的透明化。方案深度整合了 `tool-func` 原生异步特性，为长耗时任务在分布式环境下的稳定执行提供了工业级的安全性与可观测性。

@@ -1,87 +1,46 @@
-// import type { IncomingMessage, ServerResponse } from "http";
 import { ToolFunc } from "@isdk/tool-func";
 import { RemoteToolFuncSchema, RemoteFuncItem } from "./consts";
+import { ToolRpcContext } from "./transportsV2/models";
+import { injectV1ContextToParams, bridgeContextToV1Params } from "./transportsV2/compat";
 
 /**
- * Defines the structure for parameters passed to a `ServerTools` function.
- * By convention, it includes optional `_req` and `_res` properties for direct
- * access to the underlying transport's request and response objects (e.g., from Node.js http).
+ * ServerFuncParams 定义。
  */
 export interface ServerFuncParams {
-  /**
-   * The underlying request object from the transport layer (e.g., `IncomingMessage`).
-   * @type {any}
-   */
-  _req?: any
-  /**
-   * The underlying response or reply object from the transport layer (e.g., `ServerResponse`).
-   * @type {any}
-   */
-  _res?: any
-  /**
-   * The AbortSignal to monitor for cancellation or timeout.
-   * @type {AbortSignal}
-   */
-  _signal?: AbortSignal
-  [name: string]: any
+  _req?: any;
+  _res?: any;
+  _signal?: AbortSignal;
+  [name: string]: any;
 }
 
-/**
- * Configuration interface for a `ServerTools` item.
- * Extends `RemoteFuncItem` with server-specific options.
- */
 export interface ServerFuncItem extends RemoteFuncItem {
-  /**
-   * If set to true, the body of the function (`func`) will be serialized and sent
-   * to the client when tools are loaded. This allows the client to execute the
-   * function locally instead of making a remote call. Defaults to false.
-   * @type {boolean}
-   */
-  allowExportFunc?: boolean
+  allowExportFunc?: boolean;
 }
 
-// * Declaration merging to extend the `ServerTools` class with `ServerFuncItem` properties.
 export declare interface ServerTools extends ServerFuncItem {
   [name: string]: any;
 }
 
 /**
- * Represents a function that runs on a server and can be exposed to clients.
- *
- * `ServerTools` extends `ToolFunc` by adding logic for serialization and handling
- * server-side execution contexts. It is designed to work with a transport layer
- * (see `transports`) to expose its registered functions over a network.
+ * ServerTools: RPC 服务端工具基类
+ * 
+ * [V2 架构方针：原子化与纯净]
+ * 基类不再假设任何路由逻辑（ID 或 Act），仅提供运行环境支持。
  */
 export class ServerTools extends ToolFunc {
   private static _apiRoot?: string;
-  /**
-   * The conventional root path for the API endpoint.
-   */
-  static get apiRoot() {
-    return this._apiRoot
-  }
+  /** [V2] 归一化执行上下文 */
+  public ctx?: ToolRpcContext;
+  /** 控制是否开启向下兼容注入。 */
+  public enableLegacyCompat = true;
 
-  static setApiRoot(v: string) {
-    this._apiRoot = v
-  }
+  static get apiRoot() { return this._apiRoot; }
+  static setApiRoot(v: string) { this._apiRoot = v; }
 
-  /**
-   * Serializes all registered `ServerTools` instances into a JSON object.
-   * This method is typically called by a transport's discovery endpoint.
-   *
-   * It filters for tools that are instances of `this` (the current class)
-   * or marked as `isApi` but NOT an instance of `ServerTools` (e.g., base ToolFunc).
-   * It omits the `func` body from the output unless `allowExportFunc` is true.
-   *
-   * @returns A map of serializable tool definitions.
-   */
   static toJSON() {
     const result:{[name:string]: ServerTools} = {}
     for (const name in this.items) {
       let item: any = this.items[name];
-      // Only export if it's an instance of this class AND its class uses this exact toJSON method
-      // This allows subclasses (like TestResTool) to be discovered by their base class (ResServerTools)
-      // while preventing specialized subclasses (like RpcMethodsServerTool) from leaking into parent discovery.
       const isExactType = (item instanceof this) && ((item.constructor as any).toJSON === this.toJSON) && item.isApi !== false;
       const isBaseApi = item.isApi && !(item instanceof ServerTools);
 
@@ -93,40 +52,33 @@ export class ServerTools extends ToolFunc {
         result[name] = item;
       }
     }
-    return result
+    return result;
   }
 
   /**
-   * Overrides the base `run` method to inject transport-specific context.
-   * If a `context` object containing `req`, `reply`, and `signal` is provided,
-   * these are added to the parameters as `_req`, `_res`, and `_signal` before execution.
-   *
-   * @param {ServerFuncParams} params - The parameters for the function.
-   * @param {any} [options] - The transport-level context or options.
-   * @returns The result of the function execution.
+   * [V2 标准执行入口]
    */
-  run(params: ServerFuncParams, options?: any) {
-    if (options) {
-      params._req = options.req;
-      params._res = options.reply;
-      params._signal = options.signal;
+  run(params: ServerFuncParams, context?: ToolRpcContext) {
+    if (context) {
+      this.ctx = context;
     }
-    return super.run(params, options);
+
+    if (this.enableLegacyCompat && context) {
+      // 集中管理：将新架构信息回灌给旧版 Params，适配那些仍依赖 params 内部数据的旧工具。
+      injectV1ContextToParams(params, context);
+      bridgeContextToV1Params(context, params);
+    }
+
+    return this.func(params, context);
   }
 
   /**
-   * Placeholder for the actual server-side function implementation.
-   * This method is intended to be defined when a `ServerTools` instance is created.
-   * @param params - The parameters for the function.
-   * @returns The result of the function.
+   * 业务实现函数模板。
    */
-  func(params: ServerFuncParams): Promise<any>|any {}
+  func(params: ServerFuncParams, context?: ToolRpcContext): Promise<any>|any {
+      return super.run(params, context);
+  }
 }
 
-/**
- * The schema definition for `ServerTools` properties.
- * @internal
- */
 export const ServerToolFuncSchema = { ...RemoteToolFuncSchema }
-
 ServerTools.defineProperties(ServerTools, ServerToolFuncSchema)

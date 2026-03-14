@@ -2,6 +2,7 @@ import { getAllNames } from 'util-ex'
 import { type ServerFuncParams, ServerTools } from "./server-tools";
 import { type FuncParams, type FuncItem } from "@isdk/tool-func";
 import { NotFoundError } from "@isdk/common-error";
+import { ToolRpcContext } from "./transportsV2/models";
 
 export interface RpcMethodsServerFuncParams extends ServerFuncParams {
   act?: string
@@ -11,6 +12,9 @@ export interface RpcMethodsServerTool {
   methods: string[]
 }
 
+/**
+ * RpcMethodsServerTool: 专门处理 Action (act) 分发的类
+ */
 export class RpcMethodsServerTool extends ServerTools {
   declare static SpecialRpcMethodNames?: string[]
 
@@ -18,10 +22,17 @@ export class RpcMethodsServerTool extends ServerTools {
     'act': {type: 'string'},
   }
 
-  // these special RPC methods are without prefix `$`
   get SpecialRpcMethodNames() {
     const ctor = this.constructor as unknown as RpcMethodsServerTool
     return ctor.SpecialRpcMethodNames
+  }
+
+  /**
+   * 仅在 RpcMethods 类及其派生类中启用 Act 获取
+   */
+  getRpcAct(params: any, context?: ToolRpcContext): string | undefined {
+    const ctx = context || this.ctx;
+    return ctx?.act;
   }
 
   initRpcMethods(methods = this.methods) {
@@ -56,31 +67,29 @@ export class RpcMethodsServerTool extends ServerTools {
     return value
   }
 
-  getMethodFromParams(params: RpcMethodsServerFuncParams) {
-    const method = params?.act
-    return method
+  getMethodFromParams(params: RpcMethodsServerFuncParams, context?: ToolRpcContext) {
+    return this.getRpcAct(params, context);
   }
 
-  castParams(params: RpcMethodsServerFuncParams) {
+  castParams(params: RpcMethodsServerFuncParams, context?: ToolRpcContext) {
     return params
   }
 
-  func(params: RpcMethodsServerFuncParams) {
-    const method = this.getMethodFromParams(params)
+  func(params: RpcMethodsServerFuncParams, context?: ToolRpcContext) {
+    const method = this.getMethodFromParams(params, context)
 
     if (method && typeof this[method] === 'function') {
-      params = this.castParams(params)
-      return this[method](params)
-    } else {throw new NotFoundError(method!, this.name)}
+      params = this.castParams(params, context)
+      return this[method](params, context)
+    } else {
+      throw new NotFoundError(method!, this.name)
+    }
   }
 
-  // RpcMethodsServerTool 和 后续的 ResServerTools 都必须是确认的子类才可以导出
-  // 而且 isApi 修改为默认为 true, 可以设置为 false 来取消导出
   static toJSON() {
     const result:{[name:string]: ServerTools} = {}
     for (const name in this.items) {
       let item: any = this.items[name];
-      // 只导出当前层级（即：使用了当前 toJSON 逻辑）的实例，且未显式禁用 isApi
       if ((item instanceof this) && ((item.constructor as any).toJSON === this.toJSON) && item.isApi !== false) {
         if (!item.allowExportFunc) {
           item = item.toJSON()

@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022", "DOM"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "dom.iterable"
+    ],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "strict": true,
@@ -11,7 +15,6 @@
       "./node_modules/@types",
       "./node_modules/@microsoft"
     ],
-
     "strictPropertyInitialization": false,
     "useDefineForClassFields": false,
     "allowJs": true,
@@ -24,7 +27,9 @@
     "strictNullChecks": true,
     "allowSyntheticDefaultImports": true,
   },
-  "include": ["src/**/*"],
+  "include": [
+    "src/**/*"
+  ],
   "exclude": [
     "node_modules",
     "**/*.spec.ts",

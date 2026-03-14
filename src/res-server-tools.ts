@@ -1,6 +1,7 @@
 import { type FuncParams, type FuncItem } from "@isdk/tool-func";
 import { type ActionName, ActionNames } from "./consts";
 import { RpcMethodsServerFuncParams, RpcMethodsServerTool } from './rpc-methods-server-tool';
+import { ToolRpcContext } from "./transportsV2/models";
 
 export interface ResServerFuncParams extends RpcMethodsServerFuncParams {
   id?: string|number
@@ -9,13 +10,16 @@ export interface ResServerFuncParams extends RpcMethodsServerFuncParams {
 }
 
 export interface ResServerTools {
-  get?({id}: ResServerFuncParams): any
-  post?(options: ResServerFuncParams): any
-  put?({id}: ResServerFuncParams): any
-  delete?({id}: ResServerFuncParams): any
-  list?(options?: ResServerFuncParams): any
+  get?(params: ResServerFuncParams, context?: ToolRpcContext): any
+  post?(params: ResServerFuncParams, context?: ToolRpcContext): any
+  put?(params: ResServerFuncParams, context?: ToolRpcContext): any
+  delete?(params: ResServerFuncParams, context?: ToolRpcContext): any
+  list?(params?: ResServerFuncParams, context?: ToolRpcContext): any
 }
 
+/**
+ * ResServerTools: 专门处理资源 ID 路由的类
+ */
 export class ResServerTools extends RpcMethodsServerTool {
   static SpecialRpcMethodNames = ActionNames as any
   action: ActionName = 'res'
@@ -28,19 +32,41 @@ export class ResServerTools extends RpcMethodsServerTool {
     super(name, options)
   }
 
-  getMethodFromParams(params: ResServerFuncParams) {
-    let method = params?._req?.method?.toLowerCase()
-    if (method === 'get' && params.id === undefined) {method = 'list'}
-    else if (params.act) {
-      method = params.act
-    }
-    return method
+  /**
+   * 仅在 Res 类及其派生类中启用资源 ID 获取
+   */
+  getResId(params: any, context?: ToolRpcContext): string | undefined {
+    const ctx = context || this.ctx;
+    // 优先从 V2 Context 的 resId 提取
+    return ctx?.resId;
   }
 
-  castParams(params: RpcMethodsServerFuncParams) {
-    if (params.id !== undefined) {
-      params.id = this.cast('id', params.id)
+  /**
+   * 确定执行的方法
+   */
+  getMethodFromParams(params: ResServerFuncParams, context?: ToolRpcContext) {
+    // 1. 优先使用 RpcMethods 层的 Act (Action)
+    const act = this.getRpcAct(params, context);
+    if (act) return act;
+
+    // 2. 否则根据环境猜测逻辑动作
+    const ctx = context || this.ctx;
+    let method = ctx?.req?.method?.toLowerCase();
+    
+    if (method === 'get' && this.getResId(params, context) === undefined) {
+      method = 'list';
     }
-    return params
+    return method;
+  }
+
+  /**
+   * 资源 ID 映射逻辑：将协议层的 resId 灌回给业务层的 params.id
+   */
+  castParams(params: ResServerFuncParams, context?: ToolRpcContext) {
+    const resId = this.getResId(params, context);
+    if (resId !== undefined) {
+      params.id = this.cast('id', resId);
+    }
+    return params;
   }
 }

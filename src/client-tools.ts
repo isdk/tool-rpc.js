@@ -1,7 +1,7 @@
 import { throwError } from "@isdk/common-error";
 import { Funcs, ToolFunc } from "@isdk/tool-func";
 import { RemoteToolFuncSchema, type RemoteFuncItem, type ActionName } from "./consts";
-import type { IClientToolTransport } from "./transports/client";
+import type { IClientToolTransport } from "./transportsV2/client";
 import { defaultsDeep } from "lodash-es";
 
 // * Declaration merging to extend the `ClientTools` class with `ClientFuncItem` properties.
@@ -58,10 +58,6 @@ export class ClientTools extends ToolFunc {
   static setTransport(transport: IClientToolTransport) {
     if (transport) {
       this._transport = transport;
-      const ctor = this.constructor as typeof ToolFunc;
-      if (transport.Tools !== ctor) {
-        transport.Tools = ctor;
-      }
     }
   }
 
