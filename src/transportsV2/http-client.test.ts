@@ -100,4 +100,20 @@ describe('HttpClientToolTransport', () => {
         });
         expect(objJson.k).toBe('v');
     });
+
+    it('should handle complex base URLs correctly', async () => {
+        transport = new HttpClientToolTransport('http://api.example.com/v1?token=abc#frag');
+        (globalThis.fetch as any).mockResolvedValue({ ok: true, json: () => ({}) });
+
+        await transport._fetch('myTool', null, 'act', 'res-1');
+
+        const callArgs = (globalThis.fetch as any).mock.calls[0];
+        const urlStr = callArgs[0];
+        const url = new URL(urlStr);
+
+        expect(url.origin).toBe('http://api.example.com');
+        expect(url.pathname).toBe('/v1/myTool/res-1');
+        expect(url.searchParams.get('token')).toBe('abc');
+        expect(url.hash).toBe('#frag');
+    });
 });

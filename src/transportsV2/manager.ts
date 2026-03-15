@@ -64,6 +64,20 @@ export class RpcTransportManager {
   }
 
   /**
+   * 清空所有静态注册的 Schemes (主要用于测试清理)
+   * @param scheme - 可选，仅清除指定 scheme
+   */
+  public static clearSchemes(scheme?: string) {
+    if (scheme) {
+      this.schemeRegistry.delete(scheme.toLowerCase());
+      // Resolvers cannot be cleared selectively by scheme string easily as they are functions
+    } else {
+      this.schemeRegistry.clear();
+      this.schemeResolvers = [];
+    }
+  }
+
+  /**
    * 注册已有的传输实例
    */
   public register(transport: IToolTransport, apiUrl?: string) {

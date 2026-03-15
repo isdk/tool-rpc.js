@@ -57,17 +57,17 @@ export abstract class ClientToolTransport extends ToolTransport implements IClie
 
       const reqId = fetchOptions.headers[RPC_HEADERS.REQUEST_ID];
       const pollRes = await this.pollTaskStatus(reqId, fetchOptions);
+      res = pollRes;
 
-      if (pollRes && pollRes.status === 102) {
-        res = pollRes; // Update res with new 102 response, respecting new retry-after
+      if (res && res.status === 102) {
         continue;
       }
 
       // Task is no longer 102! It must be completed or failed (which throws before this line).
       if (args?.stream) {
-        return pollRes; // directly return the fetch Response (stream)
+        return res; // directly return the fetch Response (stream)
       }
-      return this.toObject(pollRes, args);
+      return this.toObject(res, args);
     }
 
     // 对于正常结束的初始请求：

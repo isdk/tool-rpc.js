@@ -144,4 +144,68 @@ describe('HttpServerToolTransport', () => {
       expect(mockPipe).toHaveBeenCalledWith(mockRes);
       expect(mockRes.end).not.toHaveBeenCalled(); // No more JSON stringifying
    });
+
+   it('should handle malformed JSON body gracefully', async () => {
+      const mockReq = {
+         url: '/api/tool',
+         method: 'POST',
+         headers: { host: 'localhost' },
+         on: (event: string, cb: any) => {
+            if (event === 'data') cb('{ invalid json'); // Invalid JSON
+            if (event === 'end') cb();
+         }
+      } as unknown as http.IncomingMessage;
+
+      const mockRes = {
+         setHeader: vi.fn(),
+         end: vi.fn()
+      } as unknown as http.ServerResponse;
+
+      await (transport as any).processIncomingCall(mockReq, mockRes);
+
+      expect(mockRes.statusCode).toBe(500);
+      const errorOutput = JSON.parse((mockRes.end as any).mock.calls[0][0]);
+      expect(errorOutput.error).toBeDefined();
+      expect(errorOutput.error.message).toBeTruthy();
+   });
+
+   it('should invoke discovery handler when URL matches', async () => {
+      const discoveryFn = vi.fn().mockReturnValue(['tool1', 'tool2']);
+      transport.addDiscoveryHandler('http://localhost/api/_discovery', discoveryFn);
+
+      const mockReq = {
+         url: '/api/_discovery',
+         method: 'GET',
+         headers: { host: 'localhost' }
+      } as unknown as http.IncomingMessage;
+
+      const mockRes = {
+         setHeader: vi.fn(),
+         end: vi.fn()
+      } as unknown as http.ServerResponse;
+
+      // Access private requestListener
+      await (transport as any).requestListener(mockReq, mockRes);
+
+      expect(discoveryFn).toHaveBeenCalled();
+      expect(mockRes.statusCode).toBe(200);
+      expect((mockRes.end as any).mock.calls[0][0]).toContain('["tool1","tool2"]');
+   });
+
+   it('should 404 on unknown paths', async () => {
+      const mockReq = {
+         url: '/unknown/path',
+         method: 'GET',
+         headers: { host: 'localhost' }
+      } as unknown as http.IncomingMessage;
+
+      const mockRes = {
+         setHeader: vi.fn(),
+         end: vi.fn()
+      } as unknown as http.ServerResponse;
+
+      await (transport as any).requestListener(mockReq, mockRes);
+
+      expect(mockRes.statusCode).toBe(404);
+   });
 });

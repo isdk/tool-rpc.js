@@ -2,6 +2,7 @@ import { RpcActiveTaskTracker, ActiveTaskHandle } from './task-tracker';
 import { RPC_HEADERS, RPC_DEFAULTS, RpcStatusCode, ToolRpcRequest, ToolRpcResponse, ToolRpcContext } from './models';
 import { RpcDeadlineGuard } from './deadline-guard';
 import { bridgeV2RequestToV1Params, elevateV1ParamsToV2Request, RpcCompatOptions, DEFAULT_COMPAT_OPTIONS } from './compat';
+import { RpcTaskResource } from './rpc-task';
 
 /**
  * 集中式 RPC 请求分发器。
@@ -11,6 +12,8 @@ export class RpcServerDispatcher {
   private static _instance: RpcServerDispatcher;
   /** 工具/函数注册表，通常挂载 ServerTools.items */
   public registry: any;
+  /** 系统级保留工具注册表 */
+  private systemRegistry = new Map<string, any>();
   /** 活动任务跟踪器，用于长任务状态管理 */
   public tracker: RpcActiveTaskTracker;
   /** 默认全局超时时间 (ms) */
@@ -28,6 +31,9 @@ export class RpcServerDispatcher {
     this.tracker = options?.tracker || new RpcActiveTaskTracker();
     if (options?.globalTimeout) this.globalTimeout = options.globalTimeout;
     if (options?.compat) this.compat = { ...DEFAULT_COMPAT_OPTIONS, ...options.compat };
+    
+    // 自动装载系统级工具
+    this.systemRegistry.set('rpcTask', new RpcTaskResource());
   }
 
   public static get instance() {
@@ -47,25 +53,34 @@ export class RpcServerDispatcher {
     }
 
     const targetRegistry = registry || this.registry;
-
-    if (!targetRegistry) {
-      return this.echoRequestId(request, {
-        status: RpcStatusCode.INTERNAL_ERROR,
-        error: { code: 500, status: 'error', message: "Dispatcher Registry not mounted" }
-      });
+    const { toolId } = request;
+    
+    let tool;
+    
+    // 1. 优先尝试从用户注册表中查找 (User Override)
+    if (targetRegistry) {
+      tool = targetRegistry.get ? targetRegistry.get(toolId) : targetRegistry[toolId];
     }
 
-    const { toolId } = request;
-    const tool = targetRegistry.get ? targetRegistry.get(toolId) : targetRegistry[toolId];
+    // 2. 如果没找到，尝试从系统注册表中查找 (System Fallback)
+    if (!tool) {
+      tool = this.systemRegistry.get(toolId);
+    }
 
     if (!tool) {
+      if (!targetRegistry) {
+         return this.echoRequestId(request, {
+          status: RpcStatusCode.INTERNAL_ERROR,
+          error: { code: 500, status: 'error', message: "Dispatcher Registry not mounted" }
+        });
+      }
       return this.echoRequestId(request, {
         status: RpcStatusCode.NOT_FOUND,
         error: { code: 404, status: 'not_found', message: `Tool not found: ${toolId}` }
       });
     }
 
-    // 1. 协议校验 (新架构强制校验能力匹配)
+    // 3. 协议校验 (新架构强制校验能力匹配)
     if (request.params?.stream && !tool.stream) {
       return this.echoRequestId(request, {
         status: RpcStatusCode.BAD_REQUEST,
@@ -101,9 +116,16 @@ export class RpcServerDispatcher {
 
     // 5. 执行工具
     (tool as any).ctx = context;
-    const executionPromise = Promise.resolve(tool.run ? tool.run(executionParams, context) : tool(executionParams, context));
+    
+    let executionPromise: Promise<any>;
 
     try {
+      try {
+        executionPromise = Promise.resolve(tool.run ? tool.run(executionParams, context) : tool(executionParams, context));
+      } catch (syncError) {
+        executionPromise = Promise.reject(syncError);
+      }
+
       let result: any;
       if (toolTimeoutObj.keepAliveOnTimeout) {
         const guard = new RpcDeadlineGuard(finalTimeout, { onResponseTimeout: () => { } });
@@ -119,6 +141,15 @@ export class RpcServerDispatcher {
     } catch (err: any) {
       clearTimeout(autoTerminateTimer);
       if (err.code === 102 && toolTimeoutObj.keepAliveOnTimeout) {
+        // If executionPromise failed with 102, we might not have a promise to track if it was sync throw?
+        // Actually sync throw of 102 is rare but possible.
+        // However, for async 102 (long running), we need the original promise.
+        
+        // Ensure we have a valid promise for the tracker
+        if (!executionPromise!) {
+             executionPromise = Promise.reject(err);
+        }
+
         const handle = new ActiveTaskHandle(
           request.requestId,
           executionPromise,
@@ -171,6 +202,15 @@ export class RpcServerDispatcher {
   }
 
   public handleError(request: ToolRpcRequest, err: any): ToolRpcResponse {
+    // 1. Handle primitive errors (string, number, etc)
+    if (typeof err !== 'object' || err === null) {
+      return {
+        status: 500,
+        error: { code: 500, status: 'error', message: String(err) }
+      };
+    }
+
+    // 2. Handle standard Error objects and duck-typed errors
     if (err.name === 'AbortError' || err.code === 'ETIMEDOUT' || err.code === 20 || err.code === 408) {
       return {
         status: RpcStatusCode.TERMINATED,

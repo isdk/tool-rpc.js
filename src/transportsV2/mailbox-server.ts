@@ -1,6 +1,6 @@
 import { ServerToolTransport } from './server';
 import { Mailbox, MailMessage } from '@mboxlabs/mailbox';
-import { ToolRpcRequest, ToolRpcResponse, RPC_HEADERS, RpcStatusCode } from './models';
+import { ToolRpcRequest, ToolRpcResponse, RPC_HEADERS, RpcStatusCode, RpcError } from './models';
 
 export interface MailboxServerOptions {
   mailbox?: Mailbox;
@@ -119,11 +119,11 @@ export class MailboxServerTransport extends ServerToolTransport {
     const reqId = rpcHeaders[RPC_HEADERS.REQUEST_ID] || (this.options.strict === false ? msgId : undefined);
 
     if (!toolId) {
-      throw { status: RpcStatusCode.BAD_REQUEST, message: `Invalid request to ${toStr}: missing tool identifier (rpc-fn)` };
+      throw new RpcError(`Invalid request to ${toStr}: missing tool identifier (rpc-fn)`, RpcStatusCode.BAD_REQUEST);
     }
 
     if (!reqId) {
-      throw { status: RpcStatusCode.BAD_REQUEST, message: `Invalid request to ${toStr}: missing ${RPC_HEADERS.REQUEST_ID} in headers (Strict Mode)` };
+      throw new RpcError(`Invalid request to ${toStr}: missing ${RPC_HEADERS.REQUEST_ID} in headers (Strict Mode)`, RpcStatusCode.BAD_REQUEST);
     }
 
     return {

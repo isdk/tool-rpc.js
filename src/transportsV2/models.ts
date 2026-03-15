@@ -105,3 +105,17 @@ export interface ToolRpcContext extends ToolFuncContext {
   req?: any;
   reply?: any;
 }
+
+export class RpcError extends Error {
+  public status: number;
+  public code: number;
+  public data?: any;
+
+  constructor(message: string, status: number = 500, code?: number, data?: any) {
+    super(message);
+    this.name = 'RpcError';
+    this.status = status;
+    this.code = code || status;
+    this.data = data;
+  }
+}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { RPC_DEFAULTS, RPC_HEADERS, RpcStatusCode } from './models';
+import { RPC_DEFAULTS, RPC_HEADERS, RpcError, RpcStatusCode } from './models';
 
 describe('Models', () => {
   it('should export correct RPC_HEADERS constants', () => {
@@ -27,5 +27,15 @@ describe('Models', () => {
     expect(RpcStatusCode.TERMINATED).toBe(408);
     expect(RpcStatusCode.INTERNAL_ERROR).toBe(500);
     expect(RpcStatusCode.GATEWAY_TIMEOUT).toBe(504);
+  });
+
+  it('should initialize RpcError correctly', () => {
+    const err = new RpcError('Test Error', 400, 4001, { foo: 'bar' });
+    expect(err.message).toBe('Test Error');
+    expect(err.status).toBe(400);
+    expect(err.code).toBe(4001);
+    expect(err.data).toEqual({ foo: 'bar' });
+    expect(err.name).toBe('RpcError');
+    expect(err).toBeInstanceOf(Error);
   });
 });

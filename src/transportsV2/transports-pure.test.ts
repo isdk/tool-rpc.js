@@ -74,7 +74,7 @@ describe('Comprehensive Pure V2 Integration (Streaming, Polling, Errors)', () =>
 
     sharedRegistry = {
       get: (id: string) => {
-        if (id === 'rpcTask') return new RpcTaskResource('rpcTask');
+        // Removed manual rpcTask registration to test automatic systemRegistry fallback
         return (ComplexV2Tool as any)[id];
       }
     };

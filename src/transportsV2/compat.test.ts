@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { bridgeV2RequestToV1Params, injectV1ContextToParams } from './compat';
+import { bridgeContextToV1Params, bridgeV2RequestToV1Params, elevateV1ParamsToV2Request, injectV1ContextToParams } from './compat';
 import { ToolRpcRequest, ToolRpcContext, RpcStatusCode } from './models';
 import { RpcServerDispatcher } from './dispatcher';
 import { ServerTools } from '../server-tools';
@@ -56,6 +56,45 @@ describe('Rpc Compatibility Layer (V2 to V1 Bridge)', () => {
         });
     });
 
+    describe('elevateV1ParamsToV2Request', () => {
+        it('should elevate id and act from params to request', () => {
+            const req: any = {
+                params: { id: 'p-id', act: 'p-act', other: 1 }
+            };
+            elevateV1ParamsToV2Request(req);
+            expect(req.resId).toBe('p-id');
+            expect(req.act).toBe('p-act');
+        });
+
+        it('should NOT overwrite existing resId/act in request', () => {
+            const req: any = {
+                resId: 'r-id',
+                act: 'r-act',
+                params: { id: 'p-id', act: 'p-act' }
+            };
+            elevateV1ParamsToV2Request(req);
+            expect(req.resId).toBe('r-id');
+            expect(req.act).toBe('r-act');
+        });
+
+        it('should convert non-string params to string', () => {
+            const req: any = { params: { id: 123, act: true } };
+            elevateV1ParamsToV2Request(req);
+            expect(req.resId).toBe('123');
+            expect(req.act).toBe('true');
+        });
+    });
+
+    describe('bridgeContextToV1Params', () => {
+        it('should bridge resId/act from context to params', () => {
+            const ctx: any = { resId: 'c-id', act: 'c-act' };
+            const params: any = { data: 1 };
+            const result = bridgeContextToV1Params(ctx, params);
+            expect(result.id).toBe('c-id');
+            expect(result.act).toBe('c-act');
+        });
+    });
+
     describe('injectV1ContextToParams', () => {
         it('should inject context into params private properties', () => {
             const params: any = {};
@@ -102,9 +141,9 @@ describe('Rpc Compatibility Layer (V2 to V1 Bridge)', () => {
                 run: vi.fn().mockResolvedValue('ok')
             };
             const registry = { get: () => mockTool };
-            const dispatcher = new RpcServerDispatcher({ 
-                registry, 
-                compat: { enableParamBridge: false, enableContextInjection: false } 
+            const dispatcher = new RpcServerDispatcher({
+                registry,
+                compat: { enableParamBridge: false, enableContextInjection: false }
             });
 
             const req: ToolRpcRequest = {
@@ -117,7 +156,7 @@ describe('Rpc Compatibility Layer (V2 to V1 Bridge)', () => {
             };
 
             await dispatcher.dispatch(req);
-            
+
             // Check first argument of the first call
             const executedParams = mockTool.run.mock.calls[0][0];
             expect(executedParams.id).toBeUndefined();
@@ -135,7 +174,7 @@ describe('Rpc Compatibility Layer (V2 to V1 Bridge)', () => {
             const ctx: ToolRpcContext = { requestId: '1', headers: {}, req: 'foo' };
 
             tool.run(params, ctx);
-            
+
             expect(tool.func).toHaveBeenCalled();
             const passedParams = tool.func.mock.calls[0][0];
             expect(passedParams._req).toBeUndefined();
@@ -150,7 +189,7 @@ describe('Rpc Compatibility Layer (V2 to V1 Bridge)', () => {
             const ctx: ToolRpcContext = { requestId: '1', headers: {}, req: 'foo' };
 
             tool.run(params, ctx);
-            
+
             const passedParams = tool.func.mock.calls[0][0];
             expect(passedParams._req).toBe('foo');
         });

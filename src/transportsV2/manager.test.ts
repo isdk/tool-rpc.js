@@ -34,30 +34,40 @@ describe('RpcTransportManager', () => {
     // However, for testing, we can just create a new one.
     manager = new RpcTransportManager();
     // Also reset static scheme registry/resolvers to be clean
-    (RpcTransportManager as any).schemeRegistry.clear();
-    (RpcTransportManager as any).schemeResolvers = [];
-  });
+    RpcTransportManager.clearSchemes();
+    });
 
-  it('should implement singleton pattern via .instance', () => {
+    it('should implement singleton pattern via .instance', () => {
     const instance1 = RpcTransportManager.instance;
     const instance2 = RpcTransportManager.instance;
     expect(instance1).toBe(instance2);
     expect(instance1).toBeInstanceOf(RpcTransportManager);
-  });
-
-  describe('Protocol Management', () => {
-    it('should register and instantiate scheme classes via bindScheme', () => {
-      RpcTransportManager.bindScheme('mock', MockClientTransport);
-
-      const apiUrl = 'mock://localhost/api';
-      const client = manager.getClient(apiUrl);
-
-      expect(client).toBeInstanceOf(MockClientTransport);
-      expect(client.apiUrl).toBe(apiUrl);
     });
 
-    it('should support multiple schemes in bindScheme', () => {
-      RpcTransportManager.bindScheme(['s1', 's2'], MockClientTransport);
+    describe('Protocol Management', () => {
+    it('should register and instantiate scheme classes via bindScheme', () => {
+    RpcTransportManager.bindScheme('mock', MockClientTransport);
+
+    const apiUrl = 'mock://localhost/api';
+    const client = manager.getClient(apiUrl);
+
+    expect(client).toBeInstanceOf(MockClientTransport);
+    expect(client.apiUrl).toBe(apiUrl);
+    });
+
+    it('should clear schemes using clearSchemes()', () => {
+      RpcTransportManager.bindScheme('temp', MockClientTransport);
+      expect((RpcTransportManager as any).schemeRegistry.has('temp')).toBe(true);
+
+      RpcTransportManager.clearSchemes('temp');
+      expect((RpcTransportManager as any).schemeRegistry.has('temp')).toBe(false);
+
+      RpcTransportManager.bindScheme(['a', 'b'], MockClientTransport);
+      RpcTransportManager.clearSchemes();
+      expect((RpcTransportManager as any).schemeRegistry.size).toBe(0);
+    });
+
+    it('should support multiple schemes in bindScheme', () => {      RpcTransportManager.bindScheme(['s1', 's2'], MockClientTransport);
       expect(manager.getClient('s1://host')).toBeInstanceOf(MockClientTransport);
       expect(manager.getClient('s2://host')).toBeInstanceOf(MockClientTransport);
     });
@@ -229,7 +239,6 @@ describe('RpcTransportManager', () => {
         'http://169.254.169.254/metadata'
       ];
 
-      // Now empty by default, so we must add patterns to test
       manager.addRestrictedPattern([
         /169\.254\.169\.254/,
         'localhost',
@@ -240,6 +249,16 @@ describe('RpcTransportManager', () => {
         const req: any = { apiUrl: url, toolId: 'any' };
         expect(() => manager.validateRpcRequest(req)).toThrow(/forbidden|restricted/);
       });
+    });
+
+    it('should support regex string patterns in addRestrictedPattern', () => {
+        // Test util-ex toRegExp conversion
+        manager.addRestrictedPattern('/\\.internal$/'); 
+        
+        expect(() => manager.validateRpcRequest({ apiUrl: 'http://service.internal', toolId: 'any' } as any))
+            .toThrow(/forbidden/);
+        expect(() => manager.validateRpcRequest({ apiUrl: 'http://service.com', toolId: 'any' } as any))
+            .not.toThrow();
     });
 
     it('should allow normal requests in validateRpcRequest', () => {

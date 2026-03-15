@@ -61,7 +61,12 @@
 | **400** | Bad Request | **能力冲突**：请求流但工具不支持；或参数校验失败、协议格式非法。 |
 | **408** | Terminated | **强制终止**：触及服务端硬死线（Hard Deadline），任务被强制中止并回收。 |
 | **504** | Gateway Timeout | **响应超时**：触及限时，且任务不具备后台维持能力。 |
-| **500** | Error | 业务代码抛错或调度引擎内部崩溃。 |
+| `error` | `object` | 否 | 结构化错误：`{ code, message, stack, data }`。 |
+
+### 3.3 RpcError (标准错误类)
+为了确保错误能被传输层正确识别并序列化，推荐在工具函数中抛出 `RpcError`。
+* **构造函数**: `new RpcError(message, status?, code?, data?)`
+* **优势**: 自动携带逻辑状态码与业务 code，支持携带额外的 `data` 负载。
 
 ---
 
@@ -72,12 +77,18 @@
 - **二级映射寻址算法**：
     1. **协议层注册 (Static)**：Scheme（如 `mailbox`）映射到具体类。支持多 Scheme 映射到单类。
     2. **实例层缓存 (Instance)**：按 `apiUrl` 的 Origin 路径缓存 Transport 物理实例，确保连接池隔离。
+- **静态清理 (`clearSchemes`)**：提供 `RpcTransportManager.clearSchemes(scheme?)` 用于清空注册表，解决单元测试间的交叉污染。
 - **架构级策略校验 (`validateRpcRequest`)**：在调度前进行最终审计。包括 SSRF 防御（`allowList`）、协议白名单、工具访问权限控制。
 
 ### 4.2 RpcServerDispatcher (逻辑执行引擎)
 - **实例协作**：调度器通过构造函数绑定私有的 `RpcActiveTaskTracker` 实例。
+- **两级工具查找 (System Fallback)**：
+    1. 优先从用户提供的 `registry` 中查找工具。
+    2. 若未命中且请求的是系统级工具（如 `rpcTask`），则回退到内置的 `systemRegistry` 查找。这确保了长任务管理功能开箱即用，同时允许用户通过同名注册进行覆盖。
 - **能力协商 (Negotiation)**：预检 `tool.stream`能力。若请求意图与能力冲突，Dispatcher 负责拦截并直接返回 `400`。
 - **AoP 装配**：负责将寻址与追踪元数据（`traceId`, `requestId`, `apiUrl`）注入影子实例的 `this.ctx`。
+- **健壮性增强**：`handleError` 能够自动兼容处理原始字符串、非 Error 对象等异常抛出。
+
 
 ### 4.3 RpcActiveTaskTracker (活跃任务追踪器)
 - **任务句柄 (ActiveTaskHandle) 状态机**：

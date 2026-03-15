@@ -16,12 +16,33 @@ export class HttpClientToolTransport extends ClientToolTransport {
       // We can also append to URL if it's HTTP for better DX and backward compat
       // This helps Server side fallback extracting if other servers are not fully V2
       if (url.startsWith('http')) {
-         if (!url.endsWith('/')) url += '/';
-         if (name) {
-            url += encodeURIComponent(name);
-            if (id) {
-               url += '/' + encodeURIComponent(id);
+         try {
+            const u = new URL(url);
+            let p = u.pathname;
+            if (!p.endsWith('/')) p += '/';
+
+            if (name) {
+               p += encodeURIComponent(name);
+               if (id) {
+                  p += '/' + encodeURIComponent(id);
+               }
             }
+            
+            // Reconstruct URL to preserve origin and query/hash
+            // Note: URL constructor does not double-encode paths passed as string
+            const newUrl = new URL(p, u.origin);
+            newUrl.search = u.search;
+            newUrl.hash = u.hash;
+            url = newUrl.toString();
+         } catch (e) {
+            // Fallback to simple concatenation if URL parsing fails (should be rare)
+             if (!url.endsWith('/')) url += '/';
+             if (name) {
+                url += encodeURIComponent(name);
+                if (id) {
+                   url += '/' + encodeURIComponent(id);
+                }
+             }
          }
       }
 

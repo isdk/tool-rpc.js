@@ -6,7 +6,7 @@ import { ServerFuncItem, ServerTools } from '../server-tools';
 import { ResServerTools } from '../res-server-tools';
 import { ClientTools } from '../client-tools';
 import { ResClientTools } from '../res-client-tools';
-import { ToolRpcRequest, ToolRpcResponse, ToolRpcContext, RPC_HEADERS } from './models';
+import { ToolRpcRequest, ToolRpcResponse, ToolRpcContext, RPC_HEADERS, RpcStatusCode } from './models';
 import { MailboxServerTransport as V2MailboxServerTransport } from './mailbox-server';
 import { MailboxClientTransport as V2MailboxClientTransport } from './mailbox-client';
 
@@ -577,6 +577,30 @@ describe('MailboxServerTransport / MailboxClientTransport V2 Test', () => {
       // 注意：如果 keepAliveOnTimeout 触发，返回的是状态对象
       expect(res1).toBeDefined();
       expect(res2).toBeDefined();
+    });
+
+    it('should catch RpcError thrown during validation and return structured error response', async () => {
+      // Trigger validation error: missing toolId
+      const responsePromise = new Promise<any>((resolve) => {
+        const sub = mailbox.subscribe(clientAddress, (msg) => {
+          if (msg.headers?.['req-id'] === 'bad-req') {
+            sub.unsubscribe();
+            resolve(msg.body);
+          }
+        });
+      });
+
+      await mailbox.post({
+        from: clientAddress,
+        to: serverAddress,
+        body: {},
+        headers: { 'req-id': 'bad-req' } // Missing rpc-fn
+      });
+
+      const res = await responsePromise;
+      expect(res.error).toBeDefined();
+      expect(res.error.code).toBe(RpcStatusCode.BAD_REQUEST);
+      expect(res.error.message).toMatch(/missing tool identifier/);
     });
   });
 });
