@@ -221,7 +221,7 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
         'mbx-fn-id': 'calculator',
         'mbx-act': 'post',
         'mbx-reply-to': thirdPartyAddress,
-        'mbx-req-id': 'redirect-test'
+        'req-id': 'redirect-test'
       }
     });
 
@@ -238,7 +238,7 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
         from: clientAddress,
         to: backlogAddress,
         body: { val: i },
-        headers: { 'mbx-fn-id': 'backlog-adder', 'mbx-req-id': `backlog-${i}`, 'mbx-act': 'post' }
+        headers: { 'mbx-fn-id': 'backlog-adder', 'req-id': `backlog-${i}`, 'mbx-act': 'post' }
       });
     }
 
@@ -357,7 +357,7 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
   it('should reject requests without mbx-fn-id header', async () => {
     const responsePromise = new Promise<any>((resolve) => {
       const sub = mailbox.subscribe(clientAddress, (msg) => {
-        if (msg.headers?.['mbx-req-id'] === 'no-fn-id') {
+        if (msg.headers?.['req-id'] === 'no-fn-id') {
           sub.unsubscribe();
           resolve(msg.body);
         }
@@ -368,7 +368,7 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
       from: clientAddress,
       to: serverAddress,
       body: { some: 'data' },
-      headers: { 'mbx-req-id': 'no-fn-id' }
+      headers: { 'req-id': 'no-fn-id' }
     });
 
     const response = await responsePromise;
@@ -392,7 +392,7 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
       headers: {
         'mbx-fn-id': 'calculator',
         'mbx-act': 'post',
-        'mbx-req-id': 'fallback-test'
+        'req-id': 'fallback-test'
       }
     });
 
@@ -419,12 +419,12 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
       from: clientAddress,
       to: serverAddress,
       body: { a: 1, b: 1 },
-      headers: { 'mbx-fn-id': 'calculator', 'mbx-act': 'post', 'mbx-req-id': 'restart-test' }
+      headers: { 'mbx-fn-id': 'calculator', 'mbx-act': 'post', 'req-id': 'restart-test' }
     });
 
     const responsePromise = new Promise<any>((resolve) => {
       const sub = mailbox.subscribe(clientAddress, (msg) => {
-        if (msg.headers?.['mbx-req-id'] === 'restart-test') {
+        if (msg.headers?.['req-id'] === 'restart-test') {
           sub.unsubscribe();
           resolve(msg.body);
         }

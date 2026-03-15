@@ -3,15 +3,15 @@ import { RPC_DEFAULTS, RPC_HEADERS, RpcStatusCode } from './models';
 
 describe('Models', () => {
   it('should export correct RPC_HEADERS constants', () => {
-    expect(RPC_HEADERS.TOOL_ID).toBe('x-rpc-func');
-    expect(RPC_HEADERS.ACT).toBe('x-rpc-act');
-    expect(RPC_HEADERS.RES_ID).toBe('x-rpc-res-id');
-    expect(RPC_HEADERS.TIMEOUT).toBe('x-rpc-timeout');
-    expect(RPC_HEADERS.TRACE_ID).toBe('x-rpc-trace-id');
-    expect(RPC_HEADERS.REQUEST_ID).toBe('x-rpc-request-id');
-    expect(RPC_HEADERS.RETRY_AFTER).toBe('x-rpc-retry-after');
+    expect(RPC_HEADERS.TOOL_ID).toBe('rpc-func');
+    expect(RPC_HEADERS.ACT).toBe('rpc-act');
+    expect(RPC_HEADERS.RES_ID).toBe('rpc-res-id');
+    expect(RPC_HEADERS.TIMEOUT).toBe('rpc-timeout');
+    expect(RPC_HEADERS.TRACE_ID).toBe('rpc-trace-id');
+    expect(RPC_HEADERS.REQUEST_ID).toBe('req-id');
+    expect(RPC_HEADERS.RETRY_AFTER).toBe('rpc-retry-after');
     // Deprecated ones
-    expect(RPC_HEADERS.FUNC).toBe('x-rpc-func');
+    expect(RPC_HEADERS.FUNC).toBe('rpc-func');
   });
 
   it('should export correct RPC_DEFAULTS constants', () => {

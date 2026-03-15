@@ -116,10 +116,10 @@ export class MailboxServerTransport extends ServerToolTransport {
     const act = rpcHeaders[RPC_HEADERS.ACT] || rpcHeaders['mbx-act'];
     const resId = rpcHeaders[RPC_HEADERS.RES_ID] || rpcHeaders['mbx-res-id'];
     const traceId = rpcHeaders[RPC_HEADERS.TRACE_ID] || rpcHeaders['mbx-trace-id'];
-    const reqId = rpcHeaders[RPC_HEADERS.REQUEST_ID] || rpcHeaders['mbx-req-id'] || msgId;
+    const reqId = rpcHeaders[RPC_HEADERS.REQUEST_ID] || msgId;
 
     if (!toolId) {
-      throw { status: RpcStatusCode.BAD_REQUEST, message: `Invalid request to ${toStr}: missing tool identifier (x-rpc-func)` };
+      throw { status: RpcStatusCode.BAD_REQUEST, message: `Invalid request to ${toStr}: missing tool identifier (rpc-func)` };
     }
 
     return {
@@ -152,7 +152,7 @@ export class MailboxServerTransport extends ServerToolTransport {
       resultBody = rpcRes.data;
     }
 
-    const reqId = rawRes.headers?.[RPC_HEADERS.REQUEST_ID] || rawRes.headers?.['mbx-req-id'] || rawRes.id;
+    const reqId = rawRes.headers?.[RPC_HEADERS.REQUEST_ID] || rawRes.id;
 
     const getAddr = (addr: any) => typeof addr === 'string' ? addr : addr?.href;
     const replyTo = rawRes.headers?.['mbx-reply-to'] || getAddr(rawRes.from);
@@ -164,8 +164,7 @@ export class MailboxServerTransport extends ServerToolTransport {
       body: resultBody,
       headers: {
         [RPC_HEADERS.REQUEST_ID]: reqId,
-        'mbx-req-id': reqId,
-        'content-type': 'application/json'
+        'content-type': 'application/json',
       }
     });
   }

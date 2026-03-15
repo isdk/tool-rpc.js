@@ -26,7 +26,7 @@ export class HttpClientToolTransport extends ClientToolTransport {
 
   async _fetch(name: string, args?: any, act?: ActionName | string, subName?: any, fetchOptions?: any) {
     const HasContentMethods = ['post', 'put', 'patch']
-    if (!act) { act = this.Tools.action || 'post'}
+    if (!act) { act = this.Tools.action || 'post' }
     if (act === 'res') { act = 'get' }
 
     if ((!fetchOptions.headers || !fetchOptions.headers['Content-Type']) && HasContentMethods.includes(act)) {
@@ -49,16 +49,16 @@ export class HttpClientToolTransport extends ClientToolTransport {
       fetchOptions.headers.Connection = 'keep-alive'
     }
     if (subName) {
-      if (typeof subName !== 'string') {subName = JSON.stringify(subName)}
-      if (name) {subName = name + '/' + subName}
+      if (typeof subName !== 'string') { subName = JSON.stringify(subName) }
+      if (name) { subName = name + '/' + subName }
     } else {
       subName = name
     }
 
-    fetchOptions.method =act.toUpperCase()
+    fetchOptions.method = act.toUpperCase()
     let urlPart: string
     if (act === 'get' || act === 'delete') {
-      urlPart  = subName + genUrlParamsStr(args)
+      urlPart = subName + genUrlParamsStr(args)
     } else {
       fetchOptions.body = JSON.stringify(args)
       urlPart = subName!
@@ -75,7 +75,7 @@ export class HttpClientToolTransport extends ClientToolTransport {
       timeoutVal = typeof fetchOptions.timeout === 'number' ? fetchOptions.timeout : fetchOptions.timeout.value;
       if (timeoutVal) {
         if (!fetchOptions.headers) { fetchOptions.headers = {}; }
-        fetchOptions.headers['x-rpc-timeout'] = timeoutVal.toString();
+        fetchOptions.headers['rpc-timeout'] = timeoutVal.toString();
 
         if (!fetchOptions.signal) {
           const controller = new AbortController();
@@ -169,8 +169,8 @@ export class HttpClientToolTransport extends ClientToolTransport {
       try {
         const body = JSON.parse(text)
         if (body) {
-          if (body.error) {errMsg = body.error}
-          if (body.name) {name = body.name}
+          if (body.error) { errMsg = body.error }
+          if (body.name) { name = body.name }
           if (body.data) {
             data = body.data
             data.name = name

@@ -42,7 +42,7 @@
 | `traceId` | `string` | 是 | 全链路追踪 ID。用于跨服务日志关联。若为空，调度器需自动生成。 |
 | `requestId` | `string` | 是 | 本次调用唯一 ID。用于任务句柄索引、状态查询及幂等校验。 |
 | `params` | `any` | 是 | 业务参数对象。包含 `stream: boolean` 意图标记。 |
-| `headers` | `Record<string, any>` | 否 | **标准 Header**：`x-rpc-timeout` (限时), `x-rpc-act` (动作), `x-rpc-priority` (优先级)。 |
+| `headers` | `Record<string, any>` | 否 | **标准 Header**：`rpc-timeout` (限时), `rpc-act` (动作), `rpc-priority` (优先级)。 |
 | `signal` | `AbortSignal` | 否 | 归一化取消信号，用于同步物理链路的中断状态。 |
 
 ### 3.2 ToolRpcResponse (RPC 响应对象)
@@ -50,7 +50,7 @@
 | :--- | :--- | :--- | :--- |
 | `status` | `number` | 是 | **逻辑状态码**（详见下表）。 |
 | `data` | `any \| ReadableStream` | 否 | 执行结果或流式数据块。 |
-| `headers` | `Record<string, any>` | 否 | **响应元数据**。例如 `x-rpc-retry-after` (102 建议轮询间隔)。 |
+| `headers` | `Record<string, any>` | 否 | **响应元数据**。例如 `rpc-retry-after` (102 建议轮询间隔)。 |
 | `error` | `object` | 否 | 结构化错误：`{ code, message, stack }`。 |
 
 **状态码逻辑对照表：**
@@ -166,7 +166,7 @@ class RpcServerDispatcher {
   async dispatch(request: ToolRpcRequest) {
     // 1. 拦截状态查询动作，实现跨信道可见性
     const activeHandle = this.tracker.get(request.requestId);
-    if (request.headers['x-rpc-act'] === 'status') {
+    if (request.headers['rpc-act'] === 'status') {
       return activeHandle ? activeHandle.getStatus() : formatError(404, "Task Not Found");
     }
 
@@ -212,13 +212,13 @@ class RpcServerDispatcher {
 async handleInterim(response: ToolRpcResponse, originalRequest: ToolRpcRequest) {
   if (response.status === 102) {
     // 按照服务端建议的 retry-after 间隔进行退避
-    const waitTime = response.headers['x-rpc-retry-after'] || 5000;
+    const waitTime = response.headers['rpc-retry-after'] || 5000;
     await sleep(waitTime);
 
     // 构造显式的状态查询请求，严禁重发原请求，保证非幂等安全
     const pollRequest = {
       ...originalRequest,
-      headers: { ...originalRequest.headers, 'x-rpc-act': 'status' }
+      headers: { ...originalRequest.headers, 'rpc-act': 'status' }
     };
 
     // 通过物理传输层发送查询，并递归处理后续状态

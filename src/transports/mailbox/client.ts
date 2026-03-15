@@ -57,7 +57,7 @@ interface PendingRequest {
  *
  * This transport enables making remote procedure calls over an asynchronous
  * message-based architecture. It manages a local registry of pending requests,
- * each associated with a unique 'mbx-req-id' to handle asynchronous correlation.
+ * each associated with a unique 'req-id' to handle asynchronous correlation.
  */
 export class MailboxClientTransport extends ClientToolTransport {
   protected mailbox: Mailbox;
@@ -99,7 +99,7 @@ export class MailboxClientTransport extends ClientToolTransport {
 
   protected onResponse(message: MailMessage) {
     const { body, headers } = message;
-    const reqId = headers?.['mbx-req-id'];
+    const reqId = headers?.['req-id'];
 
     if (reqId && this.pendingRequests.has(reqId)) {
       const { resolve, reject, timer } = this.pendingRequests.get(reqId)!;
@@ -134,7 +134,7 @@ export class MailboxClientTransport extends ClientToolTransport {
 
     const messageBody = { ...(args || {}) };
     const messageHeaders: any = {
-      'mbx-req-id': reqId,
+      'req-id': reqId,
       'mbx-reply-to': this.clientAddress,
       'mbx-fn-id': fnId || undefined,
       'mbx-act': act || undefined,
@@ -144,11 +144,11 @@ export class MailboxClientTransport extends ClientToolTransport {
     let timeoutVal: number = 30000;
     if (fetchOptions?.timeout) {
       timeoutVal = typeof fetchOptions.timeout === 'number' ? fetchOptions.timeout : fetchOptions.timeout.value;
-      messageHeaders['x-rpc-timeout'] = timeoutVal.toString();
+      messageHeaders['rpc-timeout'] = timeoutVal.toString();
     }
     console.log(`[MailboxClient] _fetch timeoutVal: ${timeoutVal}ms`);
     if (fetchOptions?.expectedDuration) {
-      messageHeaders['x-rpc-expected-duration'] = fetchOptions.expectedDuration.toString();
+      messageHeaders['rpc-expected-duration'] = fetchOptions.expectedDuration.toString();
     }
 
     if (resId !== undefined && resId !== null) {
@@ -188,20 +188,20 @@ export class MailboxClientTransport extends ClientToolTransport {
         fetchOptions.signal.addEventListener('abort', abortHandler, { once: true });
       }
 
-      this.pendingRequests.set(reqId, { 
+      this.pendingRequests.set(reqId, {
         resolve: (val: any) => {
           if (fetchOptions?.signal) {
             fetchOptions.signal.removeEventListener('abort', abortHandler);
           }
           resolve(val);
-        }, 
+        },
         reject: (err: any) => {
           if (fetchOptions?.signal) {
             fetchOptions.signal.removeEventListener('abort', abortHandler);
           }
           reject(err);
-        }, 
-        timer 
+        },
+        timer
       });
 
       this.mailbox.post({

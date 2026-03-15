@@ -81,7 +81,7 @@ export class HttpServerToolTransport extends ServerToolTransport {
          }
       }
 
-      // 瀑布流拦截: x-rpc-func -> url path
+      // 瀑布流拦截: rpc-func -> url path
       let toolId = headersStr[RPC_HEADERS.TOOL_ID] || headersStr[RPC_HEADERS.FUNC];
       let act = headersStr[RPC_HEADERS.ACT];
       let resId = headersStr[RPC_HEADERS.RES_ID];
@@ -113,7 +113,7 @@ export class HttpServerToolTransport extends ServerToolTransport {
       }
 
       if (!toolId) {
-         const err: any = new Error("Missing routing information: x-rpc-func header or valid URL Path");
+         const err: any = new Error("Missing routing information: rpc-func header or valid URL Path");
          err.status = 400;
          throw err;
       }

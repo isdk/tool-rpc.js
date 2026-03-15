@@ -61,7 +61,7 @@ export class MailboxClientTransport extends ClientToolTransport {
 
   protected onResponse(message: MailMessage) {
     const { body, headers } = message;
-    const reqId = headers?.['x-rpc-request-id'] || headers?.['mbx-req-id'];
+    const reqId = headers?.['req-id'];
 
     if (reqId && this.pendingRequests.has(reqId)) {
       const { resolve, reject, timer } = this.pendingRequests.get(reqId)!;
@@ -91,11 +91,11 @@ export class MailboxClientTransport extends ClientToolTransport {
   }
 
   public async _fetch(name: string, args?: any, act?: ActionName | string, id?: any, fetchOptions?: any) {
-    const reqId = fetchOptions?.headers?.['x-rpc-request-id'] || crypto.randomUUID();
+    const reqId = fetchOptions?.headers?.['req-id'] || crypto.randomUUID();
     const targetAddressStr = this.serverAddress;
 
     const messageHeaders: any = {
-      'x-rpc-request-id': reqId,
+      'req-id': reqId,
       'mbx-reply-to': this.clientAddress,
       ...fetchOptions?.headers,
     };

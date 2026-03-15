@@ -77,7 +77,7 @@ export class MailboxServerTransport extends ServerToolTransport {
 
   protected async onReceive(message: MailMessage) {
     const { to, body, headers, id: msgId } = message;
-    const reqId = headers?.['mbx-req-id'] || msgId;
+    const reqId = headers?.['req-id'] || msgId;
     const replyTo = headers?.['mbx-reply-to'] || message.from.href;
     const fromAddr = this.listenAddress || to.href;
 
@@ -114,7 +114,7 @@ export class MailboxServerTransport extends ServerToolTransport {
         if (act) { params.act = act; }
 
         // Calculate timeout
-        const clientTimeoutHeader = headers?.['x-rpc-timeout'];
+        const clientTimeoutHeader = headers?.['rpc-timeout'];
         const clientRequestedTimeout = clientTimeoutHeader ? parseInt(clientTimeoutHeader as string, 10) : undefined;
         const toolTimeout = func.timeout;
         const serverGlobalTimeout = this.options?.timeout;
@@ -149,7 +149,7 @@ export class MailboxServerTransport extends ServerToolTransport {
 
           // We don't await the race result directly in a way that blocks the background task's errors
           const taskPromise = func.run(params, { req: message, reply: undefined, signal });
-          
+
           try {
             result = await Promise.race([
               taskPromise,
@@ -179,7 +179,7 @@ export class MailboxServerTransport extends ServerToolTransport {
         from: fromAddr,
         to: replyTo,
         body: result,
-        headers: { 'mbx-req-id': reqId }
+        headers: { 'req-id': reqId }
       });
     } catch (error: any) {
       console.error('[MailboxServerTransport] Error processing message:', error);
@@ -188,12 +188,12 @@ export class MailboxServerTransport extends ServerToolTransport {
         code: error.code || 500,
         data: error.data || { what: error.name }
       };
-      
+
       await this.mailbox.post({
         from: fromAddr,
         to: replyTo,
         body: errorBody,
-        headers: { 'mbx-req-id': reqId }
+        headers: { 'req-id': reqId }
       }).catch(err => console.error('[MailboxServerTransport] Critical: Failed to send error response:', err));
     }
   }
@@ -201,7 +201,7 @@ export class MailboxServerTransport extends ServerToolTransport {
   public async _start(options?: any): Promise<void> {
     const address = options?.address || this.listenAddress;
     if (!address) { throw new Error('MailboxServerTransport: address is required to start'); }
-    
+
     if (this.isRunning) { await this.stop(); }
     this.isRunning = true;
 

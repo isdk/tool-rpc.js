@@ -155,7 +155,7 @@ describe('Comprehensive Pure V2 Integration (Streaming, Polling, Errors)', () =>
       const requestId = resp1.headers.get(RPC_HEADERS.REQUEST_ID);
       expect(requestId).toBeTruthy();
 
-      // Verify x-rpc-retry-after is present
+      // Verify rpc-retry-after is present
       expect(resp1.headers.get(RPC_HEADERS.RETRY_AFTER)).toBeTruthy();
 
       // Poll for status
@@ -199,7 +199,7 @@ describe('Comprehensive Pure V2 Integration (Streaming, Polling, Errors)', () =>
       httpDispatcher.registry.get = (id: string) => id === 'meta' ? new MetaTool('meta') : undefined;
 
       const resp = await fetch(`http://localhost:${httpPort}/api/meta/res-abc`, {
-        headers: { 'x-rpc-act': 'my-act' }
+        headers: { 'rpc-act': 'my-act' }
       });
       const data = await resp.json();
       expect(data.resId).toBe('res-abc');

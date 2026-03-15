@@ -80,7 +80,7 @@ export interface RemoteFuncItem extends BaseFuncItem {
 
 ### 4.2 传输层协议约定 (Transport Headers)
 
-- **请求头**: 客户端应发送 `X-RPC-Timeout` (单位: ms) 告知服务端其最终确定的等待时长。
+- **请求头**: 客户端应发送 `rpc-Timeout` (单位: ms) 告知服务端其最终确定的等待时长。
 - **状态码**:
   - **408 Request Timeout**: 客户端主动中断（超时或取消）。
   - **504 Gateway Timeout**: 服务端执行超时。

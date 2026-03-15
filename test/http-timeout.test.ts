@@ -71,7 +71,7 @@ describe('Timeout and ExpectedDuration', () => {
     ServerTools.register({
       name: 'tool-a',
       isApi: true,
-      func: async function(params) {
+      func: async function (params) {
         return await (this as any).runAs('tool-b', params);
       }
     });
@@ -79,7 +79,7 @@ describe('Timeout and ExpectedDuration', () => {
     ServerTools.register({
       name: 'tool-b',
       isApi: true,
-      func: async function({ delay = 1000 }) {
+      func: async function ({ delay = 1000 }) {
         const signal = (this as any).ctx?.signal;
         return new Promise((resolve, reject) => {
           const timer = setTimeout(() => resolve('b-done'), delay);
@@ -134,7 +134,7 @@ describe('Timeout and ExpectedDuration', () => {
   it('should support client-side manual timeout override', async () => {
     const slowTool = ClientTools.get('slow-tool')!;
     // Set manual timeout to 100ms.
-    // Since we now have a buffer and server respects x-rpc-timeout,
+    // Since we now have a buffer and server respects rpc-timeout,
     // the server should return 504 at 100ms.
     try {
       await slowTool.run({ delay: 1000 }, { timeout: 100 });
@@ -167,9 +167,9 @@ describe('Timeout and ExpectedDuration', () => {
     // To verify signal propagation, we'd need server-side logs or a side-effect.
     // The current server implementation returns 504 when timeout occurs.
     try {
-        await slowTool.run({ delay: 2000 });
+      await slowTool.run({ delay: 2000 });
     } catch (err: any) {
-        expect(err.code).toBe(504);
+      expect(err.code).toBe(504);
     }
   });
 
