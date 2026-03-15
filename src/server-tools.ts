@@ -23,7 +23,7 @@ export declare interface ServerTools extends ServerFuncItem {
 
 /**
  * ServerTools: RPC 服务端工具基类
- * 
+ *
  * [V2 架构方针：原子化与纯净]
  * 基类不再假设任何路由逻辑（ID 或 Act），仅提供运行环境支持。
  */
@@ -38,7 +38,7 @@ export class ServerTools extends ToolFunc {
   static setApiRoot(v: string) { this._apiRoot = v; }
 
   static toJSON() {
-    const result:{[name:string]: ServerTools} = {}
+    const result: { [name: string]: ServerTools } = {}
     for (const name in this.items) {
       let item: any = this.items[name];
       const isExactType = (item instanceof this) && ((item.constructor as any).toJSON === this.toJSON) && item.isApi !== false;
@@ -75,8 +75,8 @@ export class ServerTools extends ToolFunc {
   /**
    * 业务实现函数模板。
    */
-  func(params: ServerFuncParams, context?: ToolRpcContext): Promise<any>|any {
-      return super.run(params, context);
+  func(params: ServerFuncParams, context?: ToolRpcContext): Promise<any> | any {
+    return super.run(params, context);
   }
 }
 

@@ -116,10 +116,14 @@ export class MailboxServerTransport extends ServerToolTransport {
     const act = rpcHeaders[RPC_HEADERS.ACT] || rpcHeaders['mbx-act'];
     const resId = rpcHeaders[RPC_HEADERS.RES_ID] || rpcHeaders['mbx-res-id'];
     const traceId = rpcHeaders[RPC_HEADERS.TRACE_ID] || rpcHeaders['mbx-trace-id'];
-    const reqId = rpcHeaders[RPC_HEADERS.REQUEST_ID] || msgId;
+    const reqId = rpcHeaders[RPC_HEADERS.REQUEST_ID] || (this.options.strict === false ? msgId : undefined);
 
     if (!toolId) {
       throw { status: RpcStatusCode.BAD_REQUEST, message: `Invalid request to ${toStr}: missing tool identifier (rpc-func)` };
+    }
+
+    if (!reqId) {
+      throw { status: RpcStatusCode.BAD_REQUEST, message: `Invalid request to ${toStr}: missing ${RPC_HEADERS.REQUEST_ID} in headers (Strict Mode)` };
     }
 
     return {

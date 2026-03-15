@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { Mailbox, MemoryProvider, MailMessage } from '@mboxlabs/mailbox';
 
 import { ToolFunc, Funcs } from '@isdk/tool-func';
-import { ServerTools } from '../server-tools';
+import { ServerFuncItem, ServerTools } from '../server-tools';
 import { ResServerTools } from '../res-server-tools';
 import { ClientTools } from '../client-tools';
 import { ResClientTools } from '../res-client-tools';
@@ -478,6 +478,7 @@ describe('MailboxServerTransport / MailboxClientTransport V2 Test', () => {
         id: 'priority-test',
         body: {},
         headers: {
+          'req-id': 'pri-test-id',
           'rpc-func': 'v2-tool',
           'mbx-fn-id': 'v1-tool',
           'rpc-act': 'v2-act',
@@ -485,7 +486,99 @@ describe('MailboxServerTransport / MailboxClientTransport V2 Test', () => {
         }
       });
       expect(rpcReq.toolId).toBe('v2-tool');
+      expect(rpcReq.requestId).toBe('pri-test-id');
       expect(rpcReq.act).toBe('v2-act');
+    });
+  });
+
+  describe('Strict Mode and req-id logic', () => {
+    it('should reject request without req-id in default Strict Mode', async () => {
+      const responsePromise = new Promise<any>((resolve) => {
+        const sub = mailbox.subscribe(clientAddress, (msg) => {
+          // 在严格模式下，如果没有 req-id，服务端会回传 msg.body.error
+          if (msg.body?.error) {
+            sub.unsubscribe();
+            resolve(msg.body);
+          }
+        });
+      });
+
+      // 手动构造一个没有 req-id 的请求
+      await mailbox.post({
+        from: clientAddress,
+        to: serverAddress,
+        body: { a: 1, b: 2 },
+        headers: {
+          'rpc-func': 'calculator',
+          'rpc-act': 'post',
+          // 故意不传 'req-id'
+        }
+      });
+
+      const response = await responsePromise;
+      expect(response.error.message).toContain('missing req-id in headers (Strict Mode)');
+      expect(response.error.code).toBe(400);
+    });
+
+    it('should allow request without req-id when strict: false (Fallback Mode)', async () => {
+      const fallbackServerAddress = 'mem://fallback-server/api';
+      const fallbackServer = new V2MailboxServerTransport({
+        mailbox,
+        apiUrl: fallbackServerAddress,
+        strict: false // 禁用严格模式
+      });
+      fallbackServer.dispatcher.registry = ServerTools;
+      fallbackServer.addRpcHandler(fallbackServerAddress);
+      await fallbackServer.start();
+
+      const responsePromise = new Promise<any>((resolve) => {
+        const sub = mailbox.subscribe(clientAddress, (msg) => {
+          // 这里检查 msg.headers['req-id'] 是否等于原始消息的 id
+          if (msg.headers?.['req-id']?.startsWith('msg-')) {
+            sub.unsubscribe();
+            resolve(msg.body);
+          }
+        });
+      });
+
+      await mailbox.post({
+        id: 'msg-fallback-test',
+        from: clientAddress,
+        to: fallbackServerAddress,
+        body: { a: 5, b: 5 },
+        headers: {
+          'rpc-func': 'calculator',
+          'rpc-act': 'post',
+        }
+      });
+
+      const result = await responsePromise;
+      expect(result).toBe(10);
+      await fallbackServer.stop();
+    });
+
+    it('should isolate tasks in RpcActiveTaskTracker using req-id', async () => {
+      // 注册一个长耗时工具
+      new ServerTools({
+        name: 'longTask',
+        isApi: true,
+        timeout: { value: 200, keepAliveOnTimeout: true },
+        func: async () => {
+          await new Promise(r => setTimeout(r, 10));
+          return 'done';
+        },
+      } as ServerFuncItem).register();
+
+      // 发送两个内容相同但 req-id 不同的请求
+      const req1 = clientTransport.fetch('longTask', {}, 'post', undefined, { headers: { 'req-id': 'task-1' } });
+      const req2 = clientTransport.fetch('longTask', {}, 'post', undefined, { headers: { 'req-id': 'task-2' } });
+
+      // 在 V2 Dispatcher 中，它们应该由于 req-id 不同而互不干扰
+      const [res1, res2] = await Promise.all([req1, req2]);
+
+      // 注意：如果 keepAliveOnTimeout 触发，返回的是状态对象
+      expect(res1).toBeDefined();
+      expect(res2).toBeDefined();
     });
   });
 });

@@ -29,6 +29,10 @@ export interface MailboxServerOptions {
    */
   pullInterval?: number;
   /**
+   * Strict mode: enforce req-id in headers. Default is true.
+   */
+  strict?: boolean;
+  /**
    * Additional transport-specific options.
    */
   [key: string]: any;
@@ -77,43 +81,49 @@ export class MailboxServerTransport extends ServerToolTransport {
 
   protected async onReceive(message: MailMessage) {
     const { to, body, headers, id: msgId } = message;
-    const reqId = headers?.['req-id'] || msgId;
+    const fnId = headers?.['mbx-fn-id'] || undefined;
+    const resId = headers?.['mbx-res-id'] || undefined;
+    const act = headers?.['mbx-act'] || undefined;
+    const reqId = headers?.['req-id'] || (this.options.strict === false ? msgId : undefined);
+
     const replyTo = headers?.['mbx-reply-to'] || message.from.href;
     const fromAddr = this.listenAddress || to.href;
 
-    // console.log(`[MailboxServer] Receiving message ${msgId} at ${this.listenAddress} for ${to.href}`);
+    if (!reqId) {
+      const errorBody = {
+        error: `Invalid request to ${to.href}: missing 'req-id' in headers (Strict Mode)`,
+        code: 400,
+        status: 'bad_request',
+      };
+      await this.mailbox.post({
+        from: fromAddr,
+        to: replyTo,
+        body: errorBody,
+        headers: { 'req-id': msgId } // 降级使用 msgId 发回错误通知
+      }).catch(err => console.error('[MailboxServerTransport] Failed to send strict error:', err));
+      return;
+    }
 
     try {
       let result: any;
-      const fnId = headers?.['mbx-fn-id'] || undefined;
-      const resId = headers?.['mbx-res-id'] || undefined;
-      const act = headers?.['mbx-act'] || undefined;
-
-      // console.log(`[MailboxServer] Processing headers: fnId=${fnId}, resId=${resId}, act=${act}`);
-
       if (!fnId && this.discoveryHandlerInfo && (act === 'list' || act === 'get')) {
-        // console.log(`[MailboxServer] Handled as discovery list/get`);
         result = await this.discoveryHandlerInfo.handler();
         if (typeof result?.toJSON === 'function') {
           result = result.toJSON();
         }
       } else if (fnId) {
-        // console.log(`[MailboxServer] Searching tool ${fnId} in ${this.Tools.name}`);
         const func: any = this.Tools.get(fnId);
         if (!func) {
-          // console.log(`[MailboxServer] Tool ${fnId} NOT FOUND in ${this.Tools.name}`);
           const err: any = new Error(`Tool ${fnId} not found`);
           err.code = 404;
           err.data = { what: fnId };
           throw err;
         }
 
-        // console.log(`[MailboxServer] Found tool ${fnId}, running...`);
         const params = { ...(body || {}), _req: message };
         if (resId) { params.id = resId; }
         if (act) { params.act = act; }
 
-        // Calculate timeout
         const clientTimeoutHeader = headers?.['rpc-timeout'];
         const clientRequestedTimeout = clientTimeoutHeader ? parseInt(clientTimeoutHeader as string, 10) : undefined;
         const toolTimeout = func.timeout;
@@ -142,27 +152,18 @@ export class MailboxServerTransport extends ServerToolTransport {
                 controller.abort();
               }
               const err: any = new Error('Execution Timeout');
-              err.code = 504; // Gateway Timeout
+              err.code = 504;
               reject(err);
             }, effectiveTimeoutVal);
           });
 
-          // We don't await the race result directly in a way that blocks the background task's errors
           const taskPromise = func.run(params, { req: message, reply: undefined, signal });
-
           try {
-            result = await Promise.race([
-              taskPromise,
-              timeoutPromise
-            ]);
+            result = await Promise.race([taskPromise, timeoutPromise]);
           } catch (err: any) {
             if (err.message === 'Execution Timeout') {
-              // If it's a timeout and keepAlive is true, the taskPromise is still running.
-              // We catch its eventual result/error to avoid unhandled rejections.
-              taskPromise.catch(
-                (e) => console.error(`[MailboxServer] Background task ${fnId} failed eventually:`, e)
-              );
-              throw err; // Re-throw to be handled by the outer catch
+              taskPromise.catch(e => console.error(`[MailboxServer] Background task ${fnId} failed eventually:`, e));
+              throw err;
             }
             throw err;
           }
@@ -208,12 +209,9 @@ export class MailboxServerTransport extends ServerToolTransport {
     await this.mailbox.start?.();
 
     if (this.mode === 'push') {
-      // Subscribe first to capture new incoming messages
       this.subscription = this.mailbox.subscribe(address, this.onReceive.bind(this));
-      // Then drain backlog to process existing messages
       await this.drainBacklog(address);
     } else {
-      // Pull mode naturally drains backlog first
       this.runPullLoop(address);
     }
   }
