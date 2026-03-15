@@ -136,8 +136,8 @@ export class MailboxClientTransport extends ClientToolTransport {
     const messageHeaders: any = {
       'req-id': reqId,
       'mbx-reply-to': this.clientAddress,
-      'mbx-fn-id': fnId || undefined,
-      'mbx-act': act || undefined,
+      'rpc-fn': fnId || undefined,
+      'rpc-act': act || undefined,
       ...fetchOptions?.headers,
     };
 
@@ -152,7 +152,7 @@ export class MailboxClientTransport extends ClientToolTransport {
     }
 
     if (resId !== undefined && resId !== null) {
-      messageHeaders['mbx-res-id'] = typeof resId === 'string' ? resId : JSON.stringify(resId);
+      messageHeaders['rpc-res-id'] = typeof resId === 'string' ? resId : JSON.stringify(resId);
     }
 
     const clientLocalTimeout = timeoutVal + 200;

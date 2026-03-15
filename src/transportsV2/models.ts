@@ -5,13 +5,13 @@ import { type ToolFuncContext } from "@isdk/tool-func";
  */
 export const RPC_HEADERS = {
   /** 工具/函数标识 */
-  TOOL_ID: 'rpc-func',
+  TOOL_ID: 'rpc-fn',
   /** (可选) 动作或子方法 */
   ACT: 'rpc-act',
   /** (可选) 资源唯一标识 (Resource ID) */
   RES_ID: 'rpc-res-id',
   /** 链路追踪 ID */
-  TRACE_ID: 'rpc-trace-id',
+  TRACE_ID: 'trace-id',
   /** 业务执行超时声明 (ms) */
   TIMEOUT: 'rpc-timeout',
   /** 请求唯一 ID (由客户端生成或传输层补齐，且必须在响应中回显) */
@@ -21,7 +21,7 @@ export const RPC_HEADERS = {
 
   // 别名保留，方便过渡
   /** @deprecated use TOOL_ID instead */
-  FUNC: 'rpc-func',
+  FUNC: 'rpc-fn',
 };
 
 /**

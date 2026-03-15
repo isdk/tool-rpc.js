@@ -212,8 +212,8 @@ describe('MailboxServerTransport / MailboxClientTransport V2 Test', () => {
       to: serverAddress,
       body: { a: 10, b: 20 },
       headers: {
-        'mbx-fn-id': 'calculator',
-        'mbx-act': 'post',
+        'rpc-fn': 'calculator',
+        'rpc-act': 'post',
         'mbx-reply-to': thirdPartyAddress,
         'req-id': 'redirect-test'
       }
@@ -232,7 +232,7 @@ describe('MailboxServerTransport / MailboxClientTransport V2 Test', () => {
         from: clientAddress,
         to: backlogAddress,
         body: { val: i },
-        headers: { 'mbx-fn-id': 'backlog-adder', 'req-id': `backlog-${i}`, 'mbx-act': 'post' }
+        headers: { 'rpc-fn': 'backlog-adder', 'req-id': `backlog-${i}`, 'rpc-act': 'post' }
       });
     }
 
@@ -283,7 +283,7 @@ describe('MailboxServerTransport / MailboxClientTransport V2 Test', () => {
       func: (params: any, context: any) => {
         return {
           custom: context.headers?.['mbx-custom-field'],
-          traceId: context.headers?.['rpc-trace-id'] || context.headers?.['mbx-trace-id'],
+          traceId: context.headers?.['trace-id'],
         };
       },
     }).register();
@@ -292,7 +292,7 @@ describe('MailboxServerTransport / MailboxClientTransport V2 Test', () => {
     const result = await clientTransport.fetch('headerInspector', {}, 'post', undefined, {
       headers: {
         'mbx-custom-field': 'hello-world',
-        'rpc-trace-id': 'trace-123'
+        'trace-id': 'trace-123'
       }
     });
 
@@ -349,7 +349,7 @@ describe('MailboxServerTransport / MailboxClientTransport V2 Test', () => {
     expect(resNull).toBeNull();
   });
 
-  it('should reject requests without mbx-fn-id header', async () => {
+  it('should reject requests without rpc-fn header', async () => {
     const responsePromise = new Promise<any>((resolve) => {
       const sub = mailbox.subscribe(clientAddress, (msg) => {
         if (msg.headers?.['req-id'] === 'no-fn-id') {
@@ -385,8 +385,8 @@ describe('MailboxServerTransport / MailboxClientTransport V2 Test', () => {
       to: serverAddress,
       body: { a: 5, b: 5 },
       headers: {
-        'mbx-fn-id': 'calculator',
-        'mbx-act': 'post',
+        'rpc-fn': 'calculator',
+        'rpc-act': 'post',
         'req-id': 'fallback-test'
       }
     });
@@ -414,7 +414,7 @@ describe('MailboxServerTransport / MailboxClientTransport V2 Test', () => {
       from: clientAddress,
       to: serverAddress,
       body: { a: 1, b: 1 },
-      headers: { 'mbx-fn-id': 'calculator', 'mbx-act': 'post', 'req-id': 'restart-test' }
+      headers: { 'rpc-fn': 'calculator', 'rpc-act': 'post', 'req-id': 'restart-test' }
     });
 
     const responsePromise = new Promise<any>((resolve) => {
@@ -479,10 +479,8 @@ describe('MailboxServerTransport / MailboxClientTransport V2 Test', () => {
         body: {},
         headers: {
           'req-id': 'pri-test-id',
-          'rpc-func': 'v2-tool',
-          'mbx-fn-id': 'v1-tool',
+          'rpc-fn': 'v2-tool',
           'rpc-act': 'v2-act',
-          'mbx-act': 'v1-act'
         }
       });
       expect(rpcReq.toolId).toBe('v2-tool');
@@ -509,7 +507,7 @@ describe('MailboxServerTransport / MailboxClientTransport V2 Test', () => {
         to: serverAddress,
         body: { a: 1, b: 2 },
         headers: {
-          'rpc-func': 'calculator',
+          'rpc-fn': 'calculator',
           'rpc-act': 'post',
           // 故意不传 'req-id'
         }
@@ -547,7 +545,7 @@ describe('MailboxServerTransport / MailboxClientTransport V2 Test', () => {
         to: fallbackServerAddress,
         body: { a: 5, b: 5 },
         headers: {
-          'rpc-func': 'calculator',
+          'rpc-fn': 'calculator',
           'rpc-act': 'post',
         }
       });

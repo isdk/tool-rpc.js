@@ -218,8 +218,8 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
       to: serverAddress,
       body: { a: 10, b: 20 },
       headers: {
-        'mbx-fn-id': 'calculator',
-        'mbx-act': 'post',
+        'rpc-fn': 'calculator',
+        'rpc-act': 'post',
         'mbx-reply-to': thirdPartyAddress,
         'req-id': 'redirect-test'
       }
@@ -238,7 +238,7 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
         from: clientAddress,
         to: backlogAddress,
         body: { val: i },
-        headers: { 'mbx-fn-id': 'backlog-adder', 'req-id': `backlog-${i}`, 'mbx-act': 'post' }
+        headers: { 'rpc-fn': 'backlog-adder', 'req-id': `backlog-${i}`, 'rpc-act': 'post' }
       });
     }
 
@@ -288,7 +288,7 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
         const message = params._req as MailMessage;
         return {
           custom: message.headers?.['mbx-custom-field'],
-          traceId: message.headers?.['mbx-trace-id'],
+          traceId: message.headers?.['trace-id'],
         };
       },
     }).register();
@@ -297,7 +297,7 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
     const result = await clientTransport.fetch('headerInspector', {}, 'post', undefined, {
       headers: {
         'mbx-custom-field': 'hello-world',
-        'mbx-trace-id': 'trace-123'
+        'trace-id': 'trace-123'
       }
     });
 
@@ -354,7 +354,7 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
     expect(resNull).toBeNull();
   });
 
-  it('should reject requests without mbx-fn-id header', async () => {
+  it('should reject requests without rpc-fn header', async () => {
     const responsePromise = new Promise<any>((resolve) => {
       const sub = mailbox.subscribe(clientAddress, (msg) => {
         if (msg.headers?.['req-id'] === 'no-fn-id') {
@@ -372,7 +372,7 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
     });
 
     const response = await responsePromise;
-    expect(response.error).toContain("missing 'mbx-fn-id' in headers");
+    expect(response.error).toContain("missing 'rpc-fn' in headers");
     expect(response.code).toBe(400);
   });
 
@@ -390,8 +390,8 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
       to: serverAddress,
       body: { a: 5, b: 5 },
       headers: {
-        'mbx-fn-id': 'calculator',
-        'mbx-act': 'post',
+        'rpc-fn': 'calculator',
+        'rpc-act': 'post',
         'req-id': 'fallback-test'
       }
     });
@@ -419,7 +419,7 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
       from: clientAddress,
       to: serverAddress,
       body: { a: 1, b: 1 },
-      headers: { 'mbx-fn-id': 'calculator', 'mbx-act': 'post', 'req-id': 'restart-test' }
+      headers: { 'rpc-fn': 'calculator', 'rpc-act': 'post', 'req-id': 'restart-test' }
     });
 
     const responsePromise = new Promise<any>((resolve) => {

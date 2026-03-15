@@ -68,8 +68,8 @@ export class MailboxServerTransport extends ServerToolTransport {
 
   protected async onReceive(message: MailMessage) {
     const { headers } = message;
-    const toolId = headers?.[RPC_HEADERS.TOOL_ID] || headers?.[RPC_HEADERS.FUNC] || headers?.['mbx-fn-id'];
-    const act = headers?.[RPC_HEADERS.ACT] || headers?.['mbx-act'];
+    const toolId = headers?.[RPC_HEADERS.TOOL_ID];
+    const act = headers?.[RPC_HEADERS.ACT];
 
     // 处理内置发现逻辑 (Discovery)
     if (!toolId && this.discoveryHandlerInfo && (act === 'list' || act === 'get')) {
@@ -112,14 +112,14 @@ export class MailboxServerTransport extends ServerToolTransport {
     if (msgId) rpcHeaders['x-mailbox-msg-id'] = String(msgId);
 
     // 标准化路由控制头映射
-    const toolId = rpcHeaders[RPC_HEADERS.TOOL_ID] || rpcHeaders[RPC_HEADERS.FUNC] || rpcHeaders['mbx-fn-id'];
-    const act = rpcHeaders[RPC_HEADERS.ACT] || rpcHeaders['mbx-act'];
-    const resId = rpcHeaders[RPC_HEADERS.RES_ID] || rpcHeaders['mbx-res-id'];
-    const traceId = rpcHeaders[RPC_HEADERS.TRACE_ID] || rpcHeaders['mbx-trace-id'];
+    const toolId = rpcHeaders[RPC_HEADERS.TOOL_ID];
+    const act = rpcHeaders[RPC_HEADERS.ACT];
+    const resId = rpcHeaders[RPC_HEADERS.RES_ID];
+    const traceId = rpcHeaders[RPC_HEADERS.TRACE_ID];
     const reqId = rpcHeaders[RPC_HEADERS.REQUEST_ID] || (this.options.strict === false ? msgId : undefined);
 
     if (!toolId) {
-      throw { status: RpcStatusCode.BAD_REQUEST, message: `Invalid request to ${toStr}: missing tool identifier (rpc-func)` };
+      throw { status: RpcStatusCode.BAD_REQUEST, message: `Invalid request to ${toStr}: missing tool identifier (rpc-fn)` };
     }
 
     if (!reqId) {

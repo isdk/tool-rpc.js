@@ -81,9 +81,9 @@ export class MailboxServerTransport extends ServerToolTransport {
 
   protected async onReceive(message: MailMessage) {
     const { to, body, headers, id: msgId } = message;
-    const fnId = headers?.['mbx-fn-id'] || undefined;
-    const resId = headers?.['mbx-res-id'] || undefined;
-    const act = headers?.['mbx-act'] || undefined;
+    const fnId = headers?.['rpc-fn'] || undefined;
+    const resId = headers?.['rpc-res-id'] || undefined;
+    const act = headers?.['rpc-act'] || undefined;
     const reqId = headers?.['req-id'] || (this.options.strict === false ? msgId : undefined);
 
     const replyTo = headers?.['mbx-reply-to'] || message.from.href;
@@ -171,7 +171,7 @@ export class MailboxServerTransport extends ServerToolTransport {
           result = await func.run(params, { req: message, reply: undefined });
         }
       } else {
-        const err: any = new Error(`Invalid request to ${to.href}: missing 'mbx-fn-id' in headers`);
+        const err: any = new Error(`Invalid request to ${to.href}: missing 'rpc-fn' in headers`);
         err.code = 400;
         throw err;
       }
