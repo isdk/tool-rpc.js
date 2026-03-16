@@ -194,4 +194,23 @@ describe('Rpc Compatibility Layer (V2 to V1 Bridge)', () => {
             expect(passedParams._req).toBe('foo');
         });
     });
+
+    describe('Boundary Cases', () => {
+        it('should NOT crash elevateV1ParamsToV2Request when params are null', () => {
+            const req: any = { params: null };
+            expect(() => elevateV1ParamsToV2Request(req)).not.toThrow();
+        });
+
+        it('should NOT crash bridgeV2RequestToV1Params when params are null', () => {
+            const req: any = { resId: '1' };
+            expect(() => bridgeV2RequestToV1Params(req, null)).not.toThrow();
+        });
+
+        it('should handle undefined values gracefully in elevation', () => {
+            const req: any = { params: { id: undefined, act: undefined } };
+            elevateV1ParamsToV2Request(req);
+            expect(req.resId).toBeUndefined();
+            expect(req.act).toBeUndefined();
+        });
+    });
 });

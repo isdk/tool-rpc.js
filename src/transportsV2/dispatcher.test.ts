@@ -26,7 +26,11 @@ describe('RpcServerDispatcher', () => {
       } as unknown as typeof ServerTools;
       registry.get = vi.fn().mockImplementation((id: string) => (registry as any)[id]);
 
-      dispatcher = new RpcServerDispatcher({ registry, tracker: new RpcActiveTaskTracker(1000) });
+      dispatcher = new RpcServerDispatcher({ 
+         registry, 
+         tracker: new RpcActiveTaskTracker(1000),
+         terminationGraceMs: 0
+      });
    });
 
    it('should reject when tool not found', async () => {
@@ -69,7 +73,7 @@ describe('RpcServerDispatcher', () => {
          apiUrl: 'http://test', toolId: 'timeoutTool', requestId: 'req-timeout', params: {}, headers: {}
       };
       const p2 = dispatcher.dispatch(req2);
-      vi.advanceTimersByTime(60); // passes the 50ms hard timeout
+      vi.advanceTimersByTime(60); // 50ms + 10ms buffer
       const res2 = await p2;
 
       expect(res2.status).toBe(RpcStatusCode.TERMINATED); // hard timeout kills task
@@ -102,13 +106,100 @@ describe('RpcServerDispatcher', () => {
       }));
 
       const p = dispatcher.dispatch(req);
-      vi.advanceTimersByTime(30);
+      vi.advanceTimersByTime(30); // 20ms + 10ms buffer
       const res = await p;
 
       expect(res.status).toBe(RpcStatusCode.TERMINATED);
       expect(dispatcher.tracker.get('req-global-timeout')).toBeUndefined();
 
       vi.useRealTimers();
+   });
+
+   it('should respect non-zero terminationGraceMs and delay 408 response', async () => {
+      vi.useFakeTimers();
+      dispatcher.terminationGraceMs = 500;
+      dispatcher.globalTimeout = 50;
+
+      const req: ToolRpcRequest = {
+         apiUrl: 'http://test', toolId: 'testTool', requestId: 'grace-req', params: {}, headers: {}
+      };
+
+      registry.get = vi.fn().mockImplementation(() => ({
+         run: () => new Promise(resolve => setTimeout(() => resolve('done'), 2000))
+      }));
+
+      const p = dispatcher.dispatch(req);
+      
+      // 1. 超过硬超时时间 (50ms)，但未到宽限期 (500ms)
+      vi.advanceTimersByTime(100);
+      
+      // 此时 Promise 应该仍处于 pending 状态
+      let settled = false;
+      p.finally(() => { settled = true; });
+      await Promise.resolve(); // 刷新微任务队列
+      expect(settled).toBe(false);
+
+      // 2. 超过宽限期
+      vi.advanceTimersByTime(500);
+      const res = await p;
+
+      expect(res.status).toBe(RpcStatusCode.TERMINATED);
+      expect(settled).toBe(true);
+
+      vi.useRealTimers();
+   });
+
+   it('should handle synchronous errors in tool execution', async () => {
+      registry.get = vi.fn().mockReturnValue({
+         run: () => { throw new Error('Sync Error'); }
+      });
+
+      const req: ToolRpcRequest = {
+         apiUrl: 'http://test', toolId: 'syncTool', requestId: 'sync-req', params: {}, headers: {}
+      };
+
+      const res = await dispatcher.dispatch(req);
+      expect(res.status).toBe(500);
+      expect(res.error?.message).toBe('Sync Error');
+   });
+
+   it('should handle non-Error objects thrown by tool', async () => {
+      registry.get = vi.fn().mockReturnValue({
+         run: () => { throw "Primitive Error String"; }
+      });
+
+      const req: ToolRpcRequest = {
+         apiUrl: 'http://test', toolId: 'stringTool', requestId: 'string-req', params: {}, headers: {}
+      };
+
+      const res = await dispatcher.dispatch(req);
+      expect(res.status).toBe(500);
+      expect(res.error?.message).toBe('Primitive Error String');
+   });
+
+   it('should call tool.cleanup when task is aborted', async () => {
+      let cleanupCalled = false;
+      const mockCleanup = vi.fn().mockImplementation(() => { cleanupCalled = true; });
+      const mockRun = vi.fn().mockReturnValue(new Promise(() => { })); // Hangs
+
+      registry.get = vi.fn().mockReturnValue({
+         run: mockRun,
+         cleanup: mockCleanup
+      });
+
+      const req: ToolRpcRequest = {
+         apiUrl: 'http://test', toolId: 'cleanupTool', requestId: 'cleanup-req', params: { foo: 'bar' }, headers: {}
+      };
+
+      dispatcher.dispatch(req);
+      const handle = dispatcher.tracker.get('cleanup-req');
+      handle?.abort('Manual abort');
+
+      expect(cleanupCalled).toBe(true);
+      expect(mockCleanup).toHaveBeenCalledWith(
+         expect.objectContaining({ foo: 'bar' }), 
+         expect.objectContaining({ requestId: 'cleanup-req' })
+      );
    });
 
    it('should be immediately visible in tracker once dispatched', async () => {

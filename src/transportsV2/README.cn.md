@@ -71,13 +71,14 @@ export interface ToolRpcContext {
 ```
 
 ### 2.3 RpcError (标准错误处理)
-
 为了确保错误能被正确序列化并在跨进程通信中完整还原，建议在工具函数中抛出 `RpcError`：
-
 ```typescript
-// 构造函数: (message, status?, code?, data?)
-throw new RpcError('Access Denied', 403, 40301, { reason: 'IP blocked' });
+// 构造函数: (message, code: number = 500, status?: string, data?: any)
+throw new RpcError('Access Denied', 403, 'forbidden', { ip: '1.2.3.4' });
 ```
+*   **`code` (数字)**：业务错误码。若在 100-599 范围内，将直接作为响应顶层的 `status`。
+*   **`status` (字符串)**：可选的语义标识（方案一），如 `'teapot'`, `'invalid_params'`。
+*   **`data` (对象)**：额外的结构化错误负载（方案三）。
 
 ---
 
@@ -177,23 +178,43 @@ await manager.stopAll();
 
 ---
 
-## 7. 传输层实现细节
+## 7. 状态码语义对照表
 
-### 7.1 HttpServerToolTransport
+响应顶层的 **`status`** (数字) 决定了物理协议的行为及客户端的基础判定：
 
-* **寻址优先级**：Header 显式指令 > URL Path 降级解析 (`/api/tool/resId`模式)。
-* **HTTP 102 信号映射**：由于多数现代 fetch 工具（如 `undici`）对 1xx 信息性状态码的处理存在不确定性，V2 在物理层将 `102 Processing` 逻辑映射为 **`202 Accepted`**，并返回包含任务 ID 的 Body 负载，确保客户端能稳定解析。
-* **流式背压**：原生支持 `ReadableStream` 管道透传，具备自动检测 `.pipe` 的能力。
+| 状态码 | 语义 | 描述 |
+| :--- | :--- | :--- |
+| **200** | OK | 执行成功并返回结果。 |
+| **102** | Processing | 响应超时，任务已转入后台。建议客户端开始轮询。 |
+| **400** | Bad Request | 参数错误或能力协商失败。 |
+| **404** | Not Found | 找不到工具或任务 ID 已失效。 |
+| **408** | Terminated | 触及硬死线，业务已被服务端强制中止。 |
+| **409** | Conflict | 同样的 `requestId` 正在运行中，拒绝重复提交。 |
+| **500** | Error | 业务代码执行抛出异常。 |
 
-### 7.2 信号联动逻辑
+> **注**：若 `RpcError.code` 在 100-599 范围内，系统将自动将其映射为顶层 `status`。
 
+---
+
+## 8. 传输层实现细节
+
+### 8.1 HttpServerToolTransport
+*   **寻址优先级**：Header 显式指令 > URL Path 降级解析 (`/api/tool/resId`模式)。
+*   **HTTP 102 信号映射**：由于多数现代 fetch 工具（如 `undici`）对 1xx 信息性状态码的处理存在不确定性，V2 在物理层将 `102 Processing` 逻辑映射为 **`202 Accepted`**，并返回包含任务 ID 的 Body 负载，确保客户端能稳定解析。
+*   **流式背压**：原生支持 `ReadableStream` 管道透传，具备自动检测 `.pipe` 的能力。
+
+### 8.2 信号联动与延迟中止
 当任务触发硬超时（Hard Deadline）或收到取消请求时：
+1.  `Dispatcher` 会同步调用 `aborter.abort(reason)`。
+2.  `RpcDeadlineGuard` 进入 **“延迟中止”** 阶段，先通过信号通知业务代码进行清理。
+3.  **宽限期等待**：在 `terminationGraceMs` (默认 500ms) 之后，Guard 正式向外抛出异常。
+4.  `RpcActiveTaskHandle` 监听此信号，将内部状态立即切换为 `aborted`。
+5.  业务代码接收到 `ctx.signal` 信号，物理停止执行。
+6.  `Immediate Cleanup` 机制介入，回收账本资源。
 
-1. `Dispatcher` 会同步调用 `aborter.abort()`。
-2. `RpcActiveTaskHandle` 监听此信号，将内部状态立即切换为 `aborted`。
-3. 业务层代码接收到 `ctx.signal` 信号，物理停止执行。
-4. `Immediate Cleanup` 机制介入，回收账本资源。
+---
 
+## 9. 工具类继承体系
 ---
 
 ## 8. 工具类继承体系

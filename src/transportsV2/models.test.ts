@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { RPC_DEFAULTS, RPC_HEADERS, RpcError, RpcStatusCode } from './models';
+import { RpcServerDispatcher } from './dispatcher';
 
 describe('Models', () => {
   it('should export correct RPC_HEADERS constants', () => {
@@ -30,12 +31,38 @@ describe('Models', () => {
   });
 
   it('should initialize RpcError correctly', () => {
-    const err = new RpcError('Test Error', 400, 4001, { foo: 'bar' });
+    const err = new RpcError('Test Error', 400, 'bad_request', { foo: 'bar' });
     expect(err.message).toBe('Test Error');
-    expect(err.status).toBe(400);
-    expect(err.code).toBe(4001);
+    expect(err.code).toBe(400);
+    expect(err.status).toBe('bad_request');
     expect(err.data).toEqual({ foo: 'bar' });
     expect(err.name).toBe('RpcError');
     expect(err).toBeInstanceOf(Error);
+  });
+
+  describe('Dispatcher Error Handling Integration', () => {
+    it('should be handled by Dispatcher.handleError and retain custom data and status string', () => {
+      const dispatcher = new RpcServerDispatcher();
+      const mockRequest = { toolId: 'test', requestId: '1' } as any;
+
+      const err = new RpcError('Custom', 418, 'teapot', { x: 1 });
+      const res = dispatcher.handleError(mockRequest, err);
+
+      expect(res.status).toBe(418);
+      expect(res.error?.code).toBe(418);
+      expect(res.error?.status).toBe('teapot');
+      expect(res.error?.data).toEqual({ x: 1 });
+    });
+
+    it('should map special error names (like AbortError) to standard RpcStatusCodes', () => {
+      const dispatcher = new RpcServerDispatcher();
+      const mockRequest = { toolId: 'test', requestId: '1' } as any;
+
+      const abortErr = new Error('Aborted');
+      abortErr.name = 'AbortError';
+      
+      const res = dispatcher.handleError(mockRequest, abortErr);
+      expect(res.status).toBe(RpcStatusCode.TERMINATED);
+    });
   });
 });

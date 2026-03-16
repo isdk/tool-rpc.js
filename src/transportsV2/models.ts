@@ -34,6 +34,8 @@ export const RPC_DEFAULTS = {
   GLOBAL_TIMEOUT_MS: 30000,
   /** 'once' 模式下的物理清理兜底时间 (ms)，默认 1小时 */
   ONCE_FALLBACK_MS: 3600000,
+  /** 默认硬超时后的清理宽限期 (ms) */
+  TERMINATION_GRACE_MS: 500,
 };
 
 /**
@@ -66,7 +68,7 @@ export interface RpcTaskRetentionConfig {
 export type RpcTaskRetention = RpcTaskRetentionMode | number | RpcTaskRetentionConfig | 'once';
 
 /**
- * 状态码语义对照表
+ * 状态码语义对照表 (物理/逻辑响应状态码)
  */
 export enum RpcStatusCode {
   OK = 200,               // 成功
@@ -76,7 +78,7 @@ export enum RpcStatusCode {
   CONFLICT = 409,         // 请求 ID 冲突
   TERMINATED = 408,       // 硬超时终止
   INTERNAL_ERROR = 500,   // 执行错误
-  GATEWAY_TIMEOUT = 504,  // 没能来得及进入保持状态的超时
+  GATEWAY_TIMEOUT = 504,  // 响应超时
 }
 
 /**
@@ -107,11 +109,14 @@ export interface ToolRpcRequest {
  * 调度层向传输层的归一化结果对象
  */
 export interface ToolRpcResponse {
+  /** 响应状态码 (物理协议映射值，如 200, 404, 500) */
   status: number;
   data?: any;
   headers?: Record<string, string | number | string[] | undefined>;
   error?: {
+    /** 业务错误码 (对应 HTTP 错误码) */
     code: number;
+    /** 状态标识字符串 (可选，如 'not_found', 'missing_params') */
     status?: string;
     message: string;
     data?: any;
@@ -139,15 +144,18 @@ export interface ToolRpcContext extends ToolFuncContext {
 }
 
 export class RpcError extends Error {
-  public status: number;
+  /** 业务错误码 (始终是数字) */
   public code: number;
+  /** 可选的状态描述字符串 (如 'teapot', 'invalid_params') */
+  public status?: string;
+  /** 额外的业务负载数据 */
   public data?: any;
 
-  constructor(message: string, status: number = 500, code?: number, data?: any) {
+  constructor(message: string, code: number = 500, status?: string, data?: any) {
     super(message);
     this.name = 'RpcError';
+    this.code = code;
     this.status = status;
-    this.code = code || status;
     this.data = data;
   }
 }

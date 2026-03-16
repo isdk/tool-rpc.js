@@ -54,10 +54,10 @@
 
 | 字段 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `status` | `number` | 是 | **逻辑状态码**（详见下表）。 |
-| `data` | `any \| ReadableStream` | 否 | 执行结果或流式数据块。 |
+| **`status`** | `number` | 是 | **物理/逻辑响应状态码**。用于控制物理协议行为及客户端基础判定。取值范围遵循 HTTP 标准 (100-599)。 |
+| `data` | `any \| ReadableStream` | 否 | 执行成功时的业务结果或流式数据块。 |
 | `headers` | `Record<string, any>` | 否 | **响应元数据**。例如 `rpc-retry-after` (102 建议轮询间隔)。 |
-| `error` | `object` | 否 | 结构化错误：`{ code, message, stack, data }`。 |
+| **`error`** | `object` | 否 | **结构化错误负载**。包含以下字段：<br/>- **`code`** (number): 业务错误码，通常与顶层 `status` 一致。<br/>- **`status`** (string): 可选的语义化标识字符串（如 `'teapot'`）。<br/>- **`message`** (string): 错误描述。<br/>- **`data`** (any): 额外结构化负载。 |
 
 **状态码逻辑对照表：**
 
@@ -85,8 +85,11 @@
 
 为了确保错误能被传输层正确识别并序列化，推荐在工具函数中抛出 `RpcError`。
 
-* **构造函数**: `new RpcError(message, status?, code?, data?)`
-* **优势**: 自动携带逻辑状态码与业务 code，支持携带额外的 `data` 负载。
+* **构造函数**: `new RpcError(message, code: number = 500, status?: string, data?: any)`
+* **职责分工 (Status vs. Code)**：
+  - **`code` (number)**: 唯一的数字错误码。若在 100-599 范围内，`Dispatcher` 会自动将其映射为响应顶层的 `status`。
+  - **`status` (string)**: 可选的语义化标识字符串（方案一）。如 `'teapot'`, `'missing_field'`。
+* **映射逻辑**：`Dispatcher.handleError` 会根据 `err.code` 自动推导响应的物理状态码，并透传 `err.status` (string) 和 `err.data` (方案三)。 |
 
 ---
 
@@ -127,7 +130,9 @@
 - **两级裁决逻辑**：
     1. **响应超时 (Soft Deadline)**：触发 `102`。
     2. **硬死线 (Hard Deadline)**：触及资源保护阈值。触发后立即调用 `AbortSignal.abort()`。
-- **优雅退出 (Graceful Exit)**：支持 `terminationGracePeriod` 配置，死线触发后给予工具一定清理时间，随后执行物理资源强制回收。
+- **延迟中止 (Termination Grace Period)**：支持 `terminationGracePeriod` 配置（默认 500ms）。
+    - 硬死线触发后，Guard 先触发信号中止以通知业务代码进行清理，并**延迟抛出 408 异常**，确保资源回收的平滑性。
+    - 在宽限期结束后，若任务仍未自行退出，调度层正式返回 `408 Terminated` 响应。 |
 
 ### 4.5 通用生命周期管理 (Lifecycle Management)
 

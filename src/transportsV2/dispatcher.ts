@@ -29,17 +29,21 @@ export class RpcServerDispatcher {
   public globalTimeout: number = 30000;
   /** 兼容性配置 */
   public compat: RpcCompatOptions = DEFAULT_COMPAT_OPTIONS;
+  /** 硬超时后的清理宽限期 (ms) */
+  public terminationGraceMs: number = RPC_DEFAULTS.TERMINATION_GRACE_MS;
 
   constructor(options?: {
     registry?: any,
     tracker?: RpcActiveTaskTracker,
     globalTimeout?: number,
-    compat?: RpcCompatOptions
+    compat?: RpcCompatOptions,
+    terminationGraceMs?: number
   }) {
     this.registry = options?.registry;
     this.tracker = options?.tracker || new RpcActiveTaskTracker();
     if (options?.globalTimeout) this.globalTimeout = options.globalTimeout;
     if (options?.compat) this.compat = { ...DEFAULT_COMPAT_OPTIONS, ...options.compat };
+    if (options?.terminationGraceMs !== undefined) this.terminationGraceMs = options.terminationGraceMs;
     
     // 自动装载系统级工具
     this.systemRegistry.set('rpcTask', new RpcTaskResource());
@@ -216,29 +220,31 @@ export class RpcServerDispatcher {
   ): Promise<ToolRpcResponse> {
     const { finalTimeout, keepAliveOnTimeout } = config;
 
-    if (keepAliveOnTimeout) {
-      const guard = new RpcDeadlineGuard(finalTimeout, { onResponseTimeout: () => { } });
-      try {
-        const result = await Promise.race([promise, guard.getPromise()]);
-        guard.cancel();
-        return this.echoRequestId(request, this.normalizeResult(result));
-      } catch (err: any) {
-        if (err.code === RpcStatusCode.PROCESSING) {
-          return this.handle102(request);
-        }
-        throw err;
+    // 根据工具配置决定死线策略：
+    // - 开启 keepAlive: finalTimeout 作为软超时 (触发 102)
+    // - 未开启 keepAlive: finalTimeout 作为硬超时 (触发 408 并中止)
+    const guard = new RpcDeadlineGuard(
+      keepAliveOnTimeout ? finalTimeout : 0,
+      {
+        onHardDeadline: (reason) => aborter.abort(reason)
+      },
+      keepAliveOnTimeout ? undefined : finalTimeout,
+      this.terminationGraceMs
+    );
+
+    try {
+      const result = await Promise.race([promise, guard.start()]);
+      guard.cancel();
+      return this.echoRequestId(request, this.normalizeResult(result));
+    } catch (err: any) {
+      guard.cancel();
+
+      if (err.code === RpcStatusCode.PROCESSING && keepAliveOnTimeout) {
+        return this.handle102(request);
       }
-    } else {
-      try {
-        const result = await this.wrapWithSignal(promise, aborter.signal, finalTimeout);
-        return this.echoRequestId(request, this.normalizeResult(result));
-      } catch (err: any) {
-        // [关键修复]：如果是硬超时，必须中止控制器以更新 Handle 状态并允许清理
-        if (err.code === RpcStatusCode.TERMINATED) {
-           aborter.abort(err);
-        }
-        throw err;
-      }
+
+      // 注意：Hard Deadline 触发时已经在 guard 内部通过 onHardDeadline 执行了 aborter.abort(err)
+      throw err;
     }
   }
 
@@ -257,41 +263,6 @@ export class RpcServerDispatcher {
     if (!response.headers) response.headers = {};
     response.headers[RPC_HEADERS.REQUEST_ID] = request.requestId;
     return response;
-  }
-
-  private wrapWithSignal<T>(promise: Promise<T>, signal: AbortSignal, timeout: number): Promise<T> {
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        const err: any = new Error('Request Timeout');
-        err.name = 'AbortError';
-        err.code = RpcStatusCode.TERMINATED;
-        reject(err);
-      }, timeout);
-
-      const onAbort = () => {
-        clearTimeout(timer);
-        const err: any = new Error('Operation Aborted');
-        err.name = 'AbortError';
-        err.code = RpcStatusCode.TERMINATED;
-        reject(err);
-      };
-
-      if (signal.aborted) return onAbort();
-      signal.addEventListener('abort', onAbort, { once: true });
-
-      promise.then(
-        res => { 
-          clearTimeout(timer);
-          signal.removeEventListener('abort', onAbort); 
-          resolve(res); 
-        },
-        err => { 
-          clearTimeout(timer);
-          signal.removeEventListener('abort', onAbort); 
-          reject(err); 
-        }
-      );
-    });
   }
 
   private normalizeResult(result: any): ToolRpcResponse {
@@ -330,23 +301,30 @@ export class RpcServerDispatcher {
       };
     }
 
-    const rawCode = err.code || (typeof err.status === 'number' ? err.status : undefined);
-    const errCode = typeof rawCode === 'number' ? rawCode : 500;
+    // 1. 业务错误码 (Code) 优先使用原始 err.code，若无则兜底 500
+    const errorCode = typeof err.code === 'number' ? err.code : 500;
+    
+    // 2. 映射物理/响应状态码 (Status)：始终基于 errorCode 的 HTTP 语义
+    const responseStatus = (errorCode >= 100 && errorCode < 600) ? errorCode : 500;
 
-    let errStatus: string | undefined = undefined;
-    if (typeof err.status === 'string') {
-      errStatus = err.status;
-    } else if (errCode === 404) {
-      errStatus = 'not_found';
-    } else if (errCode === 400) {
-      errStatus = 'bad_request';
-    } else if (errCode === 409) {
-      errStatus = 'conflict';
+    // 3. 状态标识字符串 (Status String)：直接透传业务指定的标识
+    let errStatusStr = (typeof err.status === 'string') ? err.status : undefined;
+
+    // 4. 自动补全常见状态字符串 (如果业务没传)
+    if (!errStatusStr) {
+      if (responseStatus === 404) errStatusStr = 'not_found';
+      else if (responseStatus === 400) errStatusStr = 'bad_request';
+      else if (responseStatus === 409) errStatusStr = 'conflict';
     }
 
     return {
-      status: (errCode >= 400 && errCode < 600) ? errCode : 500,
-      error: { code: errCode, status: errStatus, message: err.message || String(err), data: err.data }
+      status: responseStatus,
+      error: { 
+        code: errorCode, 
+        status: errStatusStr, 
+        message: err.message || String(err), 
+        data: err.data 
+      }
     };
   }
 }
