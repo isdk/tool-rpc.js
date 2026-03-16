@@ -32,7 +32,38 @@ export const RPC_DEFAULTS = {
   RETRY_AFTER_MS: 1000,
   /** 默认全局硬超时时间 (ms) */
   GLOBAL_TIMEOUT_MS: 30000,
+  /** 'once' 模式下的物理清理兜底时间 (ms)，默认 1小时 */
+  ONCE_FALLBACK_MS: 3600000,
 };
+
+/**
+ * 任务完成后结果保留模式
+ */
+export enum RpcTaskRetentionMode {
+  /** 任务完成后立即销毁 */
+  None = 0,
+  /** 永久保留 (直至进程结束或手动删除) */
+  Permanent = -1,
+  /** 保留至第一次成功读取 (GET) */
+  Once = 'once'
+}
+
+/**
+ * 细粒度的保留策略配置
+ */
+export interface RpcTaskRetentionConfig {
+  /** 保留模式或毫秒数 */
+  mode: RpcTaskRetentionMode | number | 'once';
+  /** 'once' 模式下的物理清理兜底时间 (ms) */
+  onceFallbackMs?: number;
+  /** 结果保留的硬性上限时间 (ms)，无论何种模式超过此时间必删 */
+  maxRetentionMs?: number;
+}
+
+/**
+ * 灵活的任务保留策略配置类型
+ */
+export type RpcTaskRetention = RpcTaskRetentionMode | number | RpcTaskRetentionConfig | 'once';
 
 /**
  * 状态码语义对照表
@@ -42,6 +73,7 @@ export enum RpcStatusCode {
   PROCESSING = 102,       // 任务挂起，仍在后台处理
   BAD_REQUEST = 400,      // 参数/协议能力错误
   NOT_FOUND = 404,        // 找不到工具或资源
+  CONFLICT = 409,         // 请求 ID 冲突
   TERMINATED = 408,       // 硬超时终止
   INTERNAL_ERROR = 500,   // 执行错误
   GATEWAY_TIMEOUT = 504,  // 没能来得及进入保持状态的超时

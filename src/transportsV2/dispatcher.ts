@@ -1,8 +1,17 @@
-import { RpcActiveTaskTracker, ActiveTaskHandle } from './task-tracker';
-import { RPC_HEADERS, RPC_DEFAULTS, RpcStatusCode, ToolRpcRequest, ToolRpcResponse, ToolRpcContext } from './models';
+import { RpcActiveTaskTracker, RpcActiveTaskHandle } from './task-tracker';
+import { 
+  RPC_HEADERS, 
+  RPC_DEFAULTS, 
+  RpcStatusCode, 
+  ToolRpcRequest, 
+  ToolRpcResponse, 
+  ToolRpcContext,
+  RpcError
+} from './models';
 import { RpcDeadlineGuard } from './deadline-guard';
 import { bridgeV2RequestToV1Params, elevateV1ParamsToV2Request, RpcCompatOptions, DEFAULT_COMPAT_OPTIONS } from './compat';
 import { RpcTaskResource } from './rpc-task';
+import { randomUUID } from 'crypto';
 
 /**
  * 集中式 RPC 请求分发器。
@@ -47,7 +56,56 @@ export class RpcServerDispatcher {
    * @param registry 可选的替代注册表 (用于多路由挂载场景)
    */
   public async dispatch(request: ToolRpcRequest, registry?: any): Promise<ToolRpcResponse> {
-    // [兼容层] 向上提升路由信息：如果开启桥接，先将写在 params 内部的 id/act 提升到 Request 属性中
+    try {
+      // 1. [寻址阶段]：查找工具、预检能力、桥接参数
+      const { tool, params } = this.resolveTool(request, registry);
+
+      // 2. [准备阶段]：生成 Context、Aborter 和超时配置
+      const { context, abortController, timeoutConfig } = this.prepareContext(request, tool, params);
+
+      // 3. [执行阶段]：调用工具函数获取 Promise
+      const executionPromise = this.performExecution(tool, params, context);
+
+      // 4. [注册阶段]：立即登记到 Tracker，确保从执行那一刻起全链路可见
+      this.trackTask(request.requestId, executionPromise, abortController, tool, params, context);
+
+      // 5. [等待阶段]：处理执行结果与死线控制 (包含 102 处理)
+      const response = await this.waitForResult(request, executionPromise, abortController, timeoutConfig);
+      
+      // [即时清理] 若任务已完成且策略是不保留，则立即从账本移除
+      this.checkImmediateCleanup(request.requestId);
+      
+      return response;
+
+    } catch (err: any) {
+      this.checkImmediateCleanup(request.requestId);
+      return this.echoRequestId(request, this.handleError(request, err));
+    }
+  }
+
+  /**
+   * 检查是否需要立即回收账本资源
+   */
+  private checkImmediateCleanup(requestId: string) {
+    const handle = this.tracker.get(requestId);
+    if (handle && handle.shouldCleanup(Date.now())) {
+      this.tracker.remove(requestId);
+    }
+  }
+
+  /**
+   * [寻址阶段] 查找工具并准备参数
+   */
+  private resolveTool(request: ToolRpcRequest, registry?: any) {
+    // 1. [规范化] 从 Header 提取核心路由信息 (如果 Request 属性中没有)
+    if (!request.act && request.headers[RPC_HEADERS.ACT]) {
+      request.act = String(request.headers[RPC_HEADERS.ACT]);
+    }
+    if (!request.resId && request.headers[RPC_HEADERS.RES_ID]) {
+      request.resId = String(request.headers[RPC_HEADERS.RES_ID]);
+    }
+
+    // 2. [兼容层] 向上提升路由信息 (从 params 中提取)
     if (this.compat.enableParamBridge) {
       elevateV1ParamsToV2Request(request);
     }
@@ -56,50 +114,44 @@ export class RpcServerDispatcher {
     const { toolId } = request;
     
     let tool;
-    
-    // 1. 优先尝试从用户注册表中查找 (User Override)
     if (targetRegistry) {
       tool = targetRegistry.get ? targetRegistry.get(toolId) : targetRegistry[toolId];
     }
-
-    // 2. 如果没找到，尝试从系统注册表中查找 (System Fallback)
     if (!tool) {
       tool = this.systemRegistry.get(toolId);
     }
 
     if (!tool) {
       if (!targetRegistry) {
-         return this.echoRequestId(request, {
-          status: RpcStatusCode.INTERNAL_ERROR,
-          error: { code: 500, status: 'error', message: "Dispatcher Registry not mounted" }
-        });
+        throw new RpcError("Dispatcher Registry not mounted", RpcStatusCode.INTERNAL_ERROR);
       }
-      return this.echoRequestId(request, {
-        status: RpcStatusCode.NOT_FOUND,
-        error: { code: 404, status: 'not_found', message: `Tool not found: ${toolId}` }
-      });
+      throw new RpcError(`Tool not found: ${toolId}`, RpcStatusCode.NOT_FOUND);
     }
 
-    // 3. 协议校验 (新架构强制校验能力匹配)
     if (request.params?.stream && !tool.stream) {
-      return this.echoRequestId(request, {
-        status: RpcStatusCode.BAD_REQUEST,
-        error: { code: 400, status: 'bad_request', message: `Streaming not supported by tool: ${toolId}` }
-      });
+      throw new RpcError(`Streaming not supported by tool: ${toolId}`, RpcStatusCode.BAD_REQUEST);
     }
 
-    // 2. 超时协商
+    const params = this.compat.enableParamBridge
+      ? bridgeV2RequestToV1Params(request, { ...request.params })
+      : (request.params || {});
+
+    return { tool, params };
+  }
+
+  /**
+   * [准备阶段] 构建执行上下文与超时策略
+   */
+  private prepareContext(request: ToolRpcRequest, tool: any, params: any) {
     const clientTimeout = request.headers[RPC_HEADERS.TIMEOUT] ? parseInt(request.headers[RPC_HEADERS.TIMEOUT] as string) : undefined;
     const toolTimeoutObj = typeof tool.timeout === 'object' ? tool.timeout : { value: tool.timeout };
     const finalTimeout = clientTimeout || toolTimeoutObj.value || this.globalTimeout;
 
     const abortController = new AbortController();
-    const autoTerminateTimer = setTimeout(() => abortController.abort(), finalTimeout);
 
-    // 3. 构造 V2 Context (此时 request.id/act 已可能是提升后的值)
     const context: ToolRpcContext = {
       requestId: request.requestId,
-      traceId: request.traceId || (request.headers[RPC_HEADERS.TRACE_ID] as string),
+      traceId: request.traceId || (request.headers[RPC_HEADERS.TRACE_ID] as string) || randomUUID(),
       headers: request.headers,
       signal: abortController.signal,
       dispatcher: this,
@@ -109,66 +161,96 @@ export class RpcServerDispatcher {
       reply: request.raw?._res
     };
 
-    // 4. [兼容层] 向下灌注参数 (保持 V1 工具函数逻辑不碎裂)
-    const executionParams = this.compat.enableParamBridge
-      ? bridgeV2RequestToV1Params(request, { ...request.params })
-      : (request.params || {});
+    return {
+      context,
+      abortController,
+      timeoutConfig: {
+        finalTimeout,
+        keepAliveOnTimeout: !!toolTimeoutObj.keepAliveOnTimeout
+      }
+    };
+  }
 
-    // 5. 执行工具
+  /**
+   * [执行阶段] 触发业务逻辑
+   */
+  private performExecution(tool: any, params: any, context: ToolRpcContext): Promise<any> {
     (tool as any).ctx = context;
-    
-    let executionPromise: Promise<any>;
-
     try {
-      try {
-        executionPromise = Promise.resolve(tool.run ? tool.run(executionParams, context) : tool(executionParams, context));
-      } catch (syncError) {
-        executionPromise = Promise.reject(syncError);
-      }
-
-      let result: any;
-      if (toolTimeoutObj.keepAliveOnTimeout) {
-        const guard = new RpcDeadlineGuard(finalTimeout, { onResponseTimeout: () => { } });
-        result = await Promise.race([executionPromise, guard.getPromise()]);
-        guard.cancel();
-      } else {
-        result = await this.wrapWithSignal(executionPromise, abortController.signal);
-      }
-
-      clearTimeout(autoTerminateTimer);
-      return this.echoRequestId(request, this.normalizeResult(result));
-
-    } catch (err: any) {
-      clearTimeout(autoTerminateTimer);
-      if (err.code === 102 && toolTimeoutObj.keepAliveOnTimeout) {
-        // If executionPromise failed with 102, we might not have a promise to track if it was sync throw?
-        // Actually sync throw of 102 is rare but possible.
-        // However, for async 102 (long running), we need the original promise.
-        
-        // Ensure we have a valid promise for the tracker
-        if (!executionPromise!) {
-             executionPromise = Promise.reject(err);
-        }
-
-        const handle = new ActiveTaskHandle(
-          request.requestId,
-          executionPromise,
-          abortController,
-          !!tool.stream,
-          () => { if (tool.cleanup) tool.cleanup(executionParams, context); }
-        );
-        this.tracker.add(request.requestId, handle);
-        return this.echoRequestId(request, {
-          status: RpcStatusCode.PROCESSING,
-          headers: {
-            [RPC_HEADERS.RETRY_AFTER]: RPC_DEFAULTS.RETRY_AFTER_MS,
-            [RPC_HEADERS.REQUEST_ID]: request.requestId
-          },
-          data: { status: 102, message: "Task moved to background" }
-        });
-      }
-      return this.echoRequestId(request, this.handleError(request, err));
+      return Promise.resolve(tool.run ? tool.run(params, context) : tool(params, context));
+    } catch (syncError) {
+      return Promise.reject(syncError);
     }
+  }
+
+  /**
+   * [注册阶段] 向账本登记任务
+   */
+  private trackTask(
+    requestId: string, 
+    promise: Promise<any>, 
+    aborter: AbortController, 
+    tool: any, 
+    params: any, 
+    context: ToolRpcContext
+  ) {
+    const handle = new RpcActiveTaskHandle(
+      requestId,
+      promise,
+      aborter,
+      !!tool.stream,
+      () => { if (tool.cleanup) tool.cleanup(params, context); },
+      tool.retention
+    );
+    this.tracker.add(requestId, handle);
+  }
+
+  /**
+   * [等待阶段] 决定如何响应客户端 (同步等待还是转入后台)
+   */
+  private async waitForResult(
+    request: ToolRpcRequest, 
+    promise: Promise<any>, 
+    aborter: AbortController, 
+    config: { finalTimeout: number; keepAliveOnTimeout: boolean }
+  ): Promise<ToolRpcResponse> {
+    const { finalTimeout, keepAliveOnTimeout } = config;
+
+    if (keepAliveOnTimeout) {
+      const guard = new RpcDeadlineGuard(finalTimeout, { onResponseTimeout: () => { } });
+      try {
+        const result = await Promise.race([promise, guard.getPromise()]);
+        guard.cancel();
+        return this.echoRequestId(request, this.normalizeResult(result));
+      } catch (err: any) {
+        if (err.code === RpcStatusCode.PROCESSING) {
+          return this.handle102(request);
+        }
+        throw err;
+      }
+    } else {
+      try {
+        const result = await this.wrapWithSignal(promise, aborter.signal, finalTimeout);
+        return this.echoRequestId(request, this.normalizeResult(result));
+      } catch (err: any) {
+        // [关键修复]：如果是硬超时，必须中止控制器以更新 Handle 状态并允许清理
+        if (err.code === RpcStatusCode.TERMINATED) {
+           aborter.abort(err);
+        }
+        throw err;
+      }
+    }
+  }
+
+  private handle102(request: ToolRpcRequest): ToolRpcResponse {
+    return this.echoRequestId(request, {
+      status: RpcStatusCode.PROCESSING,
+      headers: {
+        [RPC_HEADERS.RETRY_AFTER]: RPC_DEFAULTS.RETRY_AFTER_MS,
+        [RPC_HEADERS.REQUEST_ID]: request.requestId
+      },
+      data: { status: 102, message: "Task moved to background" }
+    });
   }
 
   private echoRequestId(request: ToolRpcRequest, response: ToolRpcResponse): ToolRpcResponse {
@@ -177,19 +259,37 @@ export class RpcServerDispatcher {
     return response;
   }
 
-  private wrapWithSignal<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  private wrapWithSignal<T>(promise: Promise<T>, signal: AbortSignal, timeout: number): Promise<T> {
     return new Promise((resolve, reject) => {
-      const onAbort = () => {
+      const timer = setTimeout(() => {
         const err: any = new Error('Request Timeout');
         err.name = 'AbortError';
-        err.code = 408;
+        err.code = RpcStatusCode.TERMINATED;
+        reject(err);
+      }, timeout);
+
+      const onAbort = () => {
+        clearTimeout(timer);
+        const err: any = new Error('Operation Aborted');
+        err.name = 'AbortError';
+        err.code = RpcStatusCode.TERMINATED;
         reject(err);
       };
+
       if (signal.aborted) return onAbort();
       signal.addEventListener('abort', onAbort, { once: true });
+
       promise.then(
-        res => { signal.removeEventListener('abort', onAbort); resolve(res); },
-        err => { signal.removeEventListener('abort', onAbort); reject(err); }
+        res => { 
+          clearTimeout(timer);
+          signal.removeEventListener('abort', onAbort); 
+          resolve(res); 
+        },
+        err => { 
+          clearTimeout(timer);
+          signal.removeEventListener('abort', onAbort); 
+          reject(err); 
+        }
       );
     });
   }
@@ -202,7 +302,6 @@ export class RpcServerDispatcher {
   }
 
   public handleError(request: ToolRpcRequest, err: any): ToolRpcResponse {
-    // 1. Handle primitive errors (string, number, etc)
     if (typeof err !== 'object' || err === null) {
       return {
         status: 500,
@@ -210,8 +309,7 @@ export class RpcServerDispatcher {
       };
     }
 
-    // 2. Handle standard Error objects and duck-typed errors
-    if (err.name === 'AbortError' || err.code === 'ETIMEDOUT' || err.code === 20 || err.code === 408) {
+    if (err.name === 'AbortError' || err.code === 'ETIMEDOUT' || err.code === 20 || err.code === RpcStatusCode.TERMINATED) {
       return {
         status: RpcStatusCode.TERMINATED,
         error: { code: 408, status: 'timeout', message: err.message || "Request Timeout" }
@@ -225,6 +323,13 @@ export class RpcServerDispatcher {
       };
     }
 
+    if (err.status === RpcStatusCode.CONFLICT || err.code === RpcStatusCode.CONFLICT) {
+      return {
+        status: RpcStatusCode.CONFLICT,
+        error: { code: 409, status: 'conflict', message: err.message || "Request ID Conflict" }
+      };
+    }
+
     const rawCode = err.code || (typeof err.status === 'number' ? err.status : undefined);
     const errCode = typeof rawCode === 'number' ? rawCode : 500;
 
@@ -235,6 +340,8 @@ export class RpcServerDispatcher {
       errStatus = 'not_found';
     } else if (errCode === 400) {
       errStatus = 'bad_request';
+    } else if (errCode === 409) {
+      errStatus = 'conflict';
     }
 
     return {

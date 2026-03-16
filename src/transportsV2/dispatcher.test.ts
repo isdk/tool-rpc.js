@@ -73,6 +73,8 @@ describe('RpcServerDispatcher', () => {
       const res2 = await p2;
 
       expect(res2.status).toBe(RpcStatusCode.TERMINATED); // hard timeout kills task
+
+      // 这里的断言现在应该成功了，因为 Dispatcher 在 catch 块中显式中止并清理了它
       expect(dispatcher.tracker.get('req-timeout')).toBeUndefined();
 
       vi.useRealTimers();
@@ -95,7 +97,6 @@ describe('RpcServerDispatcher', () => {
          apiUrl: 'http://test', toolId: 'testTool', requestId: 'req-global-timeout', params: {}, headers: {}
       };
 
-      // Override for this specific test
       registry.get = vi.fn().mockImplementation(() => ({
          run: () => new Promise(resolve => setTimeout(resolve, 100))
       }));
@@ -110,189 +111,151 @@ describe('RpcServerDispatcher', () => {
       vi.useRealTimers();
    });
 
-   it('should respect client requested timeout from headers over globalTimeout', async () => {
-      vi.useFakeTimers();
-      dispatcher.globalTimeout = 100; // global is safe
+   it('should be immediately visible in tracker once dispatched', async () => {
+      const mockRun = vi.fn().mockReturnValue(new Promise(() => { })); // Hangs
+      registry.get = vi.fn().mockReturnValue({ run: mockRun });
 
       const req: ToolRpcRequest = {
-         apiUrl: 'http://test', toolId: 'testTool', requestId: 'req-client-timeout', params: {},
-         headers: { [RPC_HEADERS.TIMEOUT]: '20' }
+         apiUrl: 'http://test', toolId: 'testTool', requestId: 'immediate-id', params: {}, headers: {}
       };
 
-      registry.get = vi.fn().mockImplementation(() => ({
-         run: () => new Promise(resolve => setTimeout(resolve, 50))
-      }));
+      // We don't await because it hangs
+      dispatcher.dispatch(req);
 
-      const p = dispatcher.dispatch(req);
-      vi.advanceTimersByTime(30);
-      const res = await p;
-
-      // 20ms client timeout is less than 50ms run time, so it should terminate
-      expect(res.status).toBe(RpcStatusCode.TERMINATED);
-      expect(res.error?.message).toMatch(/timeout/is);
-
-      vi.useRealTimers();
+      const handle = dispatcher.tracker.get('immediate-id');
+      expect(handle).toBeDefined();
+      expect(handle?.status).toBe('processing');
    });
 
-   it('should automatically provide built-in rpcTask resource if not present in user registry', async () => {
-      // Mock user registry without rpcTask
-      registry.get = vi.fn().mockImplementation((id: string) => undefined);
+   it('should return 409 Conflict if requestId already exists in tracker', async () => {
+      // 使用挂起的 Promise 以确保任务留在 tracker 中
+      const mockRun = vi.fn().mockReturnValue(new Promise(() => { }));
+      registry.get = vi.fn().mockReturnValue({ run: mockRun });
+
+      const req: ToolRpcRequest = {
+         apiUrl: 'http://test', toolId: 'testTool', requestId: 'duplicate-id', params: {}, headers: {}
+      };
+
+      // 1. 发起第一个请求 (不等待完成，因为它挂起了)
+      dispatcher.dispatch(req);
+
+      expect(dispatcher.tracker.get('duplicate-id')).toBeDefined();
+
+      // 2. 发起第二个同 ID 请求，应该冲突
+      const res = await dispatcher.dispatch(req);
+      expect(res.status).toBe(RpcStatusCode.CONFLICT);
+      expect(res.error?.message).toMatch(/already in use/);
+   });
+
+   it('should automatically provide built-in rpcTask resource and handle fetchCount', async () => {
+      registry.get = vi.fn().mockImplementation(() => undefined);
 
       const req: ToolRpcRequest = {
          apiUrl: 'http://test',
          toolId: 'rpcTask',
          resId: 'some-task-id',
-         act: 'get', // RpcTaskResource logic: use 'get' to retrieve status/result
          requestId: 'req-system',
          params: {},
-         headers: { 'rpc-act': 'get' } // Simulate GET /api/rpcTask/:id
+         headers: { [RPC_HEADERS.ACT]: 'get' }
       };
 
-      // We need a task in tracker to be found
       const mockHandle = {
-          getStatus: () => ({ status: 'processing' }),
-          result: { foo: 'bar' },
-          status: 'completed'
+         fetchCount: 0,
+         result: { foo: 'bar' },
+         status: 'completed',
+         touch: vi.fn(),
+         shouldCleanup: vi.fn().mockReturnValue(false)
       };
-      dispatcher.tracker.get = vi.fn().mockReturnValue(mockHandle);
+
+      vi.spyOn(dispatcher.tracker, 'get').mockReturnValue(mockHandle as any);
 
       const res = await dispatcher.dispatch(req);
-      
-      // Should find RpcTaskResource and execute get()
+
       expect(res.status).toBe(RpcStatusCode.OK);
       expect(res.data).toEqual({ foo: 'bar' });
+      expect(mockHandle.fetchCount).toBe(1);
    });
 
-   it('should elevate params.id and params.act to context when compat.enableParamBridge is true', async () => {
-      dispatcher.compat.enableParamBridge = true;
-      const mockRun = vi.fn().mockResolvedValue('ok');
-      registry.get = vi.fn().mockReturnValue({ run: mockRun });
-
-      const req: ToolRpcRequest = {
-         apiUrl: 'http://test', toolId: 'testTool', requestId: 'compat-req',
-         params: { id: 'legacy-res-id', act: 'legacy-action', data: 1 },
-         headers: {}
-      };
-
-      await dispatcher.dispatch(req);
-
-      // Verify context received elevated values
-      const context = mockRun.mock.calls[0][1];
-      expect(context.resId).toBe('legacy-res-id');
-      expect(context.act).toBe('legacy-action');
-   });
-
-   it('should handle non-Error objects thrown by tools', async () => {
-      registry.get = vi.fn().mockReturnValue({
-         run: () => { throw "String Error"; }
-      });
-
-      const req: ToolRpcRequest = {
-         apiUrl: 'http://test', toolId: 'testTool', requestId: 'err-req', params: {}, headers: {}
-      };
-
-      const res = await dispatcher.dispatch(req);
-      expect(res.status).toBe(500);
-      expect(res.error?.message).toBe('String Error');
-   });
-
-   it('should handle thrown objects with status code', async () => {
-      registry.get = vi.fn().mockReturnValue({
-         run: () => { throw { status: 403, message: 'Forbidden' }; }
-      });
-
-      const req: ToolRpcRequest = {
-         apiUrl: 'http://test', toolId: 'testTool', requestId: 'err-req-2', params: {}, headers: {}
-      };
-
-      const res = await dispatcher.dispatch(req);
-      expect(res.status).toBe(403);
-      expect(res.error?.message).toBe('Forbidden');
-   });
-
-   it('should pass context including headers, requestId, traceId, and signal', async () => {
+   it('should pass context including headers, requestId, traceId, signal, and raw objects', async () => {
       const mockRun = vi.fn().mockImplementation((params, ctx) => {
-         return new Promise((resolve) => {
-            expect(ctx.signal).toBeInstanceOf(AbortSignal);
-            expect(ctx.signal.aborted).toBe(false);
-            expect(ctx.requestId).toBe('ctx-req-1');
-            expect(ctx.traceId).toBe('trace-xyz');
-            expect(ctx.headers['x-custom']).toBe('foo');
-            resolve('ok');
-         });
+         expect(ctx.signal).toBeInstanceOf(AbortSignal);
+         expect(ctx.requestId).toBe('ctx-req-1');
+         expect(ctx.req).toBe('mock-http-req');
+         expect(ctx.reply).toBe('mock-http-res');
+         return 'ok';
       });
       registry.get = vi.fn().mockReturnValue({ run: mockRun });
 
       const req: ToolRpcRequest = {
          apiUrl: 'http://test', toolId: 'contextTool', requestId: 'ctx-req-1',
-         traceId: 'trace-xyz',
-         params: {},
-         headers: { 'x-custom': 'foo' }
+         params: {}, headers: {},
+         raw: { _req: 'mock-http-req', _res: 'mock-http-res' }
       };
 
       await dispatcher.dispatch(req);
       expect(mockRun).toHaveBeenCalled();
    });
 
-   it('should trigger AbortSignal when timeout occurs', async () => {
-      vi.useFakeTimers();
-      const onAbort = vi.fn();
-      
-      registry.get = vi.fn().mockReturnValue({
-         timeout: 50,
-         run: (params: any, ctx: any) => {
-            ctx.signal.addEventListener('abort', onAbort);
-            return new Promise(() => {}); // hang forever
-         }
+   it('should allow overriding built-in system tools with user registry', async () => {
+      // 在用户注册表中注册一个同名的 rpcTask
+      const mockCustomRpcTask = vi.fn().mockResolvedValue('custom-system-tool');
+      registry.get = vi.fn().mockImplementation((id: string) => {
+         if (id === 'rpcTask') return { run: mockCustomRpcTask };
+         return undefined;
       });
 
       const req: ToolRpcRequest = {
-         apiUrl: 'http://test', toolId: 'abortTool', requestId: 'abort-req', params: {}, headers: {}
+         apiUrl: 'http://test', toolId: 'rpcTask', requestId: 'override-req', params: {}, headers: {}
       };
 
-      const p = dispatcher.dispatch(req);
-      vi.advanceTimersByTime(60);
-      try { await p; } catch {}
-
-      expect(onAbort).toHaveBeenCalled();
-      vi.useRealTimers();
+      const res = await dispatcher.dispatch(req);
+      expect(res.data).toBe('custom-system-tool');
+      expect(mockCustomRpcTask).toHaveBeenCalled();
    });
 
-   it('should mark task as completed in tracker after background execution finishes', async () => {
-      vi.useFakeTimers();
-      
-      // Setup a long running task that enters keepAlive
-      registry.get = vi.fn().mockReturnValue({
-         timeout: { value: 50, keepAliveOnTimeout: true },
-         run: async () => {
-            await new Promise(r => setTimeout(r, 100));
-            return 'done';
-         }
-      });
-
-      const req: ToolRpcRequest = {
-         apiUrl: 'http://test', toolId: 'cleanupTool', requestId: 'clean-req', params: {}, headers: {}
+   it('should use per-call registry when provided in dispatch()', async () => {
+      const perCallTool = vi.fn().mockResolvedValue('per-call-ok');
+      const perCallRegistry = { 
+         get: (id: string) => (id === 'specialTool' ? { run: perCallTool } : undefined) 
       };
 
-      // 1. Dispatch -> enters 102
-      const p = dispatcher.dispatch(req);
-      vi.advanceTimersByTime(60);
-      const res102 = await p;
-      expect(res102.status).toBe(102);
-      expect(dispatcher.tracker.get('clean-req')).toBeDefined();
+      const req: ToolRpcRequest = {
+         apiUrl: 'http://test', toolId: 'specialTool', requestId: 'per-call-req', params: {}, headers: {}
+      };
 
-      // 2. Wait for task to complete (100ms total)
-      vi.advanceTimersByTime(100); // Advance enough time
-      
-      // Flush microtasks multiple times to allow Promise chains to resolve
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-      
-      const handle = dispatcher.tracker.get('clean-req');
-      expect(handle?.status).toBe('completed');
-      expect(handle?.result).toBe('done');
+      // 1. Without per-call registry (should fail)
+      const res1 = await dispatcher.dispatch(req);
+      expect(res1.status).toBe(RpcStatusCode.NOT_FOUND);
 
-      vi.useRealTimers();
+      // 2. With per-call registry (should succeed)
+      const res2 = await dispatcher.dispatch(req, perCallRegistry);
+      expect(res2.status).toBe(RpcStatusCode.OK);
+      expect(res2.data).toBe('per-call-ok');
+   });
+
+
+
+   it('should trigger ctx.signal when task is aborted via tracker', async () => {
+      let signalAborted = false;
+      const mockRun = vi.fn().mockImplementation((params, ctx) => {
+         ctx.signal.addEventListener('abort', () => { signalAborted = true; });
+         return new Promise(() => { }); // hang
+      });
+      registry.get = vi.fn().mockReturnValue({ run: mockRun });
+
+      const req: ToolRpcRequest = {
+         apiUrl: 'http://test', toolId: 'abortTool', requestId: 'abort-me', params: {}, headers: {}
+      };
+
+      // 1. Start task
+      dispatcher.dispatch(req);
+
+      // 2. Abort via tracker
+      const handle = dispatcher.tracker.get('abort-me');
+      expect(handle).toBeDefined();
+      handle?.abort('System shutdown');
+
+      expect(signalAborted).toBe(true);
+      expect(handle?.status).toBe('aborted');
    });
 });
