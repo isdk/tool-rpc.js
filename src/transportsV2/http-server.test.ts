@@ -72,7 +72,11 @@ describe('HttpServerToolTransport', () => {
          }
       } as unknown as http.IncomingMessage;
 
-      const mockRes = { setHeader: vi.fn(), end: vi.fn() } as unknown as http.ServerResponse;
+      const mockRes = { 
+         setHeader: vi.fn(), 
+         end: vi.fn(),
+         on: vi.fn() // Add mock listener
+      } as unknown as http.ServerResponse;
 
       await (transport as any).processIncomingCall(mockReq, mockRes);
 
@@ -114,7 +118,11 @@ describe('HttpServerToolTransport', () => {
          on: (event: string, cb: any) => { if (event === 'end') cb(); }
       } as unknown as http.IncomingMessage;
 
-      const mockRes = { setHeader: vi.fn(), end: vi.fn() } as unknown as http.ServerResponse;
+      const mockRes = { 
+         setHeader: vi.fn(), 
+         end: vi.fn(),
+         on: vi.fn() // Add mock listener
+      } as unknown as http.ServerResponse;
 
       await (transport as any).processIncomingCall(mockReq, mockRes);
 
@@ -136,7 +144,11 @@ describe('HttpServerToolTransport', () => {
          on: (event: string, cb: any) => { if (event === 'end') cb(); }
       } as unknown as http.IncomingMessage;
 
-      const mockRes = { setHeader: vi.fn(), end: vi.fn() } as unknown as http.ServerResponse;
+      const mockRes = { 
+         setHeader: vi.fn(), 
+         end: vi.fn(),
+         on: vi.fn() // Add mock listener
+      } as unknown as http.ServerResponse;
 
       await (transport as any).processIncomingCall(mockReq, mockRes);
 

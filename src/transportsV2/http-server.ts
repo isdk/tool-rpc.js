@@ -148,7 +148,7 @@ export class HttpServerToolTransport extends ServerToolTransport {
       if (rpcRes.status === 102 || rpcRes.status === RpcStatusCode.PROCESSING) {
          // [V2 HTTP COMPAT] 物理层映射：102 是信息性状态码，由于 Node.js fetch (undici) 会在处理完 1xx 后期望后续
          // 真正的最终响应，如果此时直接 end() 会导致连接中断。
-         // 映射为 202 Accepted 可确保现代 fetch 正确接收到“已接受并处理中”的信息。
+         // 映射为 202 Accepted 可确保 modern fetch 正确接收到“已接受并处理中”的信息。
          rawRes.statusCode = 202;
          const dataPayload = rpcRes.data || { status: 102, message: 'Task moved to background' };
          rawRes.end(JSON.stringify(dataPayload));
@@ -162,9 +162,30 @@ export class HttpServerToolTransport extends ServerToolTransport {
 
       const result = rpcRes.data;
       if (result && typeof result.pipe === 'function') {
+         // Node.js Stream
          result.pipe(rawRes);
+         rawRes.on('close', () => {
+            if (!result.destroyed && typeof result.destroy === 'function') {
+               result.destroy();
+            }
+         });
       } else if (result && typeof (Readable as any).fromWeb === 'function' && result instanceof ReadableStream) {
-         (Readable as any).fromWeb(result).pipe(rawRes);
+         // Web Stream
+         const nodeStream = (Readable as any).fromWeb(result);
+         nodeStream.on('error', () => { }); // 防止未处理错误导致异常
+         nodeStream.pipe(rawRes);
+         rawRes.on('close', () => {
+            const requestId = rpcRes.headers?.[RPC_HEADERS.REQUEST_ID] as string;
+            if (requestId) {
+               const handle = this.dispatcher.tracker.get(requestId);
+               if (handle) {
+                  handle.abort('Physical connection closed');
+               }
+            }
+            if (!nodeStream.destroyed) {
+               nodeStream.destroy('Physical connection closed' as any);
+            }
+         });
       } else {
          rawRes.end(JSON.stringify(result === undefined ? null : result));
       }

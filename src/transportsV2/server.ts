@@ -34,34 +34,34 @@ export abstract class ServerToolTransport extends ToolTransport implements IServ
     return this._start(options);
   };
 
-   /**
-    * Template Method：处理物理请求流水线。
-    * 下层具体协议收到请求后，将其转化为内部结构，送入 Dispatcher 并写回。
-    */
+  /**
+   * Template Method：处理物理请求流水线。
+   * 下层具体协议收到请求后，将其转化为内部结构，送入 Dispatcher 并写回。
+   */
   protected async processIncomingCall(rawReq: any, rawRes: any, registry?: any): Promise<void> {
     try {
-       const rpcReq = await this.toRpcRequest(rawReq);
-       
-       // 架构层校验：调用所属 Manager 实例进行策略审计 (SSRF 防御、白名单等)
-       this.manager.validateRpcRequest(rpcReq);
+      const rpcReq = await this.toRpcRequest(rawReq);
 
-       const rpcRes = await this.dispatcher.dispatch(rpcReq, registry);
-       await this.sendRpcResponse(rpcRes, rawRes);
+      // 架构层校验：调用所属 Manager 实例进行策略审计 (SSRF 防御、白名单等)
+      this.manager.validateRpcRequest(rpcReq);
+
+      const rpcRes = await this.dispatcher.dispatch(rpcReq, registry);
+      await this.sendRpcResponse(rpcRes, rawRes);
     } catch (err: any) {
-       // 顶级异常防护 (Top-level pipeline guard)
-       const rawCode = err.code || (typeof err.status === 'number' ? err.status : undefined);
-       const errCode = typeof rawCode === 'number' ? rawCode : 500;
-       const errStatus = typeof err.status === 'string' ? err.status : 'error';
+      // 顶级异常防护 (Top-level pipeline guard)
+      const rawCode = err.code || (typeof err.status === 'number' ? err.status : undefined);
+      const errCode = typeof rawCode === 'number' ? rawCode : 500;
+      const errStatus = typeof err.status === 'string' ? err.status : 'error';
 
-       await this.sendRpcResponse({ 
-          status: (errCode >= 400 && errCode < 600) ? errCode : 500, 
-          error: { 
-            message: err.message || "Transport Pipeline Error",
-            code: errCode,
-            status: errStatus,
-            data: err.data
-          }
-       }, rawRes);
+      await this.sendRpcResponse({
+        status: (errCode >= 400 && errCode < 600) ? errCode : 500,
+        error: {
+          message: err.message || "Transport Pipeline Error",
+          code: errCode,
+          status: errStatus,
+          data: err.data
+        }
+      }, rawRes);
     }
   }
 

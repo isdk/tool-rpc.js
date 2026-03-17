@@ -139,7 +139,10 @@ await manager.stopAll();
 
 ### 4.2 即时清理机制 (Immediate Cleanup)
 
-这是 V2 的重要性能优化：在 `dispatch` 响应返回后，系统立即根据任务的 `retention` 策略评估其是否符合回收条件。若符合（如策略为 `None`），则立即将其从内存移除，无需等待全局的每分钟扫描周期。
+这是 V2 的重要性能优化：在 `dispatch` 响应返回后，系统立即根据任务的 `retention` 策略评估其是否符合回收条件。
+
+*   **常规任务**：若符合条件（如策略为 `None`），响应返回后立即移除。
+*   **流式响应**：清理评估将**自动延迟**。Dispatcher 会通过 `TransformStream` 监听流的 `flush` (结束) 或 `cancel` (取消)。只有在流传输彻底完成后，才会执行最后的清理逻辑。
 
 ---
 
@@ -155,6 +158,12 @@ await manager.stopAll();
   * **兜底清理**：支持 `onceFallbackMs`（默认 1 小时），防止因客户端异常失联导致的内存泄露。
 * **`number` (ms)**：任务完成后保留指定的时长。
 * **`maxRetentionMs`**：系统全局硬上限，无论设置何种模式，超过此时间必须被物理回收。
+
+### 5.2 任务句柄 (RpcActiveTaskHandle) 的流联动
+当 `tool.run` 返回一个 Web `ReadableStream` 时：
+1.  Dispatcher 调用 `handle.setOutputStream(stream)` 将流绑定到任务。
+2.  Handle 的 `streamPending` 标记变为 `true`。
+3.  此时，即使调用 `aborter.abort()` 也会联动调用 `stream.cancel()`，确保物理资源被正确释放。
 
 ### 5.2 系统工具 `rpcTask`
 
@@ -201,7 +210,11 @@ await manager.stopAll();
 ### 8.1 HttpServerToolTransport
 *   **寻址优先级**：Header 显式指令 > URL Path 降级解析 (`/api/tool/resId`模式)。
 *   **HTTP 102 信号映射**：由于多数现代 fetch 工具（如 `undici`）对 1xx 信息性状态码的处理存在不确定性，V2 在物理层将 `102 Processing` 逻辑映射为 **`202 Accepted`**，并返回包含任务 ID 的 Body 负载，确保客户端能稳定解析。
-*   **流式背压**：原生支持 `ReadableStream` 管道透传，具备自动检测 `.pipe` 的能力。
+*   **物理连接联动与资源清理**：
+    *   HttpServer 会监听原生响应对象的 `close` 事件。
+    *   一旦物理连接非正常断开（如客户端关闭浏览器或网络中断），Transport 会调用 `handle.abort('Physical connection closed')`。
+    *   这会触发流的 `cancel` 和业务逻辑的 `AbortSignal` 联动，确保服务端不会继续执行已无受众的任务。
+*   **流式背压**：原生支持 `ReadableStream` 管道透传，通过 `Readable.fromWeb` 桥接至 Node.js 网络层。
 
 ### 8.2 信号联动与延迟中止
 当任务触发硬超时（Hard Deadline）或收到取消请求时：

@@ -1,10 +1,10 @@
 import { RpcActiveTaskTracker, RpcActiveTaskHandle } from './task-tracker';
-import { 
-  RPC_HEADERS, 
-  RPC_DEFAULTS, 
-  RpcStatusCode, 
-  ToolRpcRequest, 
-  ToolRpcResponse, 
+import {
+  RPC_HEADERS,
+  RPC_DEFAULTS,
+  RpcStatusCode,
+  ToolRpcRequest,
+  ToolRpcResponse,
   ToolRpcContext,
   RpcError
 } from './models';
@@ -12,6 +12,7 @@ import { RpcDeadlineGuard } from './deadline-guard';
 import { bridgeV2RequestToV1Params, elevateV1ParamsToV2Request, RpcCompatOptions, DEFAULT_COMPAT_OPTIONS } from './compat';
 import { RpcTaskResource } from './rpc-task';
 import { randomUUID } from 'crypto';
+import { createCallbacksTransformer } from '@isdk/tool-func';
 
 /**
  * 集中式 RPC 请求分发器。
@@ -44,7 +45,7 @@ export class RpcServerDispatcher {
     if (options?.globalTimeout) this.globalTimeout = options.globalTimeout;
     if (options?.compat) this.compat = { ...DEFAULT_COMPAT_OPTIONS, ...options.compat };
     if (options?.terminationGraceMs !== undefined) this.terminationGraceMs = options.terminationGraceMs;
-    
+
     // 自动装载系统级工具
     this.systemRegistry.set('rpcTask', new RpcTaskResource());
   }
@@ -75,10 +76,10 @@ export class RpcServerDispatcher {
 
       // 5. [等待阶段]：处理执行结果与死线控制 (包含 102 处理)
       const response = await this.waitForResult(request, executionPromise, abortController, timeoutConfig);
-      
+
       // [即时清理] 若任务已完成且策略是不保留，则立即从账本移除
       this.checkImmediateCleanup(request.requestId);
-      
+
       return response;
 
     } catch (err: any) {
@@ -116,7 +117,7 @@ export class RpcServerDispatcher {
 
     const targetRegistry = registry || this.registry;
     const { toolId } = request;
-    
+
     let tool;
     if (targetRegistry) {
       tool = targetRegistry.get ? targetRegistry.get(toolId) : targetRegistry[toolId];
@@ -191,11 +192,11 @@ export class RpcServerDispatcher {
    * [注册阶段] 向账本登记任务
    */
   private trackTask(
-    requestId: string, 
-    promise: Promise<any>, 
-    aborter: AbortController, 
-    tool: any, 
-    params: any, 
+    requestId: string,
+    promise: Promise<any>,
+    aborter: AbortController,
+    tool: any,
+    params: any,
     context: ToolRpcContext
   ) {
     const handle = new RpcActiveTaskHandle(
@@ -213,9 +214,9 @@ export class RpcServerDispatcher {
    * [等待阶段] 决定如何响应客户端 (同步等待还是转入后台)
    */
   private async waitForResult(
-    request: ToolRpcRequest, 
-    promise: Promise<any>, 
-    aborter: AbortController, 
+    request: ToolRpcRequest,
+    promise: Promise<any>,
+    aborter: AbortController,
     config: { finalTimeout: number; keepAliveOnTimeout: boolean }
   ): Promise<ToolRpcResponse> {
     const { finalTimeout, keepAliveOnTimeout } = config;
@@ -233,8 +234,31 @@ export class RpcServerDispatcher {
     );
 
     try {
-      const result = await Promise.race([promise, guard.start()]);
+      let result = await Promise.race([promise, guard.start()]);
       guard.cancel();
+
+      // [流式生命周期闭环]
+      // 如果返回的是 Web ReadableStream，我们需要挂载观测器以监听流的结束/中止
+      // 使用鸭子类型检查以兼容不同的 ReadableStream 实现 (Polyfill/Native)
+      if (result && typeof result.getReader === 'function' && typeof result.cancel === 'function') {
+        const handle = this.tracker.get(request.requestId);
+        if (handle) {
+          const transformer = createCallbacksTransformer({
+            onClose: () => {
+              handle.markStreamFinished();
+              handle.onCleanup();
+              if (handle.shouldCleanup(Date.now())) {
+                this.tracker.remove(request.requestId);
+              }
+            }
+          });
+          // 包装流
+          result = result.pipeThrough(transformer);
+          // 让 Handle 持有流引用，以便在逻辑中止时能主动 cancel 流
+          handle.setOutputStream(result);
+        }
+      }
+
       return this.echoRequestId(request, this.normalizeResult(result));
     } catch (err: any) {
       guard.cancel();
@@ -303,7 +327,7 @@ export class RpcServerDispatcher {
 
     // 1. 业务错误码 (Code) 优先使用原始 err.code，若无则兜底 500
     const errorCode = typeof err.code === 'number' ? err.code : 500;
-    
+
     // 2. 映射物理/响应状态码 (Status)：始终基于 errorCode 的 HTTP 语义
     const responseStatus = (errorCode >= 100 && errorCode < 600) ? errorCode : 500;
 
@@ -319,11 +343,11 @@ export class RpcServerDispatcher {
 
     return {
       status: responseStatus,
-      error: { 
-        code: errorCode, 
-        status: errStatusStr, 
-        message: err.message || String(err), 
-        data: err.data 
+      error: {
+        code: errorCode,
+        status: errStatusStr,
+        message: err.message || String(err),
+        data: err.data
       }
     };
   }

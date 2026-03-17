@@ -122,7 +122,11 @@
   - **非可取消任务**：
     - **逻辑丢弃**：切断响应链，结果不再回传。
     - **物理断连**：强行触发 `AbortSignal.abort()`，若涉及流，物理连接将根据信号释放。
-- **信号联动**：Handle 深度联动 `AbortSignal`。一旦信号触发，任务状态立即强制同步为 `aborted`，确保账本状态与物理执行状态实时同步。
+- **流式生命周期管理**：
+  - **`streamPending` 状态**：专门用于追踪 Web Stream 的传输状态。即使业务 Promise 已 resolve，只要流未结束，任务仍视为“活跃”。
+  - **输出流绑定 (`setOutputStream`)**：Dispatcher 在识别到返回值为 `ReadableStream` 时，将其包装并绑定到 Handle，确保 Handle 能够感知并控制流的物理生命周期。
+  - **自动清理联动**：通过监听流的 `flush` (正常结束) 或 `cancel` (中止)，Handle 自动调用 `markStreamFinished()` 并触发 Retention 评估。
+- **信号联动**：Handle 深度联动 `AbortSignal`。一旦信号触发，任务状态立即强制同步为 `aborted`，并主动调用 `outputStream.cancel(reason)` 以释放底层资源，确保账本状态与物理执行状态实时同步。
 - **跨协议可见性**：Tracker 独立于传输协议，支持在同作用域下通过信道 A 发起、信道 B 监控/取消。
 
 ### 4.4 RpcDeadlineGuard (执行死线守卫)
@@ -150,9 +154,11 @@
 - **信号透传**：调度器自动将产生的 `signal` 链接至业务层的 `this.ctx.signal`。
 - **硬性约束**：同步阻塞任务必须定期显式检查 `this.ctx.signal.aborted` 状态。
 
-### 5.2 流式观测器与重组 (Streaming)
+### 5.2 流式观测器与生命周期闭环 (Streaming Lifecycle)
 
-- **全生命周期监控**：利用 `createCallbacksTransformer` 监听流事件。`onFinal` 钩子负责通知任务句柄进行最终清理。
+- **全生命周期监控**：利用 **`TransformStream`** (Web Standard) 在 `Dispatcher` 层包装返回流。
+    - **`flush` 钩子**：流正常结束时，调用 `handle.markStreamFinished()`。
+    - **`cancel` 钩子**：流被下游取消时，自动触发任务状态的终结与资源清理。
 - **重组技术规范**：`RpcStreamReassembler` 必须具备基于 **`sequenceNumber` 的顺序重排能力**，并实现基于流量反馈的 **背压 (Backpressure)** 控制。
 
 ---
@@ -175,7 +181,8 @@ export abstract class ServerToolTransport extends ToolTransport {
       // 3. 执行分发：交给独立的 Dispatcher 流水线
       const rpcRes = await this.dispatcher.dispatch(rpcReq, registry);
 
-      // 4. 物理层回传：子类将结果写回物理通道
+      // 4. 物理层回传与物理中止联动：子类将结果写回物理通道
+      // 在传输流时，需监听物理连接的 'close' 事件并调用 handle.abort('Physical connection closed')
       await this.sendRpcResponse(rpcRes, rawRes);
     } catch (err) {
       // 顶级异常防护，确保物理连接不挂起

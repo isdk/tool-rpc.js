@@ -1,7 +1,7 @@
-import { 
-  RpcTaskRetention, 
-  RpcTaskRetentionMode, 
-  RpcTaskRetentionConfig, 
+import {
+  RpcTaskRetention,
+  RpcTaskRetentionMode,
+  RpcTaskRetentionConfig,
   RPC_DEFAULTS,
   RpcStatusCode,
   RpcError
@@ -25,6 +25,10 @@ export class RpcActiveTaskHandle {
   public fetchCount: number = 0;
   /** 任务保留策略 */
   public retention: RpcTaskRetentionConfig;
+  /** [流式专用] 标记流是否仍在传输中 */
+  public streamPending: boolean = false;
+  /** [流式专用] 持有输出流引用以便中止 */
+  private outputStream?: ReadableStream;
 
   constructor(
     public readonly requestId: string,
@@ -36,12 +40,13 @@ export class RpcActiveTaskHandle {
   ) {
     // 归一化保留策略配置
     this.retention = this.normalizeRetention(retention);
+    this.streamPending = isStream; // 初始化时如果是流式任务，则标记为挂起
 
     // [调试] 监听中止信号以立即更新状态
     if (this.aborter.signal.aborted) {
-      this.handleAbort();
+      this.handleAbort(this.aborter.signal.reason);
     } else {
-      this.aborter.signal.addEventListener('abort', () => this.handleAbort(), { once: true });
+      this.aborter.signal.addEventListener('abort', () => this.handleAbort(this.aborter.signal.reason), { once: true });
     }
 
     this.promise.then(res => {
@@ -49,7 +54,6 @@ export class RpcActiveTaskHandle {
       this.status = 'completed';
       this.result = res;
       this.completedAt = Date.now();
-      // console.log(`[Handle:${this.requestId}] Promise resolved, status -> completed`);
     }).catch(err => {
       if (this.status !== 'processing') return;
       // 处理中止的情况
@@ -60,15 +64,36 @@ export class RpcActiveTaskHandle {
         this.error = err;
       }
       this.completedAt = Date.now();
-      // console.log(`[Handle:${this.requestId}] Promise rejected, status -> ${this.status}`);
+      // 如果发生错误，流也必定终止
+      this.streamPending = false;
     });
   }
 
-  private handleAbort() {
-    if (this.status !== 'processing') return;
+  public setOutputStream(stream: ReadableStream) {
+    this.outputStream = stream;
+    this.streamPending = true;
+  }
+
+  public markStreamFinished() {
+    this.streamPending = false;
+    // 更新完成时间，确保 retention 从流结束时开始计时
+    this.completedAt = Date.now();
+  }
+
+  private handleAbort(reason?: any) {
+    // 只要任务未终结，或者虽然 Promise 完成但流还在挂起，都视为可中止
+    if (this.status !== 'processing' && !this.streamPending) return;
+
     this.status = 'aborted';
     this.completedAt = Date.now();
-    // console.log(`[Handle:${this.requestId}] Signal aborted, status -> aborted`);
+    this.streamPending = false; // 中止意味着流也断了
+
+    if (this.outputStream) {
+      this.outputStream.cancel(reason || 'Task Aborted').catch((e: any) => {
+        console.error(`[Handle:${this.requestId}] outputStream Cancel failed: ${e.message}`);
+      });
+    }
+
     this.onCleanup();
   }
 
@@ -85,7 +110,7 @@ export class RpcActiveTaskHandle {
 
   /** 主动中止任务 */
   public abort(reason?: any) {
-    if (this.status !== 'processing') return;
+    if (this.status !== 'processing' && !this.streamPending) return;
     this.aborter.abort(reason);
     // handleAbort 会通过事件监听器被调用
   }
@@ -96,10 +121,9 @@ export class RpcActiveTaskHandle {
    */
   public shouldCleanup(now: number): boolean {
     const isProcessing = this.status === 'processing';
-    // console.log(`[Handle:${this.requestId}] shouldCleanup check: status=${this.status}, mode=${this.retention.mode}`);
-    
-    if (isProcessing) return false;
 
+    // 如果任务还在处理中，或者流还在传输中，则不清理
+    if (isProcessing || this.streamPending) return false;
     const age = now - (this.completedAt || now);
     const { mode, onceFallbackMs, maxRetentionMs } = this.retention;
 
@@ -109,7 +133,7 @@ export class RpcActiveTaskHandle {
       return true;
     }
 
-    if (mode === RpcTaskRetentionMode.Once || mode === 'once') {
+    if (mode === RpcTaskRetentionMode.Once) {
       return this.fetchCount > 0 || (onceFallbackMs! > 0 && age > onceFallbackMs!);
     }
 
@@ -155,7 +179,6 @@ export class RpcActiveTaskTracker {
   }
 
   public remove(requestId: string) {
-    // console.log(`[Tracker] Removing task: ${requestId}`);
     this.tasks.delete(requestId);
   }
 
@@ -171,7 +194,7 @@ export class RpcActiveTaskTracker {
         }
       }
     }, 60000);
-    
+
     if (this.sweepInterval?.unref) {
       this.sweepInterval.unref();
     }
@@ -182,7 +205,7 @@ export class RpcActiveTaskTracker {
       clearInterval(this.sweepInterval);
     }
     for (const handle of this.tasks.values()) {
-        handle.abort(new Error('Task Tracker is stopping'));
+      handle.abort(new Error('Task Tracker is stopping'));
     }
     this.tasks.clear();
   }

@@ -167,7 +167,6 @@ describe('Comprehensive Pure V2 Integration (Streaming, Polling, Errors)', () =>
         });
         const pollStatus = respPoll.status;
         const pollBody = await respPoll.json();
-        console.log(`Poll #${i}: status=${pollStatus}, body=${JSON.stringify(pollBody)}`);
 
         if (pollStatus === 200) {
           expect(pollBody).toEqual({ result: 'long-done' });
