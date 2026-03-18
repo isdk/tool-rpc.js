@@ -85,10 +85,13 @@ describe('Comprehensive Pure V2 Integration (Streaming, Polling, Errors)', () =>
       compat: pureCompat,
       tracker: sharedTracker
     });
-    httpTransport = new HttpServerToolTransport({ dispatcher: httpDispatcher });
+    httpTransport = new HttpServerToolTransport({
+      dispatcher: httpDispatcher,
+    });
     httpTransport.addRpcHandler('http://localhost/api/');
     await httpTransport.start({ port: 0 });
-    httpPort = (httpTransport.server.address() as any).port;
+    const rawServer = httpTransport.getRaw()!;
+    httpPort = (rawServer.address() as any).port;
 
     // 3. Initialize Mailbox
     mbxServerDispatcher = new RpcServerDispatcher({

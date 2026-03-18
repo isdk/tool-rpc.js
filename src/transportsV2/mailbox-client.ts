@@ -1,11 +1,10 @@
-import { ClientToolTransport } from "./client";
+import { ClientToolTransport, ClientToolTransportOptions } from "./client";
 import { ActionName } from "../consts";
 import { RPC_HEADERS } from "./models";
 import { Mailbox, MailMessage } from '@mboxlabs/mailbox';
 
-export interface MailboxClientOptions {
+export interface MailboxClientTransportOptions extends ClientToolTransportOptions {
   mailbox?: Mailbox;
-  apiUrl?: string;
   /** @deprecated use apiUrl instead */
   serverAddress?: string;
   clientAddress?: string;
@@ -14,7 +13,6 @@ export interface MailboxClientOptions {
     streamIdleTimeout?: number;
     keepAliveOnTimeout?: boolean;
   };
-  [key: string]: any;
 }
 
 interface PendingRequest {
@@ -24,7 +22,7 @@ interface PendingRequest {
 }
 
 export class MailboxClientTransport extends ClientToolTransport {
-  protected mailbox: Mailbox;
+  protected mailbox!: Mailbox;
   protected serverAddress: string;
   protected clientAddress: string;
   protected pendingRequests: Map<string, PendingRequest> = new Map();
@@ -32,8 +30,8 @@ export class MailboxClientTransport extends ClientToolTransport {
   protected timeout: any;
   protected isInternalMailbox = false;
 
-  constructor(options: MailboxClientOptions) {
-    const apiUrl = options.apiUrl || options.serverAddress || options.apiRoot;
+  constructor(options: MailboxClientTransportOptions) {
+    const apiUrl = options.apiUrl || options.serverAddress || (options as any).apiRoot;
     if (!apiUrl) {
       throw new Error('apiUrl (serverAddress) is required for MailboxClientTransport');
     }

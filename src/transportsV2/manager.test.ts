@@ -17,11 +17,17 @@ class MockClientTransport extends ToolTransport implements IClientToolTransport 
 
 class MockServerTransport extends ToolTransport implements IServerToolTransport {
   dispatcher: any = { dispatch: vi.fn() };
+  constructor(options?: any) {
+    super(options);
+    if (options?.apiUrl) this.apiUrl = options.apiUrl;
+  }
   start = vi.fn().mockResolvedValue(undefined);
   stop = vi.fn().mockResolvedValue(undefined);
   addDiscoveryHandler = vi.fn();
   addRpcHandler = vi.fn();
   getRaw = vi.fn();
+  getListenAddr() { return this.apiUrl || 'mock://server'; }
+  getRoutes = vi.fn().mockReturnValue(['/']);
 }
 
 describe('RpcTransportManager', () => {

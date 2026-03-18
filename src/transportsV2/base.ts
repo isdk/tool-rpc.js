@@ -5,6 +5,13 @@ import { RpcTransportManager } from "./manager";
  */
 export type RpcMethodHandler = (params: any, context?: any) => Promise<any> | any;
 
+
+export interface ToolTransportOptions {
+  manager?: RpcTransportManager;
+  apiUrl?: string;
+  [key: string]: any;
+}
+
 /**
  * 所有传输协议 (Client/Server) 统一的基础能力接口。
  */
@@ -24,7 +31,7 @@ export interface IToolTransport {
   /**
    * 具体协议额外的配置或选项扩展
    */
-  options?: any;
+  options?: ToolTransportOptions;
 
   /**
    * 启动服务 (仅服务端有效)
@@ -46,12 +53,15 @@ export interface IToolTransport {
 
 export abstract class ToolTransport implements IToolTransport {
   declare apiUrl: string;
-  declare options?: any;
+  declare options?: ToolTransportOptions;
   public manager: RpcTransportManager;
 
-  constructor(options?: { manager?: RpcTransportManager } & any) {
+  constructor(options?: ToolTransportOptions) {
     this.options = options;
     this.manager = options?.manager || RpcTransportManager.instance;
+    if (options?.apiUrl) {
+      this.apiUrl = options.apiUrl;
+    }
   }
 
   public setApiUrl(apiUrl: string) {

@@ -1,7 +1,11 @@
 import { defaultsDeep } from 'lodash-es';
-import { ToolTransport, type IToolTransport } from './base';
+import { ToolTransport, type IToolTransport, type ToolTransportOptions } from './base';
 import { RpcServerDispatcher } from './dispatcher';
 import { ToolRpcRequest, ToolRpcResponse } from './models';
+
+export interface ServerToolTransportOptions extends ToolTransportOptions {
+  dispatcher?: RpcServerDispatcher;
+}
 
 export interface IServerToolTransport extends IToolTransport {
   dispatcher: RpcServerDispatcher;
@@ -16,17 +20,37 @@ export interface IServerToolTransport extends IToolTransport {
    */
   stop(force?: boolean): Promise<void>;
 
+  /**
+   * 获取物理层面的监听地址标识。
+   * 默认返回 apiUrl。用于识别物理底座复用。
+   */
+  getListenAddr(): string | string[];
+
+  /**
+   * 获取该实例声明负责的逻辑路由列表。
+   * 默认返回 ["/"] 表示接管该物理地址下的全量路径。
+   */
+  getRoutes(): string[];
+
   getRaw?(): any;
 }
 
 export abstract class ServerToolTransport extends ToolTransport implements IServerToolTransport {
   declare apiUrl: string;
-  declare options?: any;
+  declare options?: ServerToolTransportOptions;
   public dispatcher: RpcServerDispatcher;
 
-  constructor(options?: { dispatcher?: RpcServerDispatcher } & any) {
+  constructor(options?: ServerToolTransportOptions) {
     super(options);
     this.dispatcher = options?.dispatcher || RpcServerDispatcher.instance;
+  }
+
+  public getListenAddr(): string | string[] {
+    return this.apiUrl;
+  }
+
+  public getRoutes(): string[] {
+    return ['/'];
   }
 
   public start(options?: any): Promise<any> {
@@ -72,5 +96,5 @@ export abstract class ServerToolTransport extends ToolTransport implements IServ
   public abstract addRpcHandler(apiUrl: string, options?: any): void;
   public abstract _start(options?: any): Promise<any>;
   public abstract stop(force?: boolean): Promise<void>;
-  public abstract getRaw?(): any;
+  public getRaw?(): any;
 }

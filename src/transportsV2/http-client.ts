@@ -1,8 +1,16 @@
-import { ClientToolTransport } from "./client";
+import { ClientToolTransport, ClientToolTransportOptions } from "./client";
 import { ActionName } from "../consts";
 import { RPC_HEADERS } from "./models";
 
+export interface HttpClientToolTransportOptions extends ClientToolTransportOptions {
+}
+
 export class HttpClientToolTransport extends ClientToolTransport {
+   
+   constructor(apiUrl: string, options?: HttpClientToolTransportOptions) {
+      super(apiUrl, options);
+   }
+
    public async _fetch(name: string, args?: any, act?: ActionName | string, id?: any, fetchOptions: any = {}) {
       let url = this.apiUrl;
 

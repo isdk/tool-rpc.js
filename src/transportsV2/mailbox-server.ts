@@ -1,19 +1,17 @@
-import { ServerToolTransport } from './server';
+import { ServerToolTransport, ServerToolTransportOptions } from './server';
 import { Mailbox, MailMessage } from '@mboxlabs/mailbox';
 import { ToolRpcRequest, ToolRpcResponse, RPC_HEADERS, RpcStatusCode, RpcError } from './models';
 
-export interface MailboxServerOptions {
+export interface MailboxServerTransportOptions extends ServerToolTransportOptions {
   mailbox?: Mailbox;
-  apiUrl?: string;
   /** @deprecated use apiUrl instead */
   address?: string;
   mode?: 'push' | 'pull';
   pullInterval?: number;
-  [key: string]: any;
 }
 
 export class MailboxServerTransport extends ServerToolTransport {
-  protected mailbox: Mailbox;
+  protected mailbox!: Mailbox;
   protected listenAddress: string = '';
   protected apiPrefix: string = '/';
   protected discoveryHandlerInfo: { prefix: string; handler: () => any } | null = null;
@@ -23,7 +21,7 @@ export class MailboxServerTransport extends ServerToolTransport {
   protected isRunning: boolean = false;
   protected isInternalMailbox = false;
 
-  constructor(options: MailboxServerOptions = {}) {
+  constructor(options: MailboxServerTransportOptions = {}) {
     super(options);
     if (options.mailbox) {
       this.mailbox = options.mailbox;
@@ -38,11 +36,10 @@ export class MailboxServerTransport extends ServerToolTransport {
     }
     this.apiUrl = apiUrl;
     this.listenAddress = apiUrl;
-    this.apiPrefix = this.extractPath(apiUrl);
+    this.apiPrefix = (this as any).extractPath(apiUrl);
 
     this.mode = options.mode || 'push';
     this.pullInterval = options.pullInterval || 1000;
-    this.options = options;
   }
 
   protected extractPath(urlStr: string): string {

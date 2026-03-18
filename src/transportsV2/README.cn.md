@@ -88,17 +88,21 @@ throw new RpcError('Access Denied', 403, 'forbidden', { ip: '1.2.3.4' });
 
 ### 3.1 核心职责与 API 详述
 
+* **物理与逻辑解耦审计 (Server Auditing)**：
+  * `addServer(transport)`：在注册服务端实例时，Manager 会提取其物理底座地址 (`getListenAddr`) 与逻辑管辖路由 (`getRoutes`)。
+  * **路由冲突检测**：通过内部审计表校验，禁止在同一物理底座上重复注册完全相同的逻辑路由，从架构层面杜绝路由劫持风险。
+  * **关于 `mount` (已废弃)**：`mount(tools, prefix)` 虽作为兼容 API 存在（@deprecated），但在 V2 中推荐直接使用 `addServer`。V2 的路由是由 Transport 实例通过 `apiUrl` 内部派生并经 `getRoutes()` 声明的，而非外部强制指定。
 * **bindScheme (协议绑定)**：
   * **静态绑定**：`bindScheme(['http', 'https'], HttpClient)`。将 Scheme 直接映射到具体的 Transport 类。
   * **动态解析器 (Resolvers)**：`bindScheme((scheme) => ...)`。支持注册函数，当静态注册表未命中时，动态判断并返回对应的 Transport 类。这在插件化系统中非常有用。
 * **clearSchemes (注册表清理)**：`clearSchemes(scheme?)`。支持清除全部或特定协议的注册信息，主要用于单元测试环境下的状态隔离。
-* **实例缓存与复用**：Manager 会根据 `apiUrl` 的 **Origin (协议+域名+端口)** 路径自动缓存 Transport 实例。这意味着对同一个服务端不同路径的调用将共享同一个物理连接池（如 HTTP Keep-Alive Agent），实现资源的高效复用。
+* **实例缓存与复用**：Manager 会根据 `apiUrl` 的 **Origin (协议+域名+端口)** 路径自动缓存 Transport 实例。这意味着对同一个服务端不同路径的调用将共享同一个物理连接池，实现资源复用。
 * **架构级策略校验 (validateRpcRequest)**：
   * **SSRF 防御**：通过 `addRestrictedPattern` 注入正则或字符串模式（如 `localhost`, `127.0.0.1`），Manager 会在分发前拦截非法地址请求。
   * **钩子重写**：允许通过继承 Manager 并重写此方法来实现自定义的全局审计逻辑。
 * **生命周期管理**：
   * `startAll()`：批量启动所有已注册的服务端 Transport。
-  * `stopAll()`：优雅关闭所有实例（包括服务端监听关闭和客户端物理连接池回收）。
+  * `stopAll()`：优雅关闭所有实例。由于 HTTP 层引入了引用计数，此操作会根据使用情况自动关闭物理 Server。
 
 ### 3.2 实例化与管理范例
 
@@ -208,6 +212,11 @@ await manager.stopAll();
 ## 8. 传输层实现细节
 
 ### 8.1 HttpServerToolTransport
+*   **物理底座复用 (Physical Reuse)**：支持多个逻辑 Transport 实例共享同一个物理端口（Node.js `http.Server`）。通过静态池管理，基于归一化的物理监听地址 (`getListenAddr`) 实现。
+*   **地址归一化 (Normalization)**：自动处理回环地址（`127.0.0.1` -> `localhost`），确保底座识别的精确性。支持 `:port` (0.0.0.0) 和 `host:port` 精确绑定。
+*   **精准路由分发 (Longest Prefix Match)**：当物理端口接收到请求时，采用“最长前缀匹配”算法扫描逻辑实例。
+*   **路径规范化 (Trailing Slash)**：要求所有逻辑路由（`getRoutes()`）均采用 **Trailing Slash Normalization**（尾随斜杠补齐）。这确保了 `RpcTransportManager` 审计时的字面量比对与物理层的分发逻辑 100% 对应。
+*   **引用计数管理 (Ref Counting)**：逻辑实例通过引用计数自动控制物理 Server 的生命周期，实现“最后一人离开时关灯”。
 *   **寻址优先级**：Header 显式指令 > URL Path 降级解析 (`/api/tool/resId`模式)。
 *   **HTTP 102 信号映射**：由于多数现代 fetch 工具（如 `undici`）对 1xx 信息性状态码的处理存在不确定性，V2 在物理层将 `102 Processing` 逻辑映射为 **`202 Accepted`**，并返回包含任务 ID 的 Body 负载，确保客户端能稳定解析。
 *   **物理连接联动与资源清理**：
@@ -216,7 +225,14 @@ await manager.stopAll();
     *   这会触发流的 `cancel` 和业务逻辑的 `AbortSignal` 联动，确保服务端不会继续执行已无受众的任务。
 *   **流式背压**：原生支持 `ReadableStream` 管道透传，通过 `Readable.fromWeb` 桥接至 Node.js 网络层。
 
-### 8.2 信号联动与延迟中止
+### 8.2 MailboxServerTransport
+*   **物理独占性保护**：由于 Mailbox 协议通常基于点对点地址，该 Transport 默认接管物理地址下的全量路径 (`/`)。在 Manager 的路由审计下，这确保了对特定 Mailbox 地址的物理独占，防止多实例对同一信箱地址的争抢。
+*   **元数据注入**：自动在 context 中注入 `x-mailbox-from/to` 等追踪头信息，增强全链路观测性。
+*   **信号联动**：支持 `push` (订阅) 和 `pull` (轮询) 两种模式，适配不同的信箱底座。
+
+---
+
+## 9. 信号联动与延迟中止
 当任务触发硬超时（Hard Deadline）或收到取消请求时：
 1.  `Dispatcher` 会同步调用 `aborter.abort(reason)`。
 2.  `RpcDeadlineGuard` 进入 **“延迟中止”** 阶段，先通过信号通知业务代码进行清理。

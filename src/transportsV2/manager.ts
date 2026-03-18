@@ -130,11 +130,36 @@ export class RpcTransportManager {
     return instance;
   }
 
+  /** 路由审计表: ListenAddr -> Set<RoutePath> */
+  private routeAudit = new Map<string, Set<string>>();
+
   /**
-   * 注册并管理服务端传输实例
+   * 注册并管理服务端传输实例。
+   * 会执行物理地址与逻辑路由的冲突审计。
    */
   public addServer(transport: IServerToolTransport, apiUrl?: string) {
-    this.register(transport, apiUrl);
+    const targetUrl = apiUrl || transport.apiUrl;
+
+    // 执行冲突审计
+    const addrs = Array.isArray(transport.getListenAddr()) 
+      ? transport.getListenAddr() as string[] 
+      : [transport.getListenAddr() as string];
+    const routes = transport.getRoutes();
+
+    for (const addr of addrs) {
+      if (!this.routeAudit.has(addr)) {
+        this.routeAudit.set(addr, new Set());
+      }
+      const registeredRoutes = this.routeAudit.get(addr)!;
+      for (const route of routes) {
+        if (registeredRoutes.has(route)) {
+          throw new Error(`Routing Conflict: Physical address "${addr}" already has a transport managing route "${route}"`);
+        }
+        registeredRoutes.add(route);
+      }
+    }
+
+    this.register(transport, targetUrl);
   }
 
   /**
@@ -155,14 +180,16 @@ export class RpcTransportManager {
     const clientPromises = Array.from(this.transports.values())
       .filter(inst => !this.servers.has(inst as any))
       .map(inst => {
-        if (typeof inst.stop === 'function') return inst.stop(force);
+        if (typeof (inst as any).stop === 'function') return (inst as any).stop(force);
         if (typeof inst.close === 'function') return inst.close();
       });
 
     await Promise.all([...serverPromises, ...clientPromises]);
     this.transports.clear();
     this.servers.clear();
+    this.routeAudit.clear();
   }
+
 
   /** 受限制的 URL 模式（SSRF 防护等） */
   private restrictedPatterns: RestrictedPattern[] = [];

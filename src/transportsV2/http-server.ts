@@ -1,49 +1,195 @@
 import http from 'http';
 import { URL } from 'url';
 import { Readable } from 'stream';
-import { ServerToolTransport } from './server';
+import { ServerToolTransport, ServerToolTransportOptions } from './server';
 import { defaultsDeep } from 'lodash-es';
 import { ToolRpcRequest, ToolRpcResponse, RPC_HEADERS, RpcStatusCode } from './models';
 import { randomUUID } from 'crypto';
 
+export interface HttpServerToolTransportOptions extends ServerToolTransportOptions, http.ServerOptions {
+}
+
+/**
+ * 物理 Server 绑定信息
+ */
+interface HttpBinding {
+  server: http.Server;
+  refCount: number;
+  /** pathname -> logical transport instance */
+  routes: Map<string, HttpServerToolTransport>;
+  /** 默认/降级实例 (当没有匹配到特定路径时) */
+  defaultInstance?: HttpServerToolTransport;
+}
+
+/**
+ * HTTP 服务端传输协议。
+ * 支持在同一物理端口上通过 URL Path 挂载多个逻辑 Transport 实例。
+ */
 export class HttpServerToolTransport extends ServerToolTransport {
-   public server: http.Server;
+   /** 静态物理底座池: "host:port" -> Binding */
+   private static sharedServers = new Map<string, HttpBinding>();
+
+   private managedPaths: string[] = [];
    private discoveryHandlerInfo: { prefix: string; handler: () => any } | null = null;
    private rpcPrefix: string = '';
 
-   constructor(options?: http.ServerOptions & { dispatcher?: any }) {
+   constructor(options?: HttpServerToolTransportOptions) {
       super(options);
-      if (options) {
-         // Exclude our custom options to avoid polluting http.createServer
-         const { dispatcher, ...httpOptions } = options;
-         this.server = http.createServer(httpOptions, this.requestListener.bind(this));
-      } else {
-         this.server = http.createServer(this.requestListener.bind(this));
+   }
+
+   public getListenAddr(): string {
+      const url = new URL(this.apiUrl);
+      const port = url.port || (url.protocol === 'https:' ? '443' : '80');
+      let hostname = url.hostname;
+      
+      // 归一化本地回环地址，确保物理复用
+      if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]') {
+         hostname = 'localhost';
       }
+
+      // 返回 host:port 形式表示精确绑定，或 :port 形式表示监听 0.0.0.0
+      return (hostname === 'localhost') 
+         ? `${hostname}:${port}` 
+         : `:${port}`;
+   }
+
+   public getRoutes(): string[] {
+      return this.managedPaths.length > 0 ? this.managedPaths : [this.rpcPrefix || '/'];
    }
 
    public addDiscoveryHandler(apiUrl: string, handler: () => any): void {
+      if (!this.apiUrl) this.apiUrl = apiUrl;
       const url = new URL(apiUrl);
-      this.discoveryHandlerInfo = { prefix: url.pathname, handler };
+      let prefix = url.pathname;
+      if (!prefix.endsWith('/')) {
+         prefix += '/';
+      }
+      this.discoveryHandlerInfo = { prefix, handler };
+      if (!this.managedPaths.includes(prefix)) {
+         this.managedPaths.push(prefix);
+      }
    }
 
    public addRpcHandler(apiUrl: string, options?: any) {
+      if (!this.apiUrl) this.apiUrl = apiUrl;
       const url = new URL(apiUrl);
       let prefix = url.pathname;
       if (!prefix.endsWith('/')) {
          prefix += '/';
       }
       this.rpcPrefix = prefix;
+      if (!this.managedPaths.includes(prefix)) {
+         this.managedPaths.push(prefix);
+      }
    }
 
-   private async requestListener(req: http.IncomingMessage, res: http.ServerResponse) {
-      const { url, method } = req;
-      if (!url) {
-         return this.sendError(res, 400, 'Bad Request');
+   /**
+    * 启动物理监听（支持复用）
+    */
+   public async _start(options: { port?: number; host?: string }): Promise<void> {
+      const addr = this.getListenAddr();
+      let binding = HttpServerToolTransport.sharedServers.get(addr);
+
+      if (!binding) {
+         const server = http.createServer((req, res) => this.staticRequestListener(addr, req, res));
+         binding = { server, refCount: 0, routes: new Map() };
+         HttpServerToolTransport.sharedServers.set(addr, binding);
+
+         const port = options.port !== undefined ? options.port : parseInt(addr.split(':').pop() || '3000');
+         const host = options.host || (addr.startsWith(':') ? '0.0.0.0' : addr.split(':')[0]);
+
+         try {
+            await new Promise<void>((resolve, reject) => {
+               binding!.server.on('error', reject);
+               binding!.server.listen(port, host, () => {
+                  binding!.server.off('error', reject);
+                  resolve();
+               });
+            });
+         } catch (err) {
+            HttpServerToolTransport.sharedServers.delete(addr);
+            throw err;
+         }
       }
 
-      // Discovery Handler
-      if (this.discoveryHandlerInfo && method === 'GET' && url === this.discoveryHandlerInfo.prefix) {
+      // 注册当前实例的路由
+      binding.refCount++;
+      for (const path of this.getRoutes()) {
+         binding.routes.set(path, this);
+      }
+      if (!binding.defaultInstance) binding.defaultInstance = this;
+   }
+
+   /**
+    * 停止逻辑实例（自动处理物理 Server 关闭）
+    */
+   public async stop(force?: boolean): Promise<void> {
+      const addr = this.getListenAddr();
+      const binding = HttpServerToolTransport.sharedServers.get(addr);
+      if (!binding) return;
+
+      // 清理路由映射
+      for (const path of this.getRoutes()) {
+         binding.routes.delete(path);
+      }
+      if (binding.defaultInstance === this) {
+         binding.defaultInstance = binding.routes.values().next().value;
+      }
+
+      binding.refCount--;
+      if (binding.refCount <= 0) {
+         HttpServerToolTransport.sharedServers.delete(addr);
+         return new Promise((resolve, reject) => {
+            if (force) binding.server.closeAllConnections();
+            binding.server.close((err) => err ? reject(err) : resolve());
+         });
+      }
+   }
+
+   /**
+    * 静态分发器：物理请求入口
+    */
+   private staticRequestListener(addr: string, req: http.IncomingMessage, res: http.ServerResponse) {
+      const binding = HttpServerToolTransport.sharedServers.get(addr);
+      if (!binding) return;
+
+      const url = req.url || '/';
+      const pathname = url.split('?')[0];
+      // 归一化路径匹配：确保以 / 结尾以便进行前缀对比
+      const normalizedPath = pathname.endsWith('/') ? pathname : pathname + '/';
+      
+      // 匹配最长前缀路由
+      let bestMatch: HttpServerToolTransport | undefined;
+      let longestPrefix = -1;
+
+      for (const [prefix, instance] of binding.routes.entries()) {
+         if (normalizedPath.startsWith(prefix) && prefix.length > longestPrefix) {
+            longestPrefix = prefix.length;
+            bestMatch = instance;
+         }
+      }
+
+      const target = bestMatch || binding.defaultInstance;
+      if (target) {
+         target.handleInternalRequest(req, res);
+      } else {
+         res.statusCode = 404;
+         res.end(JSON.stringify({ error: 'Not Found' }));
+      }
+   }
+
+   /**
+    * 内部逻辑分发
+    */
+   private async handleInternalRequest(req: http.IncomingMessage, res: http.ServerResponse) {
+      const { url, method } = req;
+      if (!url) return this.sendError(res, 400, 'Bad Request');
+
+      const pathname = url.split('?')[0];
+      const normalizedPath = pathname.endsWith('/') ? pathname : pathname + '/';
+
+      // 1. Discovery Handler
+      if (this.discoveryHandlerInfo && method === 'GET' && normalizedPath === this.discoveryHandlerInfo.prefix) {
          try {
             const result = this.discoveryHandlerInfo.handler();
             res.setHeader('Content-Type', 'application/json');
@@ -55,9 +201,8 @@ export class HttpServerToolTransport extends ServerToolTransport {
          return;
       }
 
-      // RPC Handler
-      if (this.rpcPrefix && url.startsWith(this.rpcPrefix)) {
-         // Send to standard template method
+      // 2. RPC Handler (基于 rpcPrefix 的业务流水线)
+      if (this.rpcPrefix && normalizedPath.startsWith(this.rpcPrefix)) {
          await this.processIncomingCall(req, res);
          return;
       }
@@ -81,19 +226,17 @@ export class HttpServerToolTransport extends ServerToolTransport {
          }
       }
 
-      // 瀑布流拦截: rpc-fn -> url path
       let toolId = headersStr[RPC_HEADERS.TOOL_ID] || headersStr[RPC_HEADERS.FUNC];
       let act = headersStr[RPC_HEADERS.ACT];
       let resId = headersStr[RPC_HEADERS.RES_ID];
 
-      // 若未发现强指定的控制头，才进行基于 HTTP Path 的降级猜测
       if (!toolId && rawReq.url) {
          const urlPath = rawReq.url.split('?')[0].substring(this.rpcPrefix.length);
          const parts = urlPath.split('/').map(s => s === undefined ? s : decodeURIComponent(s)).filter(Boolean);
          if (parts.length > 0) {
             toolId = parts[0];
             if (parts.length > 1 && resId === undefined) {
-               resId = parts[1]; // resource :id (仅当 Header 中没有时才使用路径中的 ID)
+               resId = parts[1];
             }
          }
       }
@@ -144,11 +287,7 @@ export class HttpServerToolTransport extends ServerToolTransport {
       }
       rawRes.setHeader('Content-Type', 'application/json');
 
-      // 优先处理 102 信号 (Background/Processing 状态不是错误，仅作为中间状态标志)
       if (rpcRes.status === 102 || rpcRes.status === RpcStatusCode.PROCESSING) {
-         // [V2 HTTP COMPAT] 物理层映射：102 是信息性状态码，由于 Node.js fetch (undici) 会在处理完 1xx 后期望后续
-         // 真正的最终响应，如果此时直接 end() 会导致连接中断。
-         // 映射为 202 Accepted 可确保 modern fetch 正确接收到“已接受并处理中”的信息。
          rawRes.statusCode = 202;
          const dataPayload = rpcRes.data || { status: 102, message: 'Task moved to background' };
          rawRes.end(JSON.stringify(dataPayload));
@@ -162,7 +301,6 @@ export class HttpServerToolTransport extends ServerToolTransport {
 
       const result = rpcRes.data;
       if (result && typeof result.pipe === 'function') {
-         // Node.js Stream
          result.pipe(rawRes);
          rawRes.on('close', () => {
             if (!result.destroyed && typeof result.destroy === 'function') {
@@ -170,21 +308,16 @@ export class HttpServerToolTransport extends ServerToolTransport {
             }
          });
       } else if (result && typeof (Readable as any).fromWeb === 'function' && result instanceof ReadableStream) {
-         // Web Stream
          const nodeStream = (Readable as any).fromWeb(result);
-         nodeStream.on('error', () => { }); // 防止未处理错误导致异常
+         nodeStream.on('error', () => { });
          nodeStream.pipe(rawRes);
          rawRes.on('close', () => {
             const requestId = rpcRes.headers?.[RPC_HEADERS.REQUEST_ID] as string;
             if (requestId) {
                const handle = this.dispatcher.tracker.get(requestId);
-               if (handle) {
-                  handle.abort('Physical connection closed');
-               }
+               if (handle) handle.abort('Physical connection closed');
             }
-            if (!nodeStream.destroyed) {
-               nodeStream.destroy('Physical connection closed' as any);
-            }
+            if (!nodeStream.destroyed) nodeStream.destroy('Physical connection closed' as any);
          });
       } else {
          rawRes.end(JSON.stringify(result === undefined ? null : result));
@@ -200,36 +333,8 @@ export class HttpServerToolTransport extends ServerToolTransport {
       });
    }
 
-   public async _start(options: { port: number; host?: string }): Promise<void> {
-      const { port, host = '0.0.0.0' } = defaultsDeep(options, { port: 3000 });
-      return new Promise((resolve, reject) => {
-         this.server.on('error', (err) => {
-            reject(err);
-         });
-         this.server.listen(port, host, () => {
-            resolve();
-         });
-      });
-   }
-
-   public async stop(force?: boolean): Promise<void> {
-      return new Promise((resolve, reject) => {
-         if (!this.server || !this.server.listening) {
-            return resolve();
-         }
-         if (force) {
-            this.server.closeAllConnections();
-         }
-         this.server.close((err) => {
-            if (err) {
-               return reject(err);
-            }
-            resolve();
-         });
-      });
-   }
-
-   public getRaw(): http.Server {
-      return this.server;
+   public getRaw(): http.Server | undefined {
+      const addr = this.getListenAddr();
+      return HttpServerToolTransport.sharedServers.get(addr)?.server;
    }
 }

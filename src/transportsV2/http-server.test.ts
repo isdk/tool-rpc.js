@@ -18,6 +18,16 @@ describe('HttpServerToolTransport', () => {
 
    afterEach(() => {
       vi.restoreAllMocks();
+      // Clear static shared servers to prevent test pollution
+      (HttpServerToolTransport as any).sharedServers.clear();
+   });
+
+   it('should correctly derive listen address', () => {
+      const t1 = new HttpServerToolTransport({ apiUrl: 'http://localhost:3000/api' });
+      expect(t1.getListenAddr()).toBe('localhost:3000');
+
+      const t2 = new HttpServerToolTransport({ apiUrl: 'http://0.0.0.0:8080/v1' });
+      expect(t2.getListenAddr()).toBe(':8080');
    });
 
    it('should extract target routing from headers first (Waterfall priority 1)', async () => {
@@ -196,8 +206,8 @@ describe('HttpServerToolTransport', () => {
          end: vi.fn()
       } as unknown as http.ServerResponse;
 
-      // Access private requestListener
-      await (transport as any).requestListener(mockReq, mockRes);
+      // Access private handleInternalRequest
+      await (transport as any).handleInternalRequest(mockReq, mockRes);
 
       expect(discoveryFn).toHaveBeenCalled();
       expect(mockRes.statusCode).toBe(200);
@@ -216,7 +226,7 @@ describe('HttpServerToolTransport', () => {
          end: vi.fn()
       } as unknown as http.ServerResponse;
 
-      await (transport as any).requestListener(mockReq, mockRes);
+      await (transport as any).handleInternalRequest(mockReq, mockRes);
 
       expect(mockRes.statusCode).toBe(404);
    });

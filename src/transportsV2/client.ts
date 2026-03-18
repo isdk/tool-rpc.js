@@ -1,7 +1,10 @@
 import { Funcs } from "@isdk/tool-func";
 import { ActionName } from '../consts';
-import { IToolTransport, ToolTransport } from "./base";
+import { IToolTransport, ToolTransport, ToolTransportOptions } from "./base";
 import { RPC_HEADERS, RPC_DEFAULTS } from "./models";
+
+export interface ClientToolTransportOptions extends ToolTransportOptions {
+}
 
 export interface IClientToolTransport extends IToolTransport {
   loadApis(options?: any): Promise<Funcs>;
@@ -11,8 +14,9 @@ export interface IClientToolTransport extends IToolTransport {
 
 export abstract class ClientToolTransport extends ToolTransport implements IClientToolTransport {
   declare apiUrl: string;
+  declare options?: ClientToolTransportOptions;
 
-  constructor(apiUrl: string, options?: any) {
+  constructor(apiUrl: string, options?: ClientToolTransportOptions) {
     if (!apiUrl) throw new Error('apiUrl is required for ClientToolTransport');
     super(options);
     this.setApiUrl(apiUrl);
