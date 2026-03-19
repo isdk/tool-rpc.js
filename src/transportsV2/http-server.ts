@@ -2,7 +2,6 @@ import http from 'http';
 import { URL } from 'url';
 import { Readable } from 'stream';
 import { ServerToolTransport, ServerToolTransportOptions } from './server';
-import { defaultsDeep } from 'lodash-es';
 import { ToolRpcRequest, ToolRpcResponse, RPC_HEADERS, RpcStatusCode } from './models';
 import { randomUUID } from 'crypto';
 
@@ -13,12 +12,12 @@ export interface HttpServerToolTransportOptions extends ServerToolTransportOptio
  * 物理 Server 绑定信息
  */
 interface HttpBinding {
-  server: http.Server;
-  refCount: number;
-  /** pathname -> logical transport instance */
-  routes: Map<string, HttpServerToolTransport>;
-  /** 默认/降级实例 (当没有匹配到特定路径时) */
-  defaultInstance?: HttpServerToolTransport;
+   server: http.Server;
+   refCount: number;
+   /** pathname -> logical transport instance */
+   routes: Map<string, HttpServerToolTransport>;
+   /** 默认/降级实例 (当没有匹配到特定路径时) */
+   defaultInstance?: HttpServerToolTransport;
 }
 
 /**
@@ -41,15 +40,15 @@ export class HttpServerToolTransport extends ServerToolTransport {
       const url = new URL(this.apiUrl);
       const port = url.port || (url.protocol === 'https:' ? '443' : '80');
       let hostname = url.hostname;
-      
+
       // 归一化本地回环地址，确保物理复用
       if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]') {
          hostname = 'localhost';
       }
 
       // 返回 host:port 形式表示精确绑定，或 :port 形式表示监听 0.0.0.0
-      return (hostname === 'localhost') 
-         ? `${hostname}:${port}` 
+      return (hostname === 'localhost')
+         ? `${hostname}:${port}`
          : `:${port}`;
    }
 
@@ -157,7 +156,7 @@ export class HttpServerToolTransport extends ServerToolTransport {
       const pathname = url.split('?')[0];
       // 归一化路径匹配：确保以 / 结尾以便进行前缀对比
       const normalizedPath = pathname.endsWith('/') ? pathname : pathname + '/';
-      
+
       // 匹配最长前缀路由
       let bestMatch: HttpServerToolTransport | undefined;
       let longestPrefix = -1;
