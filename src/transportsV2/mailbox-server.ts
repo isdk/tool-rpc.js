@@ -113,7 +113,7 @@ export class MailboxServerTransport extends ServerToolTransport {
     const act = rpcHeaders[RPC_HEADERS.ACT];
     const resId = rpcHeaders[RPC_HEADERS.RES_ID];
     const traceId = rpcHeaders[RPC_HEADERS.TRACE_ID];
-    const reqId = rpcHeaders[RPC_HEADERS.REQUEST_ID] || (this.options.strict === false ? msgId : undefined);
+    const reqId = rpcHeaders[RPC_HEADERS.REQUEST_ID] || (this.options?.strict === false ? msgId : undefined);
 
     if (!toolId) {
       throw new RpcError(`Invalid request to ${toStr}: missing tool identifier (rpc-fn)`, RpcStatusCode.BAD_REQUEST);
