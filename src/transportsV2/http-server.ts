@@ -2,10 +2,12 @@ import http from 'http';
 import { URL } from 'url';
 import { Readable } from 'stream';
 import { ServerToolTransport, ServerToolTransportOptions } from './server';
-import { ToolRpcRequest, ToolRpcResponse, RPC_HEADERS, RpcStatusCode } from './models';
+import { ToolRpcRequest, ToolRpcResponse, RPC_HEADERS, RpcStatusCode, RpcError } from './models';
 import { randomUUID } from 'crypto';
 
 export interface HttpServerToolTransportOptions extends ServerToolTransportOptions, http.ServerOptions {
+   /** 最大请求体大小 (字节)，默认 1MB */
+   maxBodySize?: number;
 }
 
 /**
@@ -18,6 +20,8 @@ interface HttpBinding {
    routes: Map<string, HttpServerToolTransport>;
    /** 默认/降级实例 (当没有匹配到特定路径时) */
    defaultInstance?: HttpServerToolTransport;
+   /** 初始化 Promise，用于并发 start 时同步等待物理 Ready */
+   initPromise?: Promise<void>;
 }
 
 /**
@@ -31,9 +35,12 @@ export class HttpServerToolTransport extends ServerToolTransport {
    private managedPaths: string[] = [];
    private discoveryHandlerInfo: { prefix: string; handler: () => any } | null = null;
    private rpcPrefix: string = '';
+   private maxBodySize: number;
 
    constructor(options?: HttpServerToolTransportOptions) {
       super(options);
+      this.maxBodySize = options?.maxBodySize || 1024 * 1024; // 默认 1MB
+      this.canStream = true;
    }
 
    public getListenAddr(): string {
@@ -90,25 +97,34 @@ export class HttpServerToolTransport extends ServerToolTransport {
       let binding = HttpServerToolTransport.sharedServers.get(addr);
 
       if (!binding) {
-         const server = http.createServer((req, res) => this.staticRequestListener(addr, req, res));
+         const server = http.createServer((req, res) => HttpServerToolTransport.handleIncomingHttpRequest(addr, req, res));
          binding = { server, refCount: 0, routes: new Map() };
          HttpServerToolTransport.sharedServers.set(addr, binding);
 
          const port = options.port !== undefined ? options.port : parseInt(addr.split(':').pop() || '3000');
          const host = options.host || (addr.startsWith(':') ? '0.0.0.0' : addr.split(':')[0]);
 
-         try {
-            await new Promise<void>((resolve, reject) => {
-               binding!.server.on('error', reject);
-               binding!.server.listen(port, host, () => {
-                  binding!.server.off('error', reject);
-                  resolve();
-               });
+         binding.initPromise = new Promise<void>((resolve, reject) => {
+            binding!.server.on('error', (err) => {
+               reject(err);
             });
+            binding!.server.listen(port, host, () => {
+               binding!.server.off('error', reject);
+               resolve();
+            });
+         });
+
+         try {
+            await binding.initPromise;
          } catch (err) {
             HttpServerToolTransport.sharedServers.delete(addr);
             throw err;
+         } finally {
+            binding.initPromise = undefined;
          }
+      } else if (binding.initPromise) {
+         // 等待正在进行的物理初始化完成
+         await binding.initPromise;
       }
 
       // 注册当前实例的路由
@@ -119,13 +135,12 @@ export class HttpServerToolTransport extends ServerToolTransport {
       if (!binding.defaultInstance) binding.defaultInstance = this;
    }
 
-   /**
-    * 停止逻辑实例（自动处理物理 Server 关闭）
-    */
    public async stop(force?: boolean): Promise<void> {
       const addr = this.getListenAddr();
       const binding = HttpServerToolTransport.sharedServers.get(addr);
-      if (!binding) return;
+      if (!binding) {
+         return;
+      }
 
       // 清理路由映射
       for (const path of this.getRoutes()) {
@@ -136,19 +151,29 @@ export class HttpServerToolTransport extends ServerToolTransport {
       }
 
       binding.refCount--;
+      
       if (binding.refCount <= 0) {
          HttpServerToolTransport.sharedServers.delete(addr);
          return new Promise((resolve, reject) => {
             if (force) binding.server.closeAllConnections();
-            binding.server.close((err) => err ? reject(err) : resolve());
+            binding.server.close((err: any) => {
+               // 忽略 "Server is not running" 错误，这在并发 start/stop 场景下是正常的
+               if (err && err.code === 'ERR_SERVER_NOT_RUNNING') {
+                  resolve();
+               } else if (err) {
+                  reject(err);
+               } else {
+                  resolve();
+               }
+            });
          });
       }
    }
 
    /**
-    * 静态分发器：物理请求入口
+    * 物理请求分发器（入口点）
     */
-   private staticRequestListener(addr: string, req: http.IncomingMessage, res: http.ServerResponse) {
+   private static handleIncomingHttpRequest(addr: string, req: http.IncomingMessage, res: http.ServerResponse) {
       const binding = HttpServerToolTransport.sharedServers.get(addr);
       if (!binding) return;
 
@@ -173,6 +198,7 @@ export class HttpServerToolTransport extends ServerToolTransport {
          target.handleInternalRequest(req, res);
       } else {
          res.statusCode = 404;
+         res.setHeader('Content-Type', 'application/json');
          res.end(JSON.stringify({ error: 'Not Found' }));
       }
    }
@@ -243,20 +269,24 @@ export class HttpServerToolTransport extends ServerToolTransport {
       const method = rawReq.method;
       let params: any = {};
 
-      if (method === 'GET' || method === 'DELETE') {
-         const requestUrl = new URL(rawReq.url || '/', `http://${rawReq.headers.host || 'localhost'}`);
-         const p = requestUrl.searchParams.get('p');
-         params = p ? JSON.parse(p) : {};
-         headersStr['x-http-method'] = method!;
-      } else {
-         const body = await this.getRequestBody(rawReq);
-         params = body ? JSON.parse(body) : {};
-         headersStr['x-http-method'] = method!;
+      try {
+         if (method === 'GET' || method === 'DELETE') {
+            const requestUrl = new URL(rawReq.url || '/', `http://${rawReq.headers.host || 'localhost'}`);
+            const p = requestUrl.searchParams.get('p');
+            params = p ? JSON.parse(p) : {};
+            headersStr['x-http-method'] = method!;
+         } else {
+            const body = await this.getRequestBody(rawReq);
+            params = body ? JSON.parse(body) : {};
+            headersStr['x-http-method'] = method!;
+         }
+      } catch (e: any) {
+         const err: any = new RpcError(`Malformed JSON or Request: ${e.message}`, e.status || 400);
+         throw err;
       }
 
       if (!toolId) {
-         const err: any = new Error("Missing routing information: rpc-fn header or valid URL Path");
-         err.status = 400;
+         const err: any = new RpcError("Missing routing information: rpc-fn header or valid URL Path", 400);
          throw err;
       }
 
@@ -326,7 +356,17 @@ export class HttpServerToolTransport extends ServerToolTransport {
    private getRequestBody(req: http.IncomingMessage): Promise<string> {
       return new Promise((resolve, reject) => {
          let body = '';
-         req.on('data', chunk => body += chunk.toString());
+         let currentSize = 0;
+         req.on('data', chunk => {
+            currentSize += chunk.length;
+            if (currentSize > this.maxBodySize) {
+               const err: any = new Error('Payload Too Large');
+               err.status = 413;
+               reject(err);
+            } else {
+               body += chunk.toString();
+            }
+         });
          req.on('end', () => resolve(body));
          req.on('error', reject);
       });

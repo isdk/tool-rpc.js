@@ -29,6 +29,8 @@ export class RpcActiveTaskHandle {
   public streamPending: boolean = false;
   /** [流式专用] 持有输出流引用以便中止 */
   private outputStream?: ReadableStream;
+  /** 全局运行死线定时器 */
+  private runtimeTimer?: NodeJS.Timeout;
 
   constructor(
     public readonly requestId: string,
@@ -36,7 +38,8 @@ export class RpcActiveTaskHandle {
     public readonly aborter: AbortController,
     public readonly isStream: boolean,
     public readonly onCleanup: () => void,
-    retention?: RpcTaskRetention
+    retention?: RpcTaskRetention,
+    maxRuntimeMs?: number
   ) {
     // 归一化保留策略配置
     this.retention = this.normalizeRetention(retention);
@@ -49,12 +52,21 @@ export class RpcActiveTaskHandle {
       this.aborter.signal.addEventListener('abort', () => this.handleAbort(this.aborter.signal.reason), { once: true });
     }
 
+    // 设置全局运行硬死线 (Background Guard)
+    if (maxRuntimeMs && maxRuntimeMs > 0) {
+      this.runtimeTimer = setTimeout(() => {
+        this.abort(new RpcError(`Task execution exceeded global max runtime (${maxRuntimeMs}ms)`, RpcStatusCode.TERMINATED));
+      }, maxRuntimeMs);
+    }
+
     this.promise.then(res => {
+      this.clearRuntimeTimer();
       if (this.status !== 'processing') return;
       this.status = 'completed';
       this.result = res;
       this.completedAt = Date.now();
     }).catch(err => {
+      this.clearRuntimeTimer();
       if (this.status !== 'processing') return;
       // 处理中止的情况
       if (this.aborter.signal.aborted || err?.name === 'AbortError' || err?.code === RpcStatusCode.TERMINATED) {
@@ -69,18 +81,27 @@ export class RpcActiveTaskHandle {
     });
   }
 
+  private clearRuntimeTimer() {
+    if (this.runtimeTimer) {
+      clearTimeout(this.runtimeTimer);
+      this.runtimeTimer = undefined;
+    }
+  }
+
   public setOutputStream(stream: ReadableStream) {
     this.outputStream = stream;
     this.streamPending = true;
   }
 
   public markStreamFinished() {
+    this.clearRuntimeTimer();
     this.streamPending = false;
     // 更新完成时间，确保 retention 从流结束时开始计时
     this.completedAt = Date.now();
   }
 
   private handleAbort(reason?: any) {
+    this.clearRuntimeTimer();
     // 只要任务未终结，或者虽然 Promise 完成但流还在挂起，都视为可中止
     if (this.status !== 'processing' && !this.streamPending) return;
 
@@ -123,7 +144,9 @@ export class RpcActiveTaskHandle {
     const isProcessing = this.status === 'processing';
 
     // 如果任务还在处理中，或者流还在传输中，则不清理
-    if (isProcessing || this.streamPending) return false;
+    if (isProcessing || this.streamPending) {
+      return false;
+    }
     const age = now - (this.completedAt || now);
     const { mode, onceFallbackMs, maxRetentionMs } = this.retention;
 

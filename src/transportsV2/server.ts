@@ -10,6 +10,9 @@ export interface ServerToolTransportOptions extends ToolTransportOptions {
 export interface IServerToolTransport extends IToolTransport {
   dispatcher: RpcServerDispatcher;
 
+  /** 是否支持原生的流式传输 (如 HTTP 支持, Mailbox 通常不支持) */
+  canStream: boolean;
+
   /**
    * 启动物理监听
    */
@@ -39,6 +42,7 @@ export abstract class ServerToolTransport extends ToolTransport implements IServ
   declare apiUrl: string;
   declare options?: ServerToolTransportOptions;
   public dispatcher: RpcServerDispatcher;
+  public canStream: boolean = false;
 
   constructor(options?: ServerToolTransportOptions) {
     super(options);
@@ -70,15 +74,33 @@ export abstract class ServerToolTransport extends ToolTransport implements IServ
       this.manager.validateRpcRequest(rpcReq);
 
       const rpcRes = await this.dispatcher.dispatch(rpcReq, registry);
+
+      // 能力预检：如果返回的是流，但传输层不支持流，应当报错
+      if (!this.canStream && rpcRes.data && (rpcRes.data instanceof ReadableStream || typeof rpcRes.data.getReader === 'function')) {
+        rpcRes.status = 400;
+        rpcRes.data = undefined;
+        rpcRes.error = {
+          code: 400,
+          status: 'bad_request',
+          message: `Streaming output is not supported by current transport protocol: ${this.apiUrl}`
+        };
+      }
+
       await this.sendRpcResponse(rpcRes, rawRes);
     } catch (err: any) {
       // 顶级异常防护 (Top-level pipeline guard)
-      const rawCode = err.code || (typeof err.status === 'number' ? err.status : undefined);
-      const errCode = typeof rawCode === 'number' ? rawCode : 500;
+      // 提取错误码，优先使用数字类型的 status 或 code
+      let errCode = 500;
+      if (typeof err.code === 'number') {
+        errCode = err.code;
+      } else if (typeof err.status === 'number') {
+        errCode = err.status;
+      }
+
       const errStatus = typeof err.status === 'string' ? err.status : 'error';
 
       await this.sendRpcResponse({
-        status: (errCode >= 400 && errCode < 600) ? errCode : 500,
+        status: (errCode >= 100 && errCode < 600) ? errCode : 500,
         error: {
           message: err.message || "Transport Pipeline Error",
           code: errCode,

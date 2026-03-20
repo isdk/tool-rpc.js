@@ -32,19 +32,23 @@ export class RpcServerDispatcher {
   public compat: RpcCompatOptions = DEFAULT_COMPAT_OPTIONS;
   /** 硬超时后的清理宽限期 (ms) */
   public terminationGraceMs: number = RPC_DEFAULTS.TERMINATION_GRACE_MS;
+  /** 全局任务执行硬死线 (ms)，防止后台任务永久运行。默认 1 小时 */
+  public maxTaskRuntimeMs: number = 3600000;
 
   constructor(options?: {
     registry?: any,
     tracker?: RpcActiveTaskTracker,
     globalTimeout?: number,
     compat?: RpcCompatOptions,
-    terminationGraceMs?: number
+    terminationGraceMs?: number,
+    maxTaskRuntimeMs?: number
   }) {
     this.registry = options?.registry;
     this.tracker = options?.tracker || new RpcActiveTaskTracker();
     if (options?.globalTimeout) this.globalTimeout = options.globalTimeout;
     if (options?.compat) this.compat = { ...DEFAULT_COMPAT_OPTIONS, ...options.compat };
     if (options?.terminationGraceMs !== undefined) this.terminationGraceMs = options.terminationGraceMs;
+    if (options?.maxTaskRuntimeMs !== undefined) this.maxTaskRuntimeMs = options.maxTaskRuntimeMs;
 
     // 自动装载系统级工具
     this.systemRegistry.set('rpcTask', new RpcTaskResource());
@@ -180,9 +184,11 @@ export class RpcServerDispatcher {
    * [执行阶段] 触发业务逻辑
    */
   private performExecution(tool: any, params: any, context: ToolRpcContext): Promise<any> {
-    (tool as any).ctx = context;
+    // 利用 tool-func 的影子实例机制隔离上下文，防止并发冲突
+    const runner = (typeof tool.with === 'function') ? tool.with(context) : tool;
+
     try {
-      return Promise.resolve(tool.run ? tool.run(params, context) : tool(params, context));
+      return Promise.resolve(runner.run ? runner.run(params, context) : runner(params, context));
     } catch (syncError) {
       return Promise.reject(syncError);
     }
@@ -205,7 +211,8 @@ export class RpcServerDispatcher {
       aborter,
       !!tool.stream,
       () => { if (tool.cleanup) tool.cleanup(params, context); },
-      tool.retention
+      tool.retention,
+      this.maxTaskRuntimeMs
     );
     this.tracker.add(requestId, handle);
   }

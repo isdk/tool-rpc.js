@@ -59,7 +59,9 @@ export class ServerTools extends ToolFunc {
    * [V2 标准执行入口]
    */
   run(params: ServerFuncParams, context?: ToolRpcContext) {
-    if (context) {
+    // 影子实例调用此方法时，this.ctx 可能已由 tool-func 设置
+    // 这里仅在 context 传入且未设置时作为备选注入
+    if (context && !this.ctx) {
       this.ctx = context;
     }
 

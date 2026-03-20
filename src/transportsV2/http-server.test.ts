@@ -82,8 +82,8 @@ describe('HttpServerToolTransport', () => {
          }
       } as unknown as http.IncomingMessage;
 
-      const mockRes = { 
-         setHeader: vi.fn(), 
+      const mockRes = {
+         setHeader: vi.fn(),
          end: vi.fn(),
          on: vi.fn() // Add mock listener
       } as unknown as http.ServerResponse;
@@ -128,8 +128,8 @@ describe('HttpServerToolTransport', () => {
          on: (event: string, cb: any) => { if (event === 'end') cb(); }
       } as unknown as http.IncomingMessage;
 
-      const mockRes = { 
-         setHeader: vi.fn(), 
+      const mockRes = {
+         setHeader: vi.fn(),
          end: vi.fn(),
          on: vi.fn() // Add mock listener
       } as unknown as http.ServerResponse;
@@ -154,8 +154,8 @@ describe('HttpServerToolTransport', () => {
          on: (event: string, cb: any) => { if (event === 'end') cb(); }
       } as unknown as http.IncomingMessage;
 
-      const mockRes = { 
-         setHeader: vi.fn(), 
+      const mockRes = {
+         setHeader: vi.fn(),
          end: vi.fn(),
          on: vi.fn() // Add mock listener
       } as unknown as http.ServerResponse;
@@ -185,7 +185,7 @@ describe('HttpServerToolTransport', () => {
 
       await (transport as any).processIncomingCall(mockReq, mockRes);
 
-      expect(mockRes.statusCode).toBe(500);
+      expect(mockRes.statusCode).toBe(400);
       const errorOutput = JSON.parse((mockRes.end as any).mock.calls[0][0]);
       expect(errorOutput.error).toBeDefined();
       expect(errorOutput.error.message).toBeTruthy();
