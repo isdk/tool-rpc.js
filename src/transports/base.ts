@@ -1,58 +1,70 @@
-/**
- * @file Defines common types used across transports.
- */
-
-import { ToolFunc } from "@isdk/tool-func";
+import { RpcTransportManager } from "./manager";
 
 /**
- * The generic handler for a remote procedure call (RPC) method.
- * It receives the parameters and returns the result.
- * @param params - The parameters for the RPC method.
- * @param context - Optional context, like the raw request object from the underlying framework.
- * @returns The result of the RPC method.
+ * 通用的 RPC 处理函数句柄类型
  */
 export type RpcMethodHandler = (params: any, context?: any) => Promise<any> | any;
 
-export interface IToolTransport {
-  Tools: typeof ToolFunc;
-  /**
-   * The root endpoint for the remote service.
-   * For HTTP, this is a URL. For IPC, it could be a channel name.
-   */
-  apiRoot: string;
-  /**
-   * Additional options for the transport start or fetch, passed by mount.
-   */
-  options?: any;
 
-  mount(Tools: typeof ToolFunc, apiRoot?: string, options?: any): any|Promise<any>;
+export interface ToolTransportOptions {
+  manager?: RpcTransportManager;
+  apiUrl?: string;
+  [key: string]: any;
+}
+
+/**
+ * 所有传输协议 (Client/Server) 统一的基础能力接口。
+ */
+export interface IToolTransport {
+  /**
+   * 所属管理器引用
+   */
+  manager?: RpcTransportManager;
+
+  /**
+   * 调用的基准 API 地点（URI）
+   * 必须能够支持处理如 scheme, hostname, port, 乃至 auth (user:pass)。
+   * 对于扁平协议，不必支持 path 路由（具体通过 header 进行）。
+   */
+  apiUrl: string;
+
+  /**
+   * 具体协议额外的配置或选项扩展
+   */
+  options?: ToolTransportOptions;
+
+  /**
+   * 启动服务 (仅服务端有效)
+   */
+  start?(options?: any): Promise<any>;
+
+  /**
+   * 停止服务或回收资源
+   */
+  stop?(force?: boolean): Promise<void>;
+
+  /**
+   * 物理层关闭句柄 (可选)
+   */
+  close?(): Promise<void> | void;
 
   [name: string]: any;
 }
 
 export abstract class ToolTransport implements IToolTransport {
-  declare apiRoot: string;
-  declare Tools: typeof ToolFunc;
-  declare options?: any;
+  declare apiUrl: string;
+  declare options?: ToolTransportOptions;
+  public manager: RpcTransportManager;
 
-  public setApiRoot(apiRoot: string) {
-    this.apiRoot = apiRoot;
-  }
-
-  public mount(Tools: typeof ToolFunc, apiRoot?: string, options?: any) {
-    if (!apiRoot) {
-      apiRoot = this.apiRoot
-      if (!apiRoot) {
-        throw new Error('apiRoot is required');
-      }
-    } else {
-      this.setApiRoot(apiRoot);
-    }
-
-    this.Tools = Tools;
+  constructor(options?: ToolTransportOptions) {
     this.options = options;
-    return this._mount(Tools, apiRoot, options);
+    this.manager = options?.manager || RpcTransportManager.instance;
+    if (options?.apiUrl) {
+      this.apiUrl = options.apiUrl;
+    }
   }
 
-  public abstract _mount(Tools: typeof ToolFunc, apiRoot: string, options?: any): any|Promise<any>;
+  public setApiUrl(apiUrl: string) {
+    this.apiUrl = apiUrl;
+  }
 }

@@ -2,7 +2,7 @@ import { getAllNames } from 'util-ex'
 import { type ServerFuncParams, ServerTools } from "./server-tools";
 import { type FuncParams, type FuncItem } from "@isdk/tool-func";
 import { NotFoundError } from "@isdk/common-error";
-import { ToolRpcContext } from "./transportsV2/models";
+import { ToolRpcContext } from "./transports/models";
 
 export interface RpcMethodsServerFuncParams extends ServerFuncParams {
   act?: string
@@ -19,7 +19,7 @@ export class RpcMethodsServerTool extends ServerTools {
   declare static SpecialRpcMethodNames?: string[]
 
   params: FuncParams = {
-    'act': {type: 'string'},
+    'act': { type: 'string' },
   }
 
   get SpecialRpcMethodNames() {
@@ -38,31 +38,33 @@ export class RpcMethodsServerTool extends ServerTools {
   initRpcMethods(methods = this.methods) {
     const ActionNames = this.SpecialRpcMethodNames
     if (Array.isArray(ActionNames))
-    for (const action of ActionNames) {
-      if (typeof this[action] === 'function') {
-        methods.push(action)
+      for (const action of ActionNames) {
+        if (typeof this[action] === 'function') {
+          methods.push(action)
+        }
       }
-    }
     getAllNames(Object.getPrototypeOf(this)).filter(name => name.startsWith('$') && typeof this[name] === 'function').forEach(name => {
       methods.push(name)
       const n = name.slice(1)
-      if (this[n] === undefined) {this[n] = this[name]}
+      if (this[n] === undefined) { this[n] = this[name] }
     })
   }
 
-  constructor(name: string|Function|FuncItem, options: FuncItem|any = {}) {
+  constructor(name: string | Function | FuncItem, options: FuncItem | any = {}) {
     super(name, options)
     const methods = this.methods = [] as string[]
     this.initRpcMethods(methods)
   }
 
-  cast(key: string, value: any) {
-    let vType = this.params[key]
-    if (vType) {
-      if (typeof vType !== 'string') {vType = vType.type as string}
-      if (vType === 'number') {
-        value = Number(value)
+  cast(key: string, value: any, vType?: any) {
+    if (!vType) {
+      vType = this.params[key]
+      if (vType && typeof vType !== 'string') {
+        vType = vType.type as string
       }
+    }
+    if (vType) {
+      value = castValue(value, vType)
     }
     return value
   }
@@ -85,21 +87,6 @@ export class RpcMethodsServerTool extends ServerTools {
       throw new NotFoundError(method!, this.name)
     }
   }
-
-  static toJSON() {
-    const result:{[name:string]: ServerTools} = {}
-    for (const name in this.items) {
-      let item: any = this.items[name];
-      if ((item instanceof this) && ((item.constructor as any).toJSON === this.toJSON) && item.isApi !== false) {
-        if (!item.allowExportFunc) {
-          item = item.toJSON()
-          delete item.func;
-        }
-        result[name] = item;
-      }
-    }
-    return result
-  }
 }
 
 export const RpcMethodsServerToolSchema = {
@@ -109,3 +96,21 @@ export const RpcMethodsServerToolSchema = {
 }
 
 RpcMethodsServerTool.defineProperties(RpcMethodsServerTool, RpcMethodsServerToolSchema)
+
+function castValue(value: any, vType?: any) {
+  if (vType) {
+    if (Array.isArray(vType)) {
+      for (const t of vType) {
+        try {
+          value = castValue(value, t)
+          break;
+        } catch (e) { }
+      }
+    } else {
+      if (vType === 'number') {
+        value = Number(value)
+      }
+    }
+  }
+  return value
+}

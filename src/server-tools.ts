@@ -1,7 +1,7 @@
 import { ToolFunc } from "@isdk/tool-func";
 import { RemoteToolFuncSchema, RemoteFuncItem } from "./consts";
-import { ToolRpcContext } from "./transportsV2/models";
-import { injectV1ContextToParams, bridgeContextToV1Params } from "./transportsV2/compat";
+import { ToolRpcContext } from "./transports/models";
+import { injectV1ContextToParams, bridgeContextToV1Params } from "./transports/compat";
 
 /**
  * ServerFuncParams 定义。
@@ -41,8 +41,8 @@ export class ServerTools extends ToolFunc {
     const result: { [name: string]: ServerTools } = {}
     for (const name in this.items) {
       let item: any = this.items[name];
-      const isExactType = (item instanceof this) && ((item.constructor as any).toJSON === this.toJSON) && item.isApi !== false;
-      const isBaseApi = item.isApi && !(item instanceof ServerTools);
+      const isExactType = (item instanceof this) && item.isApi !== false;
+      const isBaseApi = item.isApi && !(item instanceof ServerTools) && (this === ServerTools);
 
       if (isExactType || isBaseApi) {
         if (!item.allowExportFunc) {
@@ -71,7 +71,8 @@ export class ServerTools extends ToolFunc {
       bridgeContextToV1Params(context, params);
     }
 
-    return this.func(params, context);
+    // 如果没有重写 func，则调用基类的 run，它会处理 positional 参数等逻辑。
+    return super.run(params, context);
   }
 
   /**

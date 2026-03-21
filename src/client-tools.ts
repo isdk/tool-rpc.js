@@ -1,7 +1,7 @@
 import { throwError } from "@isdk/common-error";
 import { Funcs, ToolFunc } from "@isdk/tool-func";
 import { RemoteToolFuncSchema, type RemoteFuncItem, type ActionName } from "./consts";
-import type { IClientToolTransport } from "./transportsV2/client";
+import type { IClientToolTransport } from "./transports/client";
 import { defaultsDeep } from "lodash-es";
 
 // * Declaration merging to extend the `ClientTools` class with `ClientFuncItem` properties.
@@ -21,7 +21,7 @@ export declare namespace ClientTools {
 /**
  * Alias for `RemoteFuncItem` on the client side.
  */
-export interface ClientFuncItem extends RemoteFuncItem {}
+export interface ClientFuncItem extends RemoteFuncItem { }
 
 const NoTransportErrorMsg = 'A client transport has not been set. Use ClientTools.setTransport() or transport.mount(ClientTools) first.';
 
@@ -46,7 +46,7 @@ export class ClientTools extends ToolFunc {
    * This is used as the base for constructing request URLs.
    */
   static get apiRoot() {
-    if (!this._transport) {throwError(NoTransportErrorMsg, 'ClientTools')}
+    if (!this._transport) { throwError(NoTransportErrorMsg, 'ClientTools') }
     return this._transport.apiRoot
   }
 
@@ -58,6 +58,9 @@ export class ClientTools extends ToolFunc {
   static setTransport(transport: IClientToolTransport) {
     if (transport) {
       this._transport = transport;
+      if (typeof transport.mount === 'function') {
+        transport.mount(this);
+      }
     }
   }
 
@@ -122,7 +125,8 @@ export class ClientTools extends ToolFunc {
     if (ctor._transport) {
       // Merge fetchOptions with this.ctx (from tool-func)
       fetchOptions = defaultsDeep(fetchOptions, this.ctx, this.fetchOptions)
-      return ctor._transport.fetch(this.name!, objParam, act, subName, fetchOptions, this.timeout)
+      const result = await ctor._transport.fetch(this.name!, objParam, act, subName, fetchOptions, this.timeout)
+      return result
     } else {
       throwError(NoTransportErrorMsg, 'ClientTools');
     }
@@ -146,6 +150,6 @@ export class ClientTools extends ToolFunc {
  * The schema definition for `ClientTools` properties.
  * @internal
  */
-export const ClientToolFuncSchema =  { ...RemoteToolFuncSchema }
+export const ClientToolFuncSchema = { ...RemoteToolFuncSchema }
 
 ClientTools.defineProperties(ClientTools, ClientToolFuncSchema)

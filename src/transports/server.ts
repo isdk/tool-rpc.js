@@ -1,68 +1,122 @@
 import { defaultsDeep } from 'lodash-es';
-import type { ServerTools } from '../server-tools';
-import { ToolTransport, type IToolTransport } from './base';
+import { ToolTransport, type IToolTransport, type ToolTransportOptions } from './base';
+import { RpcServerDispatcher } from './dispatcher';
+import { ToolRpcRequest, ToolRpcResponse } from './models';
 
-/**
- * Defines the public interface for a server-side transport,
- * responsible for exposing ServerTools to the network.
- */
-export interface IServerToolTransport extends IToolTransport{
-  /**
-   * Mounts the ServerTools registry, creating the necessary API routes.
-   *
-   * This method is responsible for integrating the tool-handling logic with a
-   * running server instance.
-   *
-   * @param serverTools The ServerTools class containing the tool definitions.
-   * @param apiPrefix An optional prefix for all API routes (e.g., '/api').
-   * @param options A container for transport-specific options. For example,
-   *   an HTTP-based transport would expect an `{ server: http.Server }` object
-   *   to attach its route handlers to.
-   */
-  mount(serverTools: typeof ServerTools, apiPrefix?: string, options?: any): void;
+export interface ServerToolTransportOptions extends ToolTransportOptions {
+  dispatcher?: RpcServerDispatcher;
+}
+
+export interface IServerToolTransport extends IToolTransport {
+  dispatcher: RpcServerDispatcher;
+
+  /** 是否支持原生的流式传输 (如 HTTP 支持, Mailbox 通常不支持) */
+  canStream?: boolean;
 
   /**
-   * Starts the transport layer, making it listen for incoming connections.
-   * @param options Protocol-specific options (e.g., { port, host }).
+   * 启动物理监听
    */
   start(options?: any): Promise<any>;
 
   /**
-   * Stops the server instance gracefully.
-   * @param force - Optional flag to force shutdown immediately
-   * @returns Promise<void> when server is fully stopped
+   * 停止物理监听
    */
   stop(force?: boolean): Promise<void>;
 
   /**
-   * Gets the underlying raw server instance.
+   * 获取物理层面的监听地址标识。
+   * 默认返回 apiUrl。用于识别物理底座复用。
    */
+  getListenAddr(): string | string[];
+
+  /**
+   * 获取该实例声明负责的逻辑路由列表。
+   * 默认返回 ["/"] 表示接管该物理地址下的全量路径。
+   */
+  getRoutes(): string[];
+
   getRaw?(): any;
 }
 
-/**
- * An abstract base class for server-side transport implementations.
- * It provides the generic tool-mounting logic.
- */
 export abstract class ServerToolTransport extends ToolTransport implements IServerToolTransport {
-  declare apiRoot: string;
-  declare Tools: typeof ServerTools;
-  declare options?: any;
+  declare apiUrl: string;
+  declare options?: ServerToolTransportOptions;
+  public dispatcher: RpcServerDispatcher;
+  public canStream: boolean = false;
 
-  public _mount(Tools: typeof ServerTools, apiPrefix: string, options?: any): void {
-    // Mount the discovery endpoint first.
-    this.addDiscoveryHandler(apiPrefix, () => Tools);
-    this.addRpcHandler(Tools, apiPrefix, options);
+  constructor(options?: ServerToolTransportOptions) {
+    super(options);
+    this.dispatcher = options?.dispatcher || RpcServerDispatcher.instance;
+  }
+
+  public getListenAddr(): string | string[] {
+    return this.apiUrl;
+  }
+
+  public getRoutes(): string[] {
+    return ['/'];
   }
 
   public start(options?: any): Promise<any> {
-    if (this.options) {options = defaultsDeep(options, this.options)}
+    if (this.options) { options = defaultsDeep(options, this.options); }
     return this._start(options);
   };
 
-  public abstract addDiscoveryHandler(path: string, handler: () => any): void;
-  public abstract addRpcHandler(serverTools: typeof ServerTools, apiPrefix: string, options?: any): void;
+  /**
+   * Template Method：处理物理请求流水线。
+   * 下层具体协议收到请求后，将其转化为内部结构，送入 Dispatcher 并写回。
+   */
+  protected async processIncomingCall(rawReq: any, rawRes: any, registry?: any): Promise<void> {
+    try {
+      const rpcReq = await this.toRpcRequest(rawReq);
+
+      // 架构层校验：调用所属 Manager 实例进行策略审计 (SSRF 防御、白名单等)
+      this.manager.validateRpcRequest(rpcReq);
+
+      const rpcRes = await this.dispatcher.dispatch(rpcReq, registry);
+
+      // 能力预检：如果返回的是流，但传输层不支持流，应当报错
+      if (!this.canStream && rpcRes.data && (rpcRes.data instanceof ReadableStream || typeof rpcRes.data.getReader === 'function')) {
+        rpcRes.status = 400;
+        rpcRes.data = undefined;
+        rpcRes.error = {
+          code: 400,
+          status: 'bad_request',
+          message: `Streaming output is not supported by current transport protocol: ${this.apiUrl}`
+        };
+      }
+
+      await this.sendRpcResponse(rpcRes, rawRes);
+    } catch (err: any) {
+      // 顶级异常防护 (Top-level pipeline guard)
+      // 提取错误码，优先使用数字类型的 status 或 code
+      let errCode = 500;
+      if (typeof err.code === 'number') {
+        errCode = err.code;
+      } else if (typeof err.status === 'number') {
+        errCode = err.status;
+      }
+
+      const errStatus = typeof err.status === 'string' ? err.status : 'error';
+
+      await this.sendRpcResponse({
+        status: (errCode >= 100 && errCode < 600) ? errCode : 500,
+        error: {
+          message: err.message || "Transport Pipeline Error",
+          code: errCode,
+          status: errStatus,
+          data: err.data
+        }
+      }, rawRes);
+    }
+  }
+
+  protected abstract toRpcRequest(rawReq: any): Promise<ToolRpcRequest>;
+  protected abstract sendRpcResponse(rpcRes: ToolRpcResponse, rawRes: any): Promise<void>;
+
+  public abstract addDiscoveryHandler(apiUrl: string, handler: () => any): void;
+  public abstract addRpcHandler(apiUrl: string, options?: any): void;
   public abstract _start(options?: any): Promise<any>;
   public abstract stop(force?: boolean): Promise<void>;
-  public abstract getRaw?(): any;
+  public getRaw?(): any;
 }

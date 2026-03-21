@@ -1,10 +1,12 @@
 // @vitest-environment node
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
-import { Funcs, ToolFunc } from '@isdk/tool-func'
+import { ToolFunc } from '@isdk/tool-func'
 import { ServerTools } from "../src/server-tools"
 import { ClientTools } from '../src/client-tools'
 import { findPort } from '@isdk/util'
-import { HttpClientToolTransport, HttpServerToolTransport } from '../src/transports'
+import { HttpClientToolTransport } from '../src/transports/http-client'
+import { HttpServerToolTransport } from '../src/transports/http-server'
+import { RpcServerDispatcher } from '../src/transports/dispatcher'
 
 describe('Timeout and ExpectedDuration', () => {
   let apiRoot: string
@@ -20,11 +22,12 @@ describe('Timeout and ExpectedDuration', () => {
       name: 'slow-tool',
       timeout: 500,
       expectedDuration: 200,
-      func: async ({ delay = 1000, _signal }: { delay?: number, _signal?: AbortSignal }) => {
+      func: async ({ delay = 1000 }: { delay?: number }) => {
+        const signal = (this as any).ctx?.signal;
         return new Promise((resolve, reject) => {
           const timer = setTimeout(() => resolve('done'), delay);
-          if (_signal) {
-            _signal.addEventListener('abort', () => {
+          if (signal) {
+            signal.addEventListener('abort', () => {
               clearTimeout(timer);
               reject(new Error('Aborted by signal'));
             });
@@ -93,16 +96,23 @@ describe('Timeout and ExpectedDuration', () => {
       }
     });
 
-    server = new HttpServerToolTransport()
-    await server.mount(ServerTools, '/api')
+    // Setup Dispatcher Registry
+    RpcServerDispatcher.instance.registry = ServerTools;
+
     const port = await findPort(3000)
-    await server.start({ port })
     apiRoot = `http://localhost:${port}/api`
+
+    server = new HttpServerToolTransport({ port, apiUrl: apiRoot })
+    server.addRpcHandler(apiRoot)
+    server.addDiscoveryHandler(apiRoot, () => ServerTools.toJSON())
+
+    await server.start({ port })
 
     const clientTransport = new HttpClientToolTransport(apiRoot);
     ClientTools.setTransport(clientTransport);
     await ClientTools.loadFrom()
   })
+
 
   afterAll(async () => {
     await server.stop()

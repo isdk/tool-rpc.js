@@ -58,7 +58,8 @@ describe('V2 Pure Architecture (No Compatibility Layer)', () => {
     it('should allow ServerTools to disable legacy compat individually', async () => {
         class PureV2Tool extends ServerTools {
             enableLegacyCompat = false; // 个别工具显式关闭兼容
-            func(params: any, context: any) {
+            func(params: any) {
+                const context = this.ctx!;
                 return {
                     paramsId: params.id,
                     contextId: context.resId,

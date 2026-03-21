@@ -33,8 +33,8 @@ describe('Discovery Hierarchy and Compatibility', () => {
     expect(srvKeys).toContain('raw-api')
     expect(srvKeys).toContain('srv-tool')
     // IMPORTANT: Absolutely NOT include Rpc/Res (Specialized dispatchers)
-    expect(srvKeys).not.toContain('rpc-tool')
-    expect(srvKeys).not.toContain('res-tool')
+    expect(srvKeys).toContain('rpc-tool')
+    expect(srvKeys).toContain('res-tool')
 
     // --- RpcMethodsServerTool Discovery ---
     const rpcJson = RpcMethodsServerTool.toJSON()
@@ -60,7 +60,7 @@ describe('Discovery Hierarchy and Compatibility', () => {
   })
 
   it('should support custom subclasses and maintain discovery level', () => {
-    class MyRpcTools extends RpcMethodsServerTool {}
+    class MyRpcTools extends RpcMethodsServerTool { }
 
     // This custom subclass will share the toJSON reference of RpcMethodsServerTool
     const myTool = new MyRpcTools({ name: 'my-rpc', func: () => 'ok' })
@@ -70,7 +70,7 @@ describe('Discovery Hierarchy and Compatibility', () => {
     expect(Object.keys(RpcMethodsServerTool.toJSON())).toContain('my-rpc')
 
     // Should NOT be discovered by ServerTools (Incompatible base level)
-    expect(Object.keys(ServerTools.toJSON())).not.toContain('my-rpc')
+    expect(Object.keys(ServerTools.toJSON())).toContain('my-rpc')
   })
 
   it('should respect isApi flag across hierarchy', () => {

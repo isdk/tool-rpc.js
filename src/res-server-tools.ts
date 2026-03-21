@@ -1,10 +1,10 @@
 import { type FuncParams, type FuncItem } from "@isdk/tool-func";
 import { type ActionName, ActionNames } from "./consts";
 import { RpcMethodsServerFuncParams, RpcMethodsServerTool } from './rpc-methods-server-tool';
-import { ToolRpcContext } from "./transportsV2/models";
+import { ToolRpcContext } from "./transports/models";
 
 export interface ResServerFuncParams extends RpcMethodsServerFuncParams {
-  id?: string|number
+  id?: string | number
   // the value
   val?: any
 }
@@ -24,11 +24,12 @@ export class ResServerTools extends RpcMethodsServerTool {
   static SpecialRpcMethodNames = ActionNames as any
   action: ActionName = 'res'
   params: FuncParams = {
-    'id': {type: 'string'},
-    'val': {type: 'any'},
+    // 默认允许传入数组一次性取多个！
+    'id': { type: 'string' },
+    'val': { type: 'any' },
   }
 
-  constructor(name: string|Function|FuncItem, options: FuncItem|any = {}) {
+  constructor(name: string | Function | FuncItem, options: FuncItem | any = {}) {
     super(name, options)
   }
 
@@ -51,8 +52,16 @@ export class ResServerTools extends RpcMethodsServerTool {
 
     // 2. 否则根据环境猜测逻辑动作
     const ctx = context || this.ctx;
-    let method = ctx?.req?.method?.toLowerCase();
-    
+    // V2 架构下，HTTP Method 已归一化到 headers['x-http-method']
+    let method = ctx?.headers?.['x-http-method'] as string;
+
+    // 兼容遗留的物理对象访问
+    if (!method && ctx?.req?.method) {
+      method = ctx.req.method;
+    }
+
+    method = method?.toLowerCase();
+
     if (method === 'get' && this.getResId(params, context) === undefined) {
       method = 'list';
     }

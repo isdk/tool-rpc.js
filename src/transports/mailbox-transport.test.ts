@@ -2,19 +2,20 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { Mailbox, MemoryProvider, MailMessage } from '@mboxlabs/mailbox';
 
 import { ToolFunc, Funcs } from '@isdk/tool-func';
-import { ServerTools } from '../../server-tools';
-import { ResServerTools } from '../../res-server-tools';
-import { ClientTools } from '../../client-tools';
-import { ResClientTools } from '../../res-client-tools';
-import { MailboxServerTransport } from './server';
-import { MailboxClientTransport } from './client';
+import { ServerFuncItem, ServerTools } from '../server-tools';
+import { ResServerTools } from '../res-server-tools';
+import { ClientTools } from '../client-tools';
+import { ResClientTools } from '../res-client-tools';
+import { ToolRpcRequest, ToolRpcResponse, ToolRpcContext, RPC_HEADERS, RpcStatusCode } from './models';
+import { MailboxServerTransport as V2MailboxServerTransport } from './mailbox-server';
+import { MailboxClientTransport as V2MailboxClientTransport } from './mailbox-client';
 
-describe('MailboxServerTransport / MailboxClientTransport Test', () => {
+describe('MailboxServerTransport / MailboxClientTransport V2 Test', () => {
   let mailbox: Mailbox;
-  let serverTransport: MailboxServerTransport;
-  let resServerTransport: MailboxServerTransport;
-  let clientTransport: MailboxClientTransport;
-  let resClientTransport: MailboxClientTransport;
+  let serverTransport: V2MailboxServerTransport;
+  let resServerTransport: V2MailboxServerTransport;
+  let clientTransport: V2MailboxClientTransport;
+  let resClientTransport: V2MailboxClientTransport;
 
   const serverAddress = 'mem://api@server/api';
   const resServerAddress = 'mem://api@server/res';
@@ -22,12 +23,12 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
   const resClientAddress = 'mem://user@client/res-inbox';
 
   beforeAll(async () => {
-    // 1. Isolate Server side items (Shared among server classes)
+    // 1. Isolate Server side items
     const serverItems: any = Object.create(ToolFunc.items);
     (ServerTools as any).items = serverItems;
     (ResServerTools as any).items = serverItems;
 
-    // 2. Isolate Client side items (Shared among client classes, start empty)
+    // 2. Isolate Client side items
     const clientItems: Funcs = {};
     (ClientTools as any).items = clientItems;
     (ResClientTools as any).items = clientItems;
@@ -35,7 +36,7 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
     mailbox = new Mailbox();
     mailbox.registerProvider(new MemoryProvider());
 
-    // 3. Register tools on server items
+    // 3. Register tools
     new ServerTools({
       name: 'calculator',
       isApi: true,
@@ -54,33 +55,36 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
     }).register();
 
     // 4. Setup server transports
-    serverTransport = new MailboxServerTransport({ mailbox, address: serverAddress });
-    serverTransport.mount(ServerTools);
+    serverTransport = new V2MailboxServerTransport({ mailbox, apiUrl: serverAddress });
+    serverTransport.dispatcher.registry = ServerTools;
+    serverTransport.addDiscoveryHandler(serverAddress, () => ServerTools);
+    serverTransport.addRpcHandler(serverAddress);
     await serverTransport.start();
 
-    resServerTransport = new MailboxServerTransport({ mailbox, address: resServerAddress });
-    resServerTransport.mount(ResServerTools);
+    resServerTransport = new V2MailboxServerTransport({ mailbox, apiUrl: resServerAddress });
+    resServerTransport.dispatcher.registry = ResServerTools;
+    resServerTransport.addDiscoveryHandler(resServerAddress, () => ResServerTools);
+    resServerTransport.addRpcHandler(resServerAddress);
     await resServerTransport.start();
 
     // 5. Setup client transports
-    clientTransport = new MailboxClientTransport({
+    clientTransport = new V2MailboxClientTransport({
       mailbox,
       serverAddress: serverAddress,
       clientAddress: clientAddress,
       timeout: 1000,
     });
-    // Mount the transport to activate the client subscription
-    await clientTransport.mount(ClientTools);
+    ClientTools.setTransport(clientTransport);
+    await clientTransport.start();
 
-    resClientTransport = new MailboxClientTransport({
+    resClientTransport = new V2MailboxClientTransport({
       mailbox,
       serverAddress: resServerAddress,
       clientAddress: resClientAddress,
       timeout: 2000,
     });
-    // Mount the transport to activate the client subscription for ResClientTools
-    await resClientTransport.mount(ResClientTools);
     ResClientTools.setTransport(resClientTransport);
+    await resClientTransport.start();
   });
 
   afterAll(async () => {
@@ -88,7 +92,6 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
     await resServerTransport.stop();
     await clientTransport.stop();
     await resClientTransport.stop();
-    // Cleanup items
     delete (ServerTools as any).items;
     delete (ResServerTools as any).items;
     delete (ClientTools as any).items;
@@ -97,12 +100,8 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
 
   it('should load APIs via discovery', async () => {
     await ClientTools.loadFrom();
-
-    const calculator = ClientTools.get('calculator');
-    expect(calculator).toBeDefined();
-
-    const errorTool = ClientTools.get('errorTool');
-    expect(errorTool).toBeDefined();
+    expect(ClientTools.get('calculator')).toBeDefined();
+    expect(ClientTools.get('errorTool')).toBeDefined();
   });
 
   it('should call remote tool and get result', async () => {
@@ -123,13 +122,15 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
     }
   });
 
-  it('should allow tool to access sender information via context', async () => {
+  it('should allow tool to access sender information via V2 context headers', async () => {
     new ServerTools({
       name: 'whoami',
       isApi: true,
-      func: (params) => {
-        const message = params._req as MailMessage;
-        return { sender: message.from?.href };
+      func: function (params: any) {
+        // V2 Native way: use headers
+        const context: ToolRpcContext = this.ctx as any;
+
+        return { sender: context.headers['x-mailbox-from'] };
       },
     }).register();
 
@@ -149,21 +150,16 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
   it('should support RESTful style call with resId via Headers', async () => {
     class UserResTool extends ResServerTools {
       get(params: any) {
-        return { resId: params.id, name: 'Alice' };
+        const context: ToolRpcContext = this.ctx!;
+        return { resId: context.resId, name: 'Alice' };
       }
     }
-    // Register it onto the server items (via the tool class)
-    new UserResTool('users', { isApi: true }).register();
-    console.log(`[Test] Registered UserResTool 'users' on server`);
+    (new UserResTool('users') as any).register('users', { isApi: true });
 
     await ResClientTools.loadFrom();
     const userTool = ResClientTools.get('users');
-    console.log(`[Test] UserTool found on client: ${userTool !== undefined}`);
-
     if (userTool) {
-      console.log(`[Test] Calling userTool.fetch for id 123`);
       const user = await userTool.fetch({ id: '123' }, 'get');
-      console.log(`[Test] Received user response:`, user);
       expect(user).toEqual({ resId: '123', name: 'Alice' });
     } else {
       expect.fail('UserResTool should be discovered');
@@ -172,34 +168,35 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
 
   it('should work in Pull mode', async () => {
     const pullServerAddress = 'mem://pull-server/api';
-    const pullServer = new MailboxServerTransport({
+    const pullServer = new V2MailboxServerTransport({
       mailbox,
-      address: pullServerAddress,
+      apiUrl: pullServerAddress,
       mode: 'pull',
       pullInterval: 10
     });
 
-    // We can use ServerTools to register it, it will be visible to this server
     new ServerTools({
       name: 'pullTester',
       isApi: true,
       func: () => 'pull-success',
     }).register();
 
-    pullServer.mount(ServerTools);
+    pullServer.dispatcher.registry = ServerTools;
+    pullServer.addDiscoveryHandler(pullServerAddress, () => ServerTools);
+    pullServer.addRpcHandler(pullServerAddress);
     await pullServer.start();
 
-    const pullClient = new MailboxClientTransport({
+    const pullClient = new V2MailboxClientTransport({
       mailbox,
       serverAddress: pullServerAddress,
       clientAddress: 'mem://pull-client/inbox',
       timeout: 2000,
     });
 
-    // Independent client for pull test
     const pullClientItems = {};
     const pullClientToolsClass = class extends ClientTools { static items = pullClientItems } as any;
-    await pullClient.mount(pullClientToolsClass);
+    pullClientToolsClass.setTransport(pullClient);
+    await pullClient.start();
 
     const result = await pullClient.fetch('pullTester');
     expect(result).toBe('pull-success');
@@ -252,13 +249,15 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
       },
     }).register();
 
-    const pullServer = new MailboxServerTransport({
+    const pullServer = new V2MailboxServerTransport({
       mailbox,
-      address: backlogAddress,
+      apiUrl: backlogAddress,
       mode: 'pull',
       pullInterval: 5
     });
-    pullServer.mount(ServerTools);
+    pullServer.dispatcher.registry = ServerTools;
+    pullServer.addDiscoveryHandler(backlogAddress, () => ServerTools);
+    pullServer.addRpcHandler(backlogAddress);
     await pullServer.start();
 
     await new Promise(resolve => setTimeout(resolve, 200));
@@ -284,11 +283,11 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
     new ServerTools({
       name: 'headerInspector',
       isApi: true,
-      func: (params) => {
-        const message = params._req as MailMessage;
+      func: function (params: any) {
+        const context = this.ctx!;
         return {
-          custom: message.headers?.['mbx-custom-field'],
-          traceId: message.headers?.['trace-id'],
+          custom: context.headers?.['mbx-custom-field'],
+          traceId: context.headers?.['trace-id'],
         };
       },
     }).register();
@@ -372,8 +371,8 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
     });
 
     const response = await responsePromise;
-    expect(response.error).toContain("missing 'rpc-fn' in headers");
-    expect(response.code).toBe(400);
+    expect(response.error.message).toContain("missing tool identifier");
+    expect(response.error.code).toBe(400);
   });
 
   it('should support discovery via "get" action', async () => {
@@ -405,7 +404,7 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
     new ServerTools({
       name: 'echo',
       isApi: true,
-      func: (params) => params.data,
+      func: (params: any) => params.data,
     }).register();
 
     await ClientTools.loadFrom();
@@ -438,7 +437,7 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
   });
 
   it('should reject pending requests when transport is stopped', async () => {
-    const stopTransport = new MailboxClientTransport({
+    const stopTransport = new V2MailboxClientTransport({
       mailbox,
       serverAddress: 'mem://nobody-listener/api',
       clientAddress: 'mem://stopper@client/inbox',
@@ -453,5 +452,159 @@ describe('MailboxServerTransport / MailboxClientTransport Test', () => {
     await stopTransport.stop();
 
     await expect(promise).rejects.toThrow('Transport stopped');
+  });
+
+  describe('MailboxServerTransport Internal Path Logic', () => {
+    it('should extract apiPrefix correctly from complex URLs', () => {
+      const transport = new V2MailboxServerTransport({ mailbox, apiUrl: 'mem://my-bot/api/v1?debug=true' });
+      expect((transport as any).apiPrefix).toBe('/api/v1/');
+    });
+
+    it('should handle URLs with redundant slashes', () => {
+      const transport = new V2MailboxServerTransport({ mailbox, apiUrl: 'mem://my-bot///api//v2//' });
+      expect((transport as any).apiPrefix).toBe('/api/v2/');
+    });
+
+    it('should normalize paths in addRpcHandler', () => {
+      const transport = new V2MailboxServerTransport({ mailbox, apiUrl: 'mem://my-bot/' });
+      transport.addRpcHandler('mem://my-bot/custom-path');
+      expect((transport as any).apiPrefix).toBe('/custom-path/');
+    });
+
+    it('should handle malformed URLs gracefully by falling back to root', () => {
+      const transport = new V2MailboxServerTransport({ mailbox, apiUrl: 'not-a-valid-url' });
+      expect((transport as any).apiPrefix).toBe('/');
+    });
+
+    it('should prioritize V2 headers over V1 mbx- headers', async () => {
+      // 在这个测试中，我们手动模拟一个混合消息
+      const rpcReq = await (serverTransport as any).toRpcRequest({
+        id: 'priority-test',
+        body: {},
+        headers: {
+          'req-id': 'pri-test-id',
+          'rpc-fn': 'v2-tool',
+          'rpc-act': 'v2-act',
+        }
+      });
+      expect(rpcReq.toolId).toBe('v2-tool');
+      expect(rpcReq.requestId).toBe('pri-test-id');
+      expect(rpcReq.act).toBe('v2-act');
+    });
+  });
+
+  describe('Strict Mode and req-id logic', () => {
+    it('should reject request without req-id in default Strict Mode', async () => {
+      const responsePromise = new Promise<any>((resolve) => {
+        const sub = mailbox.subscribe(clientAddress, (msg) => {
+          // 在严格模式下，如果没有 req-id，服务端会回传 msg.body.error
+          if (msg.body?.error) {
+            sub.unsubscribe();
+            resolve(msg.body);
+          }
+        });
+      });
+
+      // 手动构造一个没有 req-id 的请求
+      await mailbox.post({
+        from: clientAddress,
+        to: serverAddress,
+        body: { a: 1, b: 2 },
+        headers: {
+          'rpc-fn': 'calculator',
+          'rpc-act': 'post',
+          // 故意不传 'req-id'
+        }
+      });
+
+      const response = await responsePromise;
+      expect(response.error.message).toContain('missing req-id in headers (Strict Mode)');
+      expect(response.error.code).toBe(400);
+    });
+
+    it('should allow request without req-id when strict: false (Fallback Mode)', async () => {
+      const fallbackServerAddress = 'mem://fallback-server/api';
+      const fallbackServer = new V2MailboxServerTransport({
+        mailbox,
+        apiUrl: fallbackServerAddress,
+        strict: false // 禁用严格模式
+      });
+      fallbackServer.dispatcher.registry = ServerTools;
+      fallbackServer.addRpcHandler(fallbackServerAddress);
+      await fallbackServer.start();
+
+      const responsePromise = new Promise<any>((resolve) => {
+        const sub = mailbox.subscribe(clientAddress, (msg) => {
+          // 这里检查 msg.headers['req-id'] 是否等于原始消息的 id
+          if (msg.headers?.['req-id']?.startsWith('msg-')) {
+            sub.unsubscribe();
+            resolve(msg.body);
+          }
+        });
+      });
+
+      await mailbox.post({
+        id: 'msg-fallback-test',
+        from: clientAddress,
+        to: fallbackServerAddress,
+        body: { a: 5, b: 5 },
+        headers: {
+          'rpc-fn': 'calculator',
+          'rpc-act': 'post',
+        }
+      });
+
+      const result = await responsePromise;
+      expect(result).toBe(10);
+      await fallbackServer.stop();
+    });
+
+    it('should isolate tasks in RpcActiveTaskTracker using req-id', async () => {
+      // 注册一个长耗时工具
+      new ServerTools({
+        name: 'longTask',
+        isApi: true,
+        timeout: { value: 200, keepAliveOnTimeout: true },
+        func: async () => {
+          await new Promise(r => setTimeout(r, 10));
+          return 'done';
+        },
+      } as ServerFuncItem).register();
+
+      // 发送两个内容相同但 req-id 不同的请求
+      const req1 = clientTransport.fetch('longTask', {}, 'post', undefined, { headers: { 'req-id': 'task-1' } });
+      const req2 = clientTransport.fetch('longTask', {}, 'post', undefined, { headers: { 'req-id': 'task-2' } });
+
+      // 在 V2 Dispatcher 中，它们应该由于 req-id 不同而互不干扰
+      const [res1, res2] = await Promise.all([req1, req2]);
+
+      // 注意：如果 keepAliveOnTimeout 触发，返回的是状态对象
+      expect(res1).toBeDefined();
+      expect(res2).toBeDefined();
+    });
+
+    it('should catch RpcError thrown during validation and return structured error response', async () => {
+      // Trigger validation error: missing toolId
+      const responsePromise = new Promise<any>((resolve) => {
+        const sub = mailbox.subscribe(clientAddress, (msg) => {
+          if (msg.headers?.['req-id'] === 'bad-req') {
+            sub.unsubscribe();
+            resolve(msg.body);
+          }
+        });
+      });
+
+      await mailbox.post({
+        from: clientAddress,
+        to: serverAddress,
+        body: {},
+        headers: { 'req-id': 'bad-req' } // Missing rpc-fn
+      });
+
+      const res = await responsePromise;
+      expect(res.error).toBeDefined();
+      expect(res.error.code).toBe(RpcStatusCode.BAD_REQUEST);
+      expect(res.error.message).toMatch(/missing tool identifier/);
+    });
   });
 });

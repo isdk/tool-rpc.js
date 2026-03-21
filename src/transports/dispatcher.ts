@@ -313,8 +313,8 @@ export class RpcServerDispatcher {
 
     if (err.name === 'AbortError' || err.code === 'ETIMEDOUT' || err.code === 20 || err.code === RpcStatusCode.TERMINATED) {
       return {
-        status: RpcStatusCode.TERMINATED,
-        error: { code: 408, status: 'timeout', message: err.message || "Request Timeout" }
+        status: RpcStatusCode.GATEWAY_TIMEOUT,
+        error: { code: RpcStatusCode.GATEWAY_TIMEOUT, status: 'timeout', message: err.message || "Request Timeout" }
       };
     }
 

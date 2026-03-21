@@ -1,196 +1,184 @@
-import { createError } from "@isdk/common-error";
-import { Funcs } from '@isdk/tool-func';
-import { ActionName } from '../consts';
-import { genUrlParamsStr } from "./gen-url-params";
-import { ClientToolTransport } from "./client";
+import { ClientToolTransport, ClientToolTransportOptions } from "./client";
+import { ActionName } from "../consts";
+import { RPC_HEADERS } from "./models";
 
-/**
- * A concrete client transport implementation that uses the browser/node `fetch` API.
- */
+export interface HttpClientToolTransportOptions extends ClientToolTransportOptions {
+}
+
 export class HttpClientToolTransport extends ClientToolTransport {
 
-  /**
-   * Connects to the server's discovery endpoint to get the list of available tools.
-   * @param options Additional options for the discovery call.
-   * @returns A promise that resolves to a map of tool function metadata.
-   */
-  async loadApis(options?: any): Promise<Funcs> {
-    const fetchOptions = {
-      headers: { 'Content-Type': 'application/json' },
-      ...options,
-    };
-    const res = await this._fetch('', undefined, 'get', undefined, fetchOptions);
-    const items = await res.json();
-    return items;
-  }
+   constructor(apiUrl: string, options?: HttpClientToolTransportOptions) {
+      super(apiUrl, options);
+   }
 
-  async _fetch(name: string, args?: any, act?: ActionName | string, subName?: any, fetchOptions?: any) {
-    const HasContentMethods = ['post', 'put', 'patch']
-    if (!act) { act = this.Tools.action || 'post' }
-    if (act === 'res') { act = 'get' }
+   public async _fetch(name: string, args?: any, act?: ActionName | string, id?: any, fetchOptions: any = {}) {
+      let url = this.apiUrl;
+      if (id != null && typeof id !== 'string') { id = JSON.stringify(id) }
 
-    if ((!fetchOptions.headers || !fetchOptions.headers['Content-Type']) && HasContentMethods.includes(act)) {
-      fetchOptions.headers = {
-        "Content-Type": "application/json",
-        ...fetchOptions.headers,
+      const headersstr: Record<string, string> = { ...fetchOptions.headers };
+
+      // Inject standard routing headers (The essence of V2 Transport decoupling!)
+      if (name) headersstr[RPC_HEADERS.FUNC] = name;
+      if (act) headersstr[RPC_HEADERS.ACT] = act as string;
+      if (id) headersstr[RPC_HEADERS.RES_ID] = id;
+
+      // We can also append to URL if it's HTTP for better DX and backward compat
+      // This helps Server side fallback extracting if other servers are not fully V2
+      if (url.startsWith('http')) {
+         try {
+            const u = new URL(url);
+            let p = u.pathname;
+            if (!p.endsWith('/')) p += '/';
+
+            if (name) {
+               p += encodeURIComponent(name);
+               if (id) {
+                  p += '/' + encodeURIComponent(id);
+               }
+            }
+
+            // Reconstruct URL to preserve origin and query/hash
+            // Note: URL constructor does not double-encode paths passed as string
+            const newUrl = new URL(p, u.origin);
+            newUrl.search = u.search;
+            newUrl.hash = u.hash;
+            url = newUrl.toString();
+         } catch (e) {
+            // Fallback to simple concatenation if URL parsing fails (should be rare)
+            if (!url.endsWith('/')) url += '/';
+            if (name) {
+               url += encodeURIComponent(name);
+               if (id) {
+                  url += '/' + encodeURIComponent(id);
+               }
+            }
+         }
       }
-    }
 
-    // Translate clientId from options to a request header
-    if (fetchOptions?.clientId) {
-      if (!fetchOptions.headers) {
-        fetchOptions.headers = {};
+      let reqOptions: any = {
+         method: 'POST',
+         headers: headersstr
+      };
+
+      if (!headersstr['Content-Type']) {
+         headersstr['Content-Type'] = 'application/json';
       }
-      fetchOptions.headers['x-client-id'] = fetchOptions.clientId;
-      delete fetchOptions.clientId;
-    }
 
-    if (args?.stream && !fetchOptions.headers.Connection) {
-      fetchOptions.headers.Connection = 'keep-alive'
-    }
-    if (subName) {
-      if (typeof subName !== 'string') { subName = JSON.stringify(subName) }
-      if (name) { subName = name + '/' + subName }
-    } else {
-      subName = name
-    }
+      if (act === 'get' || act === 'delete' || act === 'list' || fetchOptions.method === 'GET') {
+         reqOptions.method = (act === 'delete') ? 'DELETE' : 'GET';
+         if (args) {
+            const u = new URL(url);
+            u.searchParams.append('p', typeof args === 'string' ? args : JSON.stringify(args));
+            url = u.toString();
+         }
+      } else if (args) {
+         reqOptions.body = typeof args === 'string' ? args : JSON.stringify(args);
+      }
 
-    fetchOptions.method = act.toUpperCase()
-    let urlPart: string
-    if (act === 'get' || act === 'delete') {
-      urlPart = subName + genUrlParamsStr(args)
-    } else {
-      fetchOptions.body = JSON.stringify(args)
-      urlPart = subName!
-    }
+      // [Client-side Timeout & Signal Handling]
+      let timeoutId: any;
+      const controller = new AbortController();
 
-    if (fetchOptions.headers && !HasContentMethods.includes(act)) {
-      delete fetchOptions.headers['Content-Type']
-    }
+      if (fetchOptions.signal) {
+         fetchOptions.signal.addEventListener('abort', () => controller.abort(fetchOptions.signal.reason));
+      }
 
-    const fullUrl = urlPart ? `${this.apiRoot}/${urlPart}` : this.apiRoot;
+      reqOptions.signal = controller.signal;
 
-    let timeoutVal: number | undefined;
-    if (fetchOptions.timeout) {
-      timeoutVal = typeof fetchOptions.timeout === 'number' ? fetchOptions.timeout : fetchOptions.timeout.value;
+      let timeoutVal = fetchOptions.timeout;
+      if (typeof timeoutVal === 'object' && timeoutVal !== null) timeoutVal = timeoutVal.value;
       if (timeoutVal) {
-        if (!fetchOptions.headers) { fetchOptions.headers = {}; }
-        fetchOptions.headers['rpc-timeout'] = timeoutVal.toString();
-
-        if (!fetchOptions.signal) {
-          const controller = new AbortController();
-          fetchOptions.signal = controller.signal;
-          // Add a small buffer to client local timeout to receive server 504
-          const clientLocalTimeout = timeoutVal + 200;
-          setTimeout(() => {
-            if (!controller.signal.aborted) {
-              controller.abort();
-            }
-          }, clientLocalTimeout);
-        }
+         timeoutId = setTimeout(() => {
+            const err = new Error('Request Timeout');
+            (err as any).code = 504;
+            controller.abort(err);
+         }, Number(timeoutVal));
       }
-    }
 
-    const res = await fetch(fullUrl, fetchOptions)
-    if (!res.ok) {
-      const err = await this.errorFrom(name, res)
-      throw err
-    }
-
-    if (args?.stream && fetchOptions.timeout?.streamIdleTimeout) {
-      return this.wrapStreamWithIdleTimeout(res, fetchOptions.timeout.streamIdleTimeout);
-    }
-    return res
-  }
-
-  /**
-   * Wraps a response with a stream idle timeout.
-   * @param res - The response to wrap.
-   * @param idleTimeout - The idle timeout in milliseconds.
-   * @returns A response with a wrapped stream.
-   */
-  private wrapStreamWithIdleTimeout(res: any, idleTimeout: number) {
-    if (!res.body) return res;
-
-    const reader = res.body.getReader();
-    const stream = new ReadableStream({
-      async start(controller) {
-        let timer: any;
-
-        const resetTimer = () => {
-          if (timer) clearTimeout(timer);
-          timer = setTimeout(() => {
-            const err: any = new Error('Stream Idle Timeout');
-            err.code = 'TIMEOUT';
-            controller.error(err);
-            reader.cancel();
-          }, idleTimeout);
-        };
-
-        resetTimer();
-
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) {
-              if (timer) clearTimeout(timer);
-              controller.close();
-              break;
-            }
-            resetTimer();
-            controller.enqueue(value);
-          }
-        } catch (err) {
-          if (timer) clearTimeout(timer);
-          controller.error(err);
-        }
-      }
-    });
-
-    return new Response(stream, {
-      status: res.status,
-      statusText: res.statusText,
-      headers: res.headers,
-    });
-  }
-
-  /**
-   * @internal
-   * A helper to create a structured error from a failed `fetch` response.
-   * @param res - The HTTP response.
-   * @returns A structured error object.
-   */
-  async errorFrom(name: string, res: Response) {
-    let errCode = res.status
-    let errMsg = res.statusText
-    let data: any
-    if (res.body) {
-      const text = await res.text()
       try {
-        const body = JSON.parse(text)
-        if (body) {
-          if (body.error) { errMsg = body.error }
-          if (body.name) { name = body.name }
-          if (body.data) {
-            data = body.data
-            data.name = name
-            if (data.what) {
-              data.msg = errMsg
-              errMsg = data.what
-            }
-          }
-          if (body.message) {
-            errMsg = errMsg + ':' + body.message;
-          }
-        }
-      } catch (e) {
-        console.warn('🚀 ~ parse error body to json:', e)
-      }
-    }
-    return createError(errMsg, name, errCode)
-  }
+         const response = await fetch(url, reqOptions);
+         clearTimeout(timeoutId);
 
-  async toObject(res: any, args?: any) {
-    return await res.json()
-  }
+         if (response.status === 102) {
+            return {
+               status: 102,
+               headers: Object.fromEntries(response.headers.entries())
+            };
+         }
+
+         if (!response.ok && response.status !== 102) {
+            let errMsg = response.statusText;
+            let errDetails: any = {};
+            try {
+               const errBody = await response.json();
+               if (errBody.error && typeof errBody.error === 'object') {
+                  errMsg = errBody.error.message || errMsg;
+                  errDetails = errBody.error;
+               } else if (errBody.error) {
+                  errMsg = String(errBody.error);
+               }
+            } catch { }
+
+            const error: any = new Error(`RPC Error [${response.status}]: ${errMsg}`);
+            error.code = errDetails.code || response.status;
+            error.status = errDetails.status || 'error';
+            error.data = errDetails.data;
+            if (errDetails.name) error.name = errDetails.name;
+
+            throw error;
+         }
+
+         // [Stream Idle Timeout Enforcement]
+         const idleTimeoutVal = (typeof fetchOptions.timeout === 'object') ? fetchOptions.timeout.streamIdleTimeout : undefined;
+         if (idleTimeoutVal && response.body) {
+            let idleTimer: any;
+            const resetIdleTimer = (controller: TransformStreamDefaultController) => {
+               if (idleTimer) clearTimeout(idleTimer);
+               idleTimer = setTimeout(() => {
+                  controller.error(new Error(`Idle Timeout (${idleTimeoutVal}ms)`));
+               }, Number(idleTimeoutVal));
+            };
+
+            const transformer = new TransformStream({
+               start(controller) {
+                  resetIdleTimer(controller);
+               },
+               transform(chunk, controller) {
+                  resetIdleTimer(controller);
+                  controller.enqueue(chunk);
+               },
+               flush() {
+                  if (idleTimer) clearTimeout(idleTimer);
+               }
+            });
+
+            // Handle stream cancelation (if downstream cancels, we should clear timer)
+            const originalStream = response.body;
+            const monitoredStream = originalStream.pipeThrough(transformer);
+
+            // Re-wrap in Response to preserve headers
+            return new Response(monitoredStream, {
+               status: response.status,
+               statusText: response.statusText,
+               headers: response.headers
+            });
+         }
+
+         return response;
+      } catch (err: any) {
+         clearTimeout(timeoutId);
+         throw err;
+      }
+   }
+
+   public async toObject(res: any, args?: any): Promise<any> {
+      // Pass raw 102 back up to ClientToolTransport for executeWithPolling handling
+      if (res && res.status === 102) return res;
+
+      const contentType = res?.headers?.get?.('content-type');
+      if (contentType && contentType.includes('application/json')) {
+         return res.json();
+      }
+      return res.text();
+   }
 }

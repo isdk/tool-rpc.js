@@ -10,7 +10,9 @@ import { ResClientTools } from '../src/res-client-tools';
 import { RpcMethodsServerTool } from '../src/rpc-methods-server-tool';
 import { RpcMethodsClientTool } from '../src/rpc-methods-client-tool';
 
-import { HttpServerToolTransport, HttpClientToolTransport } from '../src/transports';
+import { HttpServerToolTransport } from '../src/transports/http-server';
+import { HttpClientToolTransport } from '../src/transports/http-client';
+import { RpcServerDispatcher } from '../src/transports/dispatcher';
 
 // Server-side implementation of a resource tool for testing
 class TestResTool extends ResServerTools {
@@ -63,15 +65,15 @@ class TestResTool extends ResServerTools {
       delete this.items[id as string];
       return { id, status: 'deleted' };
     }
-     throw new Error('id is required for delete');
+    throw new Error('id is required for delete');
   }
 }
 
 // Server-side implementation of a generic RPC tool for testing
 class TestRpcTool extends RpcMethodsServerTool {
-    $add({a, b}: {a: number, b: number}) {
-        return a + b;
-    }
+  $add({ a, b }: { a: number, b: number }) {
+    return a + b;
+  }
 }
 
 describe('FastifyRestfulToolTransport', () => {
@@ -79,8 +81,11 @@ describe('FastifyRestfulToolTransport', () => {
   let apiRoot: string;
 
   beforeAll(async () => {
+    // Reset registries to prevent leaks
+    ToolFunc.items = {}
+
     // 让 items 属性继承 ToolFunc.items
-    const ServerToolItems: {[name:string]: ServerTools|ToolFunc} = {}
+    const ServerToolItems: { [name: string]: ServerTools | ToolFunc } = {}
     Object.setPrototypeOf(ServerToolItems, ToolFunc.items)
     ServerTools.items = ServerToolItems
 
@@ -88,25 +93,33 @@ describe('FastifyRestfulToolTransport', () => {
     Object.setPrototypeOf(ClientToolItems, ToolFunc.items)
     ClientTools.items = ClientToolItems
 
+    // Setup Dispatcher Registry
+    RpcServerDispatcher.instance.registry = ServerTools;
+
     const res = new TestResTool('resTest')
     res.register()
     const rpc = new TestRpcTool('rpcTest')
     RpcMethodsServerTool.register(rpc)
 
-    // 2. Use the new, specialized transport to mount all tools
-    serverTransport = new HttpServerToolTransport();
-    serverTransport.mount(RpcMethodsServerTool, '/api');
-
     const port = await findPort(3003);
-    await serverTransport.start({ port, host: 'localhost' });
     apiRoot = `http://localhost:${port}/api`;
 
+    // 2. Use the new, specialized transport to mount all tools
+    serverTransport = new HttpServerToolTransport({ port, apiUrl: apiRoot });
+    serverTransport.addRpcHandler(apiRoot);
+    serverTransport.addDiscoveryHandler(apiRoot, () => ServerTools.toJSON());
+
+    await serverTransport.start({ port, host: 'localhost' });
 
     // 3. Setup the client transport and load tools
     const clientTransport = new HttpClientToolTransport(apiRoot);
-    // ResClientTools.setTransport(clientTransport);
-    // await ResClientTools.loadFrom();
-    await clientTransport.mount(ResClientTools)
+    ClientTools.setTransport(clientTransport);
+
+    // Pre-register client stubs to ensure correct types
+    new ResClientTools('resTest').register();
+    new RpcMethodsClientTool('rpcTest').register();
+
+    await ClientTools.loadFrom();
   });
 
   afterAll(async () => {
@@ -128,13 +141,13 @@ describe('FastifyRestfulToolTransport', () => {
 
     it('should call the get method', async () => {
       const resTool = ResClientTools.get('resTest') as ResClientTools;
-      const result = await resTool.get!({id: 1});
+      const result = await resTool.get!({ id: 1 });
       expect(result).toEqual({ id: '1', name: 'Item 1' });
     });
 
     it('should call customMethod', async () => {
       const resTool = ResClientTools.get('resTest') as ResClientTools;
-      const result = await resTool.customMethod({id: 2});
+      const result = await resTool.customMethod({ id: 2 });
       expect(result).toEqual({ id: '2', name: 'Item 2', custom: true });
     });
   });
@@ -147,7 +160,7 @@ describe('FastifyRestfulToolTransport', () => {
 
     it('should call a method via POST /rpcTest', async () => {
       const rpcTool = RpcMethodsClientTool.get('rpcTest') as RpcMethodsClientTool & { add: Function };
-      const result = await rpcTool.add({a: 100, b: 50});
+      const result = await rpcTool.add({ a: 100, b: 50 });
       expect(result).toBe(150);
     });
   });

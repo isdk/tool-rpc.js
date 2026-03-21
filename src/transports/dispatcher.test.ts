@@ -55,7 +55,7 @@ describe('RpcServerDispatcher', () => {
       expect(mockRun).toHaveBeenCalledWith({ x: 1 }, expect.objectContaining({ requestId: '1' }));
    });
 
-   it('should handle keepAlive (102 Processing) and timeout (408)', async () => {
+   it('should handle keepAlive (102 Processing) and timeout (504)', async () => {
       vi.useFakeTimers();
 
       const req1: ToolRpcRequest = {
@@ -76,7 +76,7 @@ describe('RpcServerDispatcher', () => {
       vi.advanceTimersByTime(60); // 50ms + 10ms buffer
       const res2 = await p2;
 
-      expect(res2.status).toBe(RpcStatusCode.TERMINATED); // hard timeout kills task
+      expect(res2.status).toBe(RpcStatusCode.GATEWAY_TIMEOUT); // hard timeout kills task
 
       // 这里的断言现在应该成功了，因为 Dispatcher 在 catch 块中显式中止并清理了它
       expect(dispatcher.tracker.get('req-timeout')).toBeUndefined();
@@ -109,13 +109,13 @@ describe('RpcServerDispatcher', () => {
       vi.advanceTimersByTime(30); // 20ms + 10ms buffer
       const res = await p;
 
-      expect(res.status).toBe(RpcStatusCode.TERMINATED);
+      expect(res.status).toBe(RpcStatusCode.GATEWAY_TIMEOUT);
       expect(dispatcher.tracker.get('req-global-timeout')).toBeUndefined();
 
       vi.useRealTimers();
    });
 
-   it('should respect non-zero terminationGraceMs and delay 408 response', async () => {
+   it('should respect non-zero terminationGraceMs and delay 504 response', async () => {
       vi.useFakeTimers();
       dispatcher.terminationGraceMs = 500;
       dispatcher.globalTimeout = 50;
@@ -143,7 +143,7 @@ describe('RpcServerDispatcher', () => {
       vi.advanceTimersByTime(500);
       const res = await p;
 
-      expect(res.status).toBe(RpcStatusCode.TERMINATED);
+      expect(res.status).toBe(RpcStatusCode.GATEWAY_TIMEOUT);
       expect(settled).toBe(true);
 
       vi.useRealTimers();

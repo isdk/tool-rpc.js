@@ -60,9 +60,9 @@ describe('Models', () => {
 
       const abortErr = new Error('Aborted');
       abortErr.name = 'AbortError';
-      
+
       const res = dispatcher.handleError(mockRequest, abortErr);
-      expect(res.status).toBe(RpcStatusCode.TERMINATED);
+      expect(res.status).toBe(RpcStatusCode.GATEWAY_TIMEOUT);
     });
   });
 });

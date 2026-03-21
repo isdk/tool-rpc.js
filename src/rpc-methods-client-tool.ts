@@ -8,11 +8,7 @@ export interface RpcMethodsClientFuncParams {
 
 export class RpcMethodsClientTool extends ClientTools {
   async fetch(options: RpcMethodsClientFuncParams, action: ActionName, subName?: any, fetchOptions?: any) {
-    if (!options) {options = {} as any}
-    if (action?.startsWith('$')) {
-      options.act = action
-      action = 'post'
-    }
+    if (!options) { options = {} as any }
     return await super.fetch(options, action, subName, fetchOptions)
   }
 

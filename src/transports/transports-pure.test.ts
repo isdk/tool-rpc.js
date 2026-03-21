@@ -194,7 +194,8 @@ describe('Comprehensive Pure V2 Integration (Streaming, Polling, Errors)', () =>
     it('should pass resId and act via ToolRpcContext in pure V2', async () => {
       class MetaTool extends ServerTools {
         enableLegacyCompat = false;
-        func(params: any, context: ToolRpcContext) {
+        func(params: any) {
+          const context: ToolRpcContext = this.ctx!;
           return { resId: context.resId, act: context.act };
         }
       }
