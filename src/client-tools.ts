@@ -2,6 +2,7 @@ import { throwError } from "@isdk/common-error";
 import { Funcs, ToolFunc } from "@isdk/tool-func";
 import { RemoteToolFuncSchema, type RemoteFuncItem, type ActionName } from "./consts";
 import type { IClientToolTransport } from "./transports/client";
+import { RpcTransportManager } from "./transports/manager";
 import { defaultsDeep } from "lodash-es";
 
 // * Declaration merging to extend the `ClientTools` class with `ClientFuncItem` properties.
@@ -39,49 +40,74 @@ export class ClientTools extends ToolFunc {
   // the default action name
   declare static action?: ActionName | string;
 
-  private static _transport: IClientToolTransport;
+  /**
+   * The default API URL for this tools class.
+   * If set, loadFrom and fetch will use this URL to find the transport.
+   */
+  static apiUrl?: string;
 
   /**
-   * Gets the root URL for API endpoints from the configured transport.
-   * This is used as the base for constructing request URLs.
+   * The default fetch options for this tools class.
    */
-  static get apiRoot() {
-    if (!this._transport) { throwError(NoTransportErrorMsg, 'ClientTools') }
-    return this._transport.apiRoot
+  static fetchOptions?: any;
+
+  /**
+   * Creates a scoped version of this Service class bound to a specific API URL.
+   * This allows the same service definition to be used with multiple backends or protocols
+   * without creating manual subclasses.
+   *
+   * @param apiUrl - The target API URL.
+   * @param options - Optional configuration for the transport or discovery.
+   * @returns A new anonymous class inheriting from the current one, with its own apiUrl and items.
+   */
+  static connect<T extends typeof ClientTools>(this: T, apiUrl: string, options?: any): T {
+    const BoundService = class extends (this as any) { } as any;
+    BoundService.apiUrl = apiUrl;
+    BoundService.items = {}; // Scope isolation for discovered stubs
+    if (options) BoundService.fetchOptions = options;
+    return BoundService as T;
   }
 
   /**
-   * Injects the client-side transport implementation. This is a crucial step
-   * to enable communication with the server.
-   * @param {IClientToolTransport} transport - The transport instance to use for all client-server communication.
+   * Injects the client-side transport implementation.
+   * @deprecated Use RpcTransportManager.instance.register(transport) or manager.getClient(apiUrl)
+   * @param {IClientToolTransport} transport - The transport instance to use.
    */
   static setTransport(transport: IClientToolTransport) {
     if (transport) {
-      this._transport = transport;
+      RpcTransportManager.instance.register(transport);
       if (typeof transport.mount === 'function') {
         transport.mount(this);
       }
     }
   }
 
+  /**
+   * @deprecated Use RpcTransportManager.instance.getClient(apiUrl)
+   */
   static get transport() {
-    return this._transport;
+    // This is problematic for multiple transports, returning a guess or throwing
+    console.warn('ClientTools.transport is deprecated. Use instance.transport or manager.getClient(apiUrl)');
+    return (this as any)._transport;
   }
 
   /**
    * Loads tool definitions from the remote server via the configured transport.
    * This method populates the local `ToolFunc` registry with `ClientTools` stubs.
    * @param items - Optional map of tool function metadata.
-   * @param options - Additional options for the discovery call (e.g., timeout).
+   * @param options - Additional options for the discovery call (e.g., timeout, apiUrl).
    */
   static async loadFrom(items?: Funcs, options?: any) {
+    const apiUrl = options?.apiUrl || this.apiUrl;
     if (!items) {
-      if (!this._transport) {
-        throwError(NoTransportErrorMsg, 'ClientTools');
+      if (!apiUrl) {
+        throwError('apiUrl is required for ClientTools.loadFrom when items is not provided', 'ClientTools');
       }
-      items = await this._transport.loadApis(options);
+      const transport = RpcTransportManager.instance.getClient(apiUrl!, options);
+      items = await transport.loadApis(options);
+      if (!this.apiUrl) this.apiUrl = apiUrl;
     }
-    if (items) this.loadFromSync(items);
+    if (items) this.loadFromSync(items, apiUrl);
     return items;
   }
 
@@ -89,17 +115,22 @@ export class ClientTools extends ToolFunc {
    * Synchronously loads tool definitions from a provided object, registering
    * each one as a `ClientTools` instance.
    * @param items - A map of tool function metadata, typically from a server.
+   * @param apiUrl - The API URL to associate with these tools.
    */
-  static loadFromSync(items: Funcs) {
+  static loadFromSync(items: Funcs, apiUrl?: string) {
     for (const name in items) {
-      const item: any = this.get(name);
+      let item: any = this.get(name);
       const funcItem = items[name] as ClientFuncItem;
       if (!item) {
-        this.register(funcItem);
+        item = this.register(funcItem);
       } else if (item instanceof ClientTools) {
         item.assign(funcItem);
       } else {
         throwError(`${name} already registered as ${item.constructor.name}`, 'ClientTools');
+      }
+
+      if (item instanceof ClientTools && (apiUrl || this.apiUrl)) {
+        item.apiUrl = apiUrl || this.apiUrl;
       }
     }
   }
@@ -112,24 +143,41 @@ export class ClientTools extends ToolFunc {
   }
 
   /**
-   * Gets the root URL for API endpoints from the configured transport.
-   * This is used as the base for constructing request URLs.
+   * @deprecated Use apiUrl instead.
    */
   get apiRoot() {
-    const ctor = this.constructor as typeof ClientTools
-    return ctor.apiRoot
+    return this.apiUrl;
+  }
+
+  get apiUrl(): string | undefined {
+    return (this as any)._apiUrl || (this.constructor as any).apiUrl;
+  }
+
+  set apiUrl(v: string | undefined) {
+    (this as any)._apiUrl = v;
+  }
+
+  /**
+   * Gets the transport instance for this tool.
+   */
+  get transport(): IClientToolTransport | undefined {
+    const apiUrl = this.apiUrl;
+    if (apiUrl) {
+      return RpcTransportManager.instance.getClient(apiUrl);
+    }
   }
 
   async fetch(objParam?: any, act?: ActionName, subName?: any, fetchOptions?: any) {
-    const ctor = this.constructor as typeof ClientTools
-    if (ctor._transport) {
-      // Merge fetchOptions with this.ctx (from tool-func)
-      fetchOptions = defaultsDeep(fetchOptions, this.ctx, this.fetchOptions)
-      const result = await ctor._transport.fetch(this.name!, objParam, act, subName, fetchOptions, this.timeout)
-      return result
-    } else {
-      throwError(NoTransportErrorMsg, 'ClientTools');
+    // Merge fetchOptions with this.ctx (from tool-func) and class-level defaults
+    const classDefaults = (this.constructor as any).fetchOptions;
+    fetchOptions = defaultsDeep(fetchOptions, this.ctx, this.fetchOptions, classDefaults)
+    const apiUrl = fetchOptions.apiUrl || this.apiUrl;
+    if (!apiUrl) {
+      throwError('apiUrl is required for ClientTools.fetch', 'ClientTools');
     }
+    const transport = RpcTransportManager.instance.getClient(apiUrl, fetchOptions);
+    const result = await transport.fetch(this.name!, objParam, act, subName, fetchOptions, this.timeout)
+    return result
   }
 
   /**

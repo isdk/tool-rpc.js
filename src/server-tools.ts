@@ -28,14 +28,10 @@ export declare interface ServerTools extends ServerFuncItem {
  * 基类不再假设任何路由逻辑（ID 或 Act），仅提供运行环境支持。
  */
 export class ServerTools extends ToolFunc {
-  private static _apiRoot?: string;
   /** [V2] 归一化执行上下文 */
   public ctx?: ToolRpcContext;
   /** 控制是否开启向下兼容注入。 */
   public enableLegacyCompat = true;
-
-  static get apiRoot() { return this._apiRoot; }
-  static setApiRoot(v: string) { this._apiRoot = v; }
 
   static toJSON() {
     const result: { [name: string]: ServerTools } = {}

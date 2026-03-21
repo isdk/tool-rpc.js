@@ -6,14 +6,20 @@
 
 ## ✨ 核心功能
 
+- **三位一体架构 (V2.6+):** 
+  - **RpcTransportManager (管理中心)**: 协议注册中心、逻辑路由审计及传输实例生命周期管理。
+  - **RpcServerDispatcher (执行调度器)**: 独立于协议的执行引擎，内置并发隔离（影子实例）与任务追踪。
+  - **RpcActiveTaskTracker (任务追踪器)**: 跨协议任务可见性，支持结果保留策略与后台执行 (102 Processing)。
 - **分层抽象:** 提供了一套分层的工具类 (`ServerTools`, `RpcMethodsServerTool`, `ResServerTools`)，允许您根据需求选择合适的抽象级别。
 - **🌐 RESTful 接口:** 使用 `ResServerTools` 快速创建符合 REST 风格的 API，自动处理 `get`, `list`, `post`, `put`, `delete` 等标准操作。
 - **🔧 RPC 方法分组:** 使用 `RpcMethodsServerTool` 将多个相关函数（方法）捆绑在单个工具下，通过 `act` 参数进行调用。
-- **🔌 客户端自动代理:** 客户端 (`ClientTools` 及其子类) 能从服务器自动加载工具定义，并动态生成类型安全的代理函数，使远程调用如本地调用般简单。
-- **⏱️ 生产级超时控制:** 支持硬超时强制中断、预估耗时 (UX 优化)、流式空闲超时监控以及后台持续运行模式。
-- **🧠 执行上下文 (Context):** 采用“影子实例”机制，通过 `.with(ctx)` 链式调用轻松配置超时、信号 (AbortSignal) 及业务元数据。
-- **🚀 内置传输层:** 提供基于 Node.js `http` 模块的服务器和基于 `fetch` / `mailbox` 的客户端，支持插件化扩展。
-- **🌊 深度流式支持:** 服务器和客户端均支持 `ReadableStream` (Web & Node)，可轻松实现跨环境流式数据传输。
+- **🔌 客户端自动代理:** 客户端 (`ClientTools` 及其子类) 能从服务器自动加载工具定义，并动态生成类型安全的代理函数。
+- **🚀 多实例并行隔离:** 支持在单个进程中运行多个具有不同 `apiUrl` 的传输实例，彻底消除全局状态冲突。
+- **🛡️ 执行死线守卫:** 集成两级超时管理（软/硬死线）以及物理链路与逻辑执行的中止联动。
+- **🚀 内置 HTTP & Mailbox 传输:** 
+  - **HTTP**: 提供基于 Node.js `http` 模块的服务器和基于 `fetch` 的客户端。
+  - **Mailbox**: 原生支持内部分布式信箱协议，适用于跨进程或跨线程通信。
+- **🌊 深度流式支持:** 服务器和客户端均支持 `ReadableStream` (Web & Node)，具备完整的生命周期管理、背压控制及自动清理机制。
 
 ## 📦 安装
 
@@ -64,29 +70,35 @@ export class UserTool extends ResServerTools {
 
 ### 第 2 步：设置并启动服务器
 
-在您的服务器入口文件中，实例化工具，然后设置并启动 `HttpServerToolTransport`。
+在 V2 中，我们建议使用 `RpcTransportManager` 进行生命周期管理，并显式配置 `RpcServerDispatcher`。
 
 ```typescript
 // ./server.ts
-import { HttpServerToolTransport, ResServerTools } from '@isdk/tool-rpc';
+import { HttpServerToolTransport, RpcTransportManager, RpcServerDispatcher, ServerTools } from '@isdk/tool-rpc';
 import { UserTool } from './tools/UserTool';
 
 async function startServer() {
-  // 1. 实例化并注册您的工具。
-  // 名称 'users' 将作为 URL 的一部分 (例如 /api/users)
+  // 1. 在全局注册表中注册工具实例
   new UserTool('users').register();
 
-  // 2. 初始化服务器传输层
-  const serverTransport = new HttpServerToolTransport();
+  // 2. 初始化传输层并注入专用的调度器
+  const apiUrl = 'http://localhost:3000/api';
+  const serverTransport = new HttpServerToolTransport({
+    apiUrl,
+    dispatcher: new RpcServerDispatcher({ registry: ServerTools.items })
+  });
 
-  // 3. 挂载工具的基类。传输层将找到所有已注册的 ResServerTools 实例。
-  // 这将在 '/api' 前缀下创建 API 端点。
-  serverTransport.mount(ResServerTools, '/api');
+  // 3. 配置该传输层的逻辑路由
+  // 暴露工具定义供客户端发现
+  serverTransport.addDiscoveryHandler(apiUrl, () => ServerTools.toJSON());
+  // 暴露 RPC 端点供工具执行
+  serverTransport.addRpcHandler(apiUrl);
 
-  // 4. 启动服务器
-  const port = 3000;
-  await serverTransport.start({ port });
-  console.log(`✅ 工具服务器已启动，监听地址: http://localhost:${port}`);
+  // 4. 将传输层注册到管理器并启动所有服务
+  RpcTransportManager.instance.addServer(serverTransport);
+  await RpcTransportManager.instance.startAll();
+
+  console.log(`✅ 工具服务器已启动，地址: ${apiUrl}`);
 }
 
 startServer();
@@ -94,11 +106,11 @@ startServer();
 
 ### 第 3 步：设置并使用客户端
 
-在客户端代码中，初始化 `HttpClientToolTransport`，它会自动从服务器加载工具定义并创建代理。
+在 V2 中，客户端 (`ResClientTools.loadFrom`) 使用 `RpcTransportManager` 根据 `apiUrl` 自动解析并管理传输实例。
 
 ```typescript
 // ./client.ts
-import { HttpClientToolTransport, ResClientTools } from '@isdk/tool-rpc';
+import { HttpClientToolTransport, RpcTransportManager, ResClientTools } from '@isdk/tool-rpc';
 
 // 定义一个类型以获得完整的类型提示，包括自定义方法
 type UserClientTool = ResClientTools & {
@@ -106,15 +118,14 @@ type UserClientTool = ResClientTools & {
 };
 
 async function main() {
-  const apiRoot = 'http://localhost:3000/api';
+  const apiUrl = 'http://localhost:3000/api';
 
-  // 1. 初始化客户端传输层
-  const clientTransport = new HttpClientToolTransport(apiRoot);
+  // 1. 注册 HTTP 协议（如果未全局预注册）
+  RpcTransportManager.bindScheme('http', HttpClientToolTransport);
 
-  // 2. 挂载客户端工具。此操作将：
-  //    a. 为 ResClientTools 设置传输层
-  //    b. 从服务器加载 API 定义并创建代理工具
-  await clientTransport.mount(ResClientTools);
+  // 2. 从服务器加载 API 定义
+  // 这会自动为给定的 apiUrl 创建或使用传输实例
+  await ResClientTools.loadFrom(undefined, { apiUrl });
 
   // 3. 获取为远程工具动态创建的代理
   const userTool = ResClientTools.get('users') as UserClientTool;
@@ -133,7 +144,6 @@ async function main() {
   console.log('所有用户:', allUsers); // [{...}, {...}]
 
   // 调用自定义 RPC 方法 $promote
-  // 客户端代理会自动处理 `act` 参数
   const admin = await userTool.promote({ id: '2' });
   console.log('提升后的用户:', admin); // { id: '2', name: '鲍勃', role: 'admin' }
 }
@@ -205,12 +215,26 @@ graph TD
     B -- 将结果返回给 --> A;
 ```
 
-### 3. 🛡️ 物理隔离与单进程测试 (Isolation in Testing)
+### 3. 🛡️ 并发隔离 (影子实例 Shadow Instances)
 
-在单进程（如本地集成测试）中，由于服务器端和客户端共享相同的 `ToolFunc` 静态类，直接运行会导致客户端的代理尝试覆盖服务器端的原始实例，引发 `already registered` 错误。
+V2 架构引入了**影子实例**机制，彻底解决了异步环境下的 `this.ctx` 竞态冲突。
+- 当请求到达时，`Dispatcher` 会利用 `Object.create(tool)` 创建一个新实例。
+- **属性遮蔽 (Property Shadowing)**：`this.ctx = context` 仅作用于当前执行实例，确保高并发下的物理隔离，同时保留对原始工具属性的访问。
 
-* **解决方案**：利用 JavaScript 静态属性的**遮蔽效应 (Property Shadowing)**。
-* **操作**：在测试环境中调用 `ClientTools.isolateRegistry()`。该方法会为当前类开启一个独立的**分层注册表作用域**，实现项目（items）、别名（aliases）及引用计数的物理隔离。它利用原型链机制确保了客户端代理在拥有独立命名空间的同时，仍能透明地继承父级工具，从而在单进程内完美模拟 C/S 隔离。
+### 4. 🚀 三位一体架构 (V2.6+)
+
+`@isdk/tool-rpc` 的核心由三个解耦的组件构成：
+
+1.  **RpcTransportManager (管理中心)**:
+    - **物理映射**: 管理 `apiUrl` 到 `IToolTransport` 实例的映射。
+    - **路由审计**: 执行 `ListenAddr -> Set<RoutePath>` 冲突检测，防止在共享物理端口上发生路由劫持。
+2.  **RpcServerDispatcher (执行调度器)**:
+    - **归一化**: 将协议特定的对象转化为标准的 `ToolRpcContext`。
+    - **死线裁决**: 实现软死线（触发 `102 Processing` 以转入后台执行）和硬死线（以 `408` 终止任务）。
+3.  **RpcActiveTaskTracker (任务账本)**:
+    - **可观测性**: 跨协议追踪所有活跃和后台任务。
+    - **结果保留**: 管理任务结果的保留策略（`Once`, `Permanent`, TTL）。
+    - **中止联动**: 将物理连接的 `AbortSignal` 桥接到执行层。
 
 ## 🛠️ 进阶架构：分层注册表与多态定制
 
@@ -410,19 +434,26 @@ await runner.run(params);
     1. **暴露发现端点**: 创建一个通常为 `GET` 的路由（例如 `/api`），当客户端访问时，它会返回所有已注册并可用的工具的 JSON 定义。这是通过 `addDiscoveryHandler` 方法实现的。
     2. **处理 RPC 调用**: 创建一个通用的 RPC 路由（例如 `/api/:toolId`），它接收请求，根据 `toolId` 查找对应的工具，执行它，然后返回结果。这是通过 `addRpcHandler` 方法实现的。
     3. 管理服务器生命周期 (`start`, `stop`)。
+    4. **物理感知 (V2)**: 通过 `getListenAddr()` 和 `getRoutes()` 实现物理端口复用与逻辑路由审计。
 - **`IClientToolTransport`**: 客户端传输必须实现的接口。其核心职责是：
     1. **加载 API 定义**: 调用 `loadApis()` 方法，该方法会访问服务器的发现端点以获取所有工具的定义。
     2. **执行远程调用**: 实现 `fetch()` 方法，该方法负责将客户端的工具调用（函数名和参数）序列化，发送到服务器的 RPC 端点，并处理响应。
+    3. **后台生命周期 (V2)**: 支持 **102 Processing 轮询** 以及与本地 `AbortSignal` 联动的远程中止。
 
-### 内置 HTTP 传输
+### 内置传输实现
 
-本库提供了一套即插即用的、基于 HTTP 的传输实现，无需额外配置：
+本库提供了多套即插即用的传输实现，无需额外配置：
 
-- **`HttpServerToolTransport`**: 一个服务器端传输，使用 Node.js 内置的 `http` 模块来创建一个轻量级的服务器。当您调用 `serverTransport.mount(ServerTools, '/api')` 时，它会自动：
-  - 创建一个 `GET /api` 路由用于服务发现。
-  - 创建一个 `POST /api/:toolId` 路由（也支持其他方法）来处理所有工具的 RPC 调用。它会智能地从请求体或 URL 参数中解析出工具的参数。
+- **`HttpServerToolTransport` (HTTP 服务端)**: 基于 Node.js 内置 `http` 模块。在 V2 中，它支持 **最长前缀匹配 (Longest Prefix Match)** 路由，允许多个逻辑实例共享同一个物理端口（物理底座复用）。它会自动：
+  - 创建一个 `GET /prefix` 路由用于服务发现。
+  - 创建一个包含工具名的 RPC 路由，智能解析请求体或 URL 参数。
 
-- **`HttpClientToolTransport`**: 一个客户端传输，使用跨平台的 `fetch` API 来向服务器发送请求。当您调用 `client.init()`（内部使用 `loadApis`）时，它会请求 `GET /api`。当您运行一个工具时，它会向 `POST /api/toolName` 发送一个包含参数的 JSON 请求。
+- **`HttpClientToolTransport` (HTTP 客户端)**: 基于跨平台 `fetch` API。V2 版本支持对后台任务的自动状态轮询。
+
+- **`Mailbox Transports` (信箱传输)**: 原生支持内部分布式信箱协议。
+  - **特点**: 适用于跨进程或跨线程通信，天然具备物理隔离性。
+  - **优势**: 在无需 HTTP Stack 的场景下提供高性能的工具调用能力。
+
 
 ### 功能扩展：创建您自己的传输
 

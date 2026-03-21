@@ -256,29 +256,80 @@ await manager.stopAll();
 
 ---
 
-## 9. 客户端使用范例
+## 9. 客户端高级连接范式 (Advanced Client Patterns)
+
+为了实现业务逻辑与物理寻址的深度解耦，V2 架构推荐以下两种高级连接模式，取代传统的全局 `setTransport` 绑定。
+
+### 9.1 服务连接模式 (Service Connection Pattern)
+
+适用于“一个业务类需要对接多个后端实例”的场景。通过 `connect` 工厂方法，可以为同一个业务定义产生多个物理隔离的连接实例。
+
+```typescript
+import { ClientTools } from '@isdk/tool-rpc';
+
+class OrderService extends ClientTools {}
+
+// 1. 声明式绑定：产生两个物理隔离的 Service 类
+const httpSrv = OrderService.connect('http://localhost:3000/api');
+const mbxSrv = OrderService.connect('mailbox://peer-1/api');
+
+// 2. 独立加载：各服务发现并生成属于自己的 Stub
+await httpSrv.loadFrom();
+await mbxSrv.loadFrom();
+
+// 3. 强类型调用：底层自动匹配正确的 Transport 协议
+const orderA = await httpSrv.createOrder.run({ id: 1 });
+const orderB = await mbxSrv.createOrder.run({ id: 2 });
+```
+
+- **隔离性**：每个 `connect` 产生的类拥有独立的 `items` 注册表，互不干扰。
+- **协议透明**：开发者只需关注业务类（`OrderService`），无需手动处理 Transport 细节。
+
+### 9.2 动态绑定调用 (On-demand Binding)
+
+适用于“同一个工具 Stub 需要动态发往不同集群”的极致灵活性场景。利用 `with` 机制在执行时注入寻址信息。
+
+```typescript
+// 1. 获取通用工具存根 (Stub)
+const chatTool = ClientTools.get('chat');
+
+// 2. 在执行瞬间决定目标集群 (无需预先创建 Service 实例)
+const resUS = await chatTool.with({ apiUrl: 'https://us.api.srv/v1' }).run({ text: 'Hello' });
+const resCN = await chatTool.with({ apiUrl: 'https://cn.api.srv/v1' }).run({ text: '你好' });
+```
+
+- **极致灵活**：支持在运行时根据负载、地理位置或租户 ID 动态路由 RPC 请求。
+- **无状态**：Stub 本身不持有寻址状态，状态仅存在于影子实例的上下文中。
+
+---
+
+## 10. 客户端使用范例
 
 ```typescript
 import { RpcTransportManager } from './transportsV2/manager';
 import { HttpClientToolTransport } from './transportsV2/http-client';
+import { ClientTools } from './client-tools';
 
+// 1. 注册协议解析器 (全局一次)
 RpcTransportManager.bindScheme(['http', 'https'], HttpClientToolTransport);
+
+// 2. [推荐] 使用连接模式：结构清晰，支持多服务并行
+const api = ClientTools.connect('http://api.srv/v1');
+await api.loadFrom();
+const result = await api.myTool.run({ data: 123 });
+
+// 3. [进阶] 动态绑定：适用于路由网关或多区域调度
+const stub = ClientTools.get('commonTool');
+const resultCN = await stub.with({ apiUrl: 'http://cn.api/v1' }).run();
+
+// 4. [兼容] 直接通过 Transport 手动调用
 const transport = RpcTransportManager.instance.getClient('http://api.srv/v1');
-
-// 1. 普通调用
-const res = await transport.fetch('adder', { a: 1 });
-
-// 2. 指定资源动作 (ResServerTools)
-const userInfo = await transport.fetch('user', {}, 'get', 'user-abc');
-
-// 3. 长任务自动轮询
-// 若服务端返回 102 (202 Accepted)，fetch 会自动转入后台轮询直至结果返回
-const longResult = await transport.fetch('heavy-task', { data: 123 });
+const rawRes = await transport.fetch('adder', { a: 1 });
 ```
 
 ---
 
-## 10. V1 到 V2 迁移指南
+## 11. V1 到 V2 迁移指南
 
 ### 10.1 服务端兼容配置
 

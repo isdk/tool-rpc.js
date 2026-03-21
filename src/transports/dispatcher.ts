@@ -1,3 +1,7 @@
+import { randomUUID } from 'crypto';
+import { createCallbacksTransformer } from '@isdk/tool-func';
+
+import { ServerTools } from '../server-tools';
 import { RpcActiveTaskTracker, RpcActiveTaskHandle } from './task-tracker';
 import {
   RPC_HEADERS,
@@ -11,8 +15,6 @@ import {
 import { RpcDeadlineGuard } from './deadline-guard';
 import { bridgeV2RequestToV1Params, elevateV1ParamsToV2Request, RpcCompatOptions, DEFAULT_COMPAT_OPTIONS } from './compat';
 import { RpcTaskResource } from './rpc-task';
-import { randomUUID } from 'crypto';
-import { createCallbacksTransformer } from '@isdk/tool-func';
 
 /**
  * 集中式 RPC 请求分发器。
@@ -20,7 +22,7 @@ import { createCallbacksTransformer } from '@isdk/tool-func';
  */
 export class RpcServerDispatcher {
   private static _instance: RpcServerDispatcher;
-  /** 工具/函数注册表，通常挂载 ServerTools.items */
+  /** 工具/函数注册表，通常挂载 ServerTools */
   public registry: any;
   /** 系统级保留工具注册表 */
   private systemRegistry = new Map<string, any>();
@@ -43,7 +45,7 @@ export class RpcServerDispatcher {
     terminationGraceMs?: number,
     maxTaskRuntimeMs?: number
   }) {
-    this.registry = options?.registry;
+    this.registry = options?.registry || ServerTools;
     this.tracker = options?.tracker || new RpcActiveTaskTracker();
     if (options?.globalTimeout) this.globalTimeout = options.globalTimeout;
     if (options?.compat) this.compat = { ...DEFAULT_COMPAT_OPTIONS, ...options.compat };
@@ -131,9 +133,9 @@ export class RpcServerDispatcher {
     }
 
     if (!tool) {
-      if (!targetRegistry) {
-        throw new RpcError("Dispatcher Registry not mounted", RpcStatusCode.INTERNAL_ERROR);
-      }
+      // if (!targetRegistry) {
+      //   throw new RpcError("Dispatcher Registry not mounted", RpcStatusCode.INTERNAL_ERROR);
+      // }
       throw new RpcError(`Tool not found: ${toolId}`, RpcStatusCode.NOT_FOUND);
     }
 

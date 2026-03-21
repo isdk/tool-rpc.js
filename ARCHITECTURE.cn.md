@@ -20,6 +20,13 @@
 - **上下文绑定**：实例方法（如 `func`）通过 `this` 访问元数据，通过 `this.ctx` 访问运行时上下文（如 `AbortSignal`, `request` 对象）。
 - **影子实例 (Shadow Instance)**：利用原型继承，为每次请求创建临时的影子实例，确保并发请求下的状态隔离。
 
+### 1.3 寻址与协议解耦 (V2 Addressing)
+
+在重构后的 V2 架构中，业务逻辑与物理传输协议通过 **`apiUrl`** 彻底解耦。
+
+- **逻辑寻址标识**：不再依赖全局唯一的 Transport 实例，而是通过 URL（如 `http://srv/v1` 或 `mailbox://peer-1/api`）进行逻辑匹配。
+- **协议透明化**：`ClientTools` 类持有 `apiUrl` 后，底层 `RpcTransportManager` 会根据 URL 的 Scheme 自动调度正确的物理传输层。
+
 ## 2. 核心机制解析
 
 ### 2.1 发现隔离算法 (Discovery Filtering)
@@ -130,3 +137,59 @@ static toJSON() {
 ### 5.2 多版本共存
 
 在复杂的 Monorepo 中，若多个版本的 `@isdk/tool-func` 被打包，`instanceof` 可能会失效。架构上应优先依赖 `name` 和协议标识符，而非单纯的原型检查。
+
+## 6. 分布式寻址与连接模式 (V2 Service Connection)
+
+### 6.1 服务连接模式 (Service Connection Pattern)
+
+为了解决“同一个业务服务类（如 `OrderService`）需要同时对接多种传输协议”的问题，架构引入了 `connect` 工厂模式。
+
+```typescript
+class OrderService extends ClientTools {}
+
+// 1. 业务定义与物理寻址解耦
+const httpApi = OrderService.connect('http://localhost/api');
+const mbxApi = OrderService.connect('mailbox://peer-1/api');
+
+// 2. 独立的 Stub 隔离加载
+await httpApi.loadFrom();
+await mbxApi.loadFrom();
+
+// 3. 执行时自动匹配正确的 Transport
+await httpApi.createOrder.run({ id: 1 });
+await mbxApi.createOrder.run({ id: 2 });
+```
+
+### 6.2 动态绑定调用 (On-demand Binding)
+
+对于极致灵活的场景（如路由网关或多区域调度），架构支持在执行瞬间动态指定目标。利用 `with` 机制在“影子实例”中注入寻址信息。
+
+```typescript
+// 1. 获取通用工具存根 (Stub)
+const chatTool = ClientTools.get('chat');
+
+// 2. 在执行瞬间决定目标集群 (无状态调用)
+const resUS = await chatTool.with({ apiUrl: 'https://us.api/v1' }).run({ text: 'Hello' });
+const resCN = await chatTool.with({ apiUrl: 'https://cn.api/v1' }).run({ text: '你好' });
+```
+
+- **无状态特性**：Stub 本身不持有寻址状态，状态仅存在于单次调用的上下文中。
+- **环境感知**：支持根据用户地理位置、负载均衡策略或租户 ID 在运行时动态路由 RPC 请求。
+
+### 6.3 传输管理中心 (RpcTransportManager)
+
+`RpcTransportManager` 是整个 V2 架构的“交通枢纽”。它负责：
+
+- **二级寻址**：根据 `apiUrl` 的 Scheme 路由到具体协议类，再根据 Origin 复用物理连接。
+- **配置透传**：通过 `connect(url, options)` 传入的配置，最终会流转到 Transport 实例，支持超时、认证等连接级配置。
+- **物理底座共享**：支持多个逻辑 `apiUrl` 共享同一个物理端口（如 HTTP 的不同 Path 挂载）。
+
+### 6.4 联邦寻址 (Federated Addressing)
+
+每一个 `ClientTools` 实例（Stub）手里都握着一份 `apiUrl` 地图。在调用 `run()` 时，它不再依赖全局唯一的 Transport，而是：
+1. 从 `this.apiUrl` 获取目标地址。
+2. 委托 `RpcTransportManager` 找到该地址对应的 Transport。
+3. 执行远程搬运。
+
+这种设计使得应用能够以“联邦化”的方式同时与数十个微服务进行通信，每个服务可以有不同的地址、不同的协议，且相互物理隔离。
+

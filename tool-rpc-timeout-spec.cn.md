@@ -80,11 +80,16 @@ export interface RemoteFuncItem extends BaseFuncItem {
 
 ### 4.2 传输层协议约定 (Transport Headers)
 
-- **请求头**: 客户端应发送 `rpc-Timeout` (单位: ms) 告知服务端其最终确定的等待时长。
-- **状态码**:
-  - **408 Request Timeout**: 客户端主动中断（超时或取消）。
-  - **504 Gateway Timeout**: 服务端执行超时。
-  - **错误负载**: 返回标准错误对象 `{ error: 'TIMEOUT', code: 504, data: { ... } }`。
+- **标准 Header (V2)**:
+  - `rpc-timeout`: 客户端告知其最终确定的等待时长 (单位: ms)。
+  - `rpc-request-id`: 本次调用的唯一标识。在触发 102 状态后，用于后续的状态轮询。
+  - `rpc-trace-id`: 全链路追踪 ID，用于跨服务日志关联。
+- **状态码 (V2)**:
+  - **102 Processing**: **软死线 (Soft Deadline) 触发**。服务端响应超时，但任务已转入后台继续运行。客户端应根据 `Retry-After` 头进行轮询。
+  - **408 Terminated**: **硬死线 (Hard Deadline) 触发**。任务运行时间超过服务端设定的物理上限（如 `maxTaskRuntimeMs`），被强制终止。
+  - **409 Conflict**: `requestId` 冲突。表示该 ID 的任务已在账本中激活。
+  - **504 Gateway Timeout**: 客户端等待超时，且任务不具备后台维持能力。
+  - **错误负载**: 返回标准响应对象 `{ status: 504, error: { code: 504, message: 'TIMEOUT', ... } }`。
 
 ---
 
@@ -92,10 +97,19 @@ export interface RemoteFuncItem extends BaseFuncItem {
 
 ### 5.1 AbortSignal 注入
 
-- **服务端**: `ServerTools.run(params)` 的 `params` 中必须注入 `_signal: AbortSignal`。
+- **服务端**: `ServerTools.run(params)` 的 `params` 中必须注入 `_signal: AbortSignal`。同时，业务逻辑可以通过 `this.ctx.signal` 访问该信号。
 - **行为**: 当传输层触发超时（或客户端断开连接）且 `keepAliveOnTimeout` 为 `false` 时，该信号会被触发 (`abort`)。工具函数内部应通过监听此信号来停止耗时操作（如停止 AI 模型生成、中断 DB 查询）。
 
-### 5.2 资源释放
+### 5.2 物理与逻辑中止联动 (V2)
+
+- **物理中止**: 当物理链路断开（如 TCP Reset）时，服务端的 `HttpServerToolTransport` 应感知此事件并调用 `context.abort()`，从而中止关联的本地任务。
+- **逻辑中止**:
+  - **客户端取消**: 当用户在客户端触发 `AbortSignal` 时：
+    1. 传输层立即尝试物理切断当前连接。
+    2. 若任务已在后台执行（曾收到过 102），传输层必须向服务端发送 `POST /rpcTask/:requestId?act=$cancel`。
+  - **服务端响应**: `RpcActiveTaskTracker` 接收到取消请求后，立即强制终止对应任务，触发任务的 `cleanup` 钩子并清理账本记录。
+
+### 5.3 资源释放
 
 - 超时触发后，传输层必须确保所有关联的流（Stream）和 Socket 连接被正确关闭。
 

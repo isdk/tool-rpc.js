@@ -27,6 +27,16 @@ export abstract class ClientToolTransport extends ToolTransport implements IClie
   /** @deprecated use apiUrl instead */
   set apiRoot(val) { this.apiUrl = val; }
 
+  /**
+   * Mounts the transport to a tools class, setting the default apiUrl for that class.
+   * @param toolsClass - The tools class (e.g., ClientTools) to mount to.
+   */
+  public mount(toolsClass: any) {
+    if (toolsClass && this.apiUrl) {
+      toolsClass.apiUrl = this.apiUrl;
+    }
+  }
+
   public async loadApis(options?: any): Promise<Funcs> {
     const fetchOptions = {
       headers: { 'Content-Type': 'application/json' },
@@ -111,36 +121,67 @@ export abstract class ClientToolTransport extends ToolTransport implements IClie
    * 处理服务端通过 102 信号引发的客户端后台循环轮询逻辑
    */
   private async executeWithPolling(name: string, args: any, act: any, subName: any, fetchOptions: any): Promise<any> {
-    let res = await this._fetch(name, args, act, subName, fetchOptions);
+    const signal: AbortSignal = fetchOptions.signal;
+    const reqId = fetchOptions.headers[RPC_HEADERS.REQUEST_ID];
+    let abortListener: (() => void) | undefined;
 
-    // 监测到服务端正在执行硬超时退避，转入状态轮询重试
-    while (res && res.status === 102) {
-      // 读取 Retry-After 给出的参考轮询等待时间，避免洪水攻击 (支持标准与自定义头)
-      const retryAfter = res.headers?.[RPC_HEADERS.RETRY_AFTER];
-      const waitTime = retryAfter ? parseInt(String(retryAfter)) : RPC_DEFAULTS.RETRY_AFTER_MS;
-      await new Promise(r => setTimeout(r, waitTime));
+    if (signal) {
+      if (signal.aborted) {
+        throw signal.reason || new Error('Aborted');
+      }
+      abortListener = () => {
+        // 当本地信号触发时，尝试通知服务端注销后台任务 (Fire and forget)
+        this.pollTaskStatus(reqId, { ...fetchOptions, act: '$cancel' }).catch(() => {});
+      };
+      signal.addEventListener('abort', abortListener);
+    }
 
-      const reqId = fetchOptions.headers[RPC_HEADERS.REQUEST_ID];
-      const pollRes = await this.pollTaskStatus(reqId, fetchOptions);
-      res = pollRes;
+    try {
+      let res = await this._fetch(name, args, act, subName, fetchOptions);
 
-      if (res && res.status === 102) {
-        continue;
+      // 监测到服务端正在执行硬超时退避，转入状态轮询重试
+      while (res && res.status === 102) {
+        // 读取 Retry-After 给出的参考轮询等待时间，避免洪水攻击 (支持标准与自定义头)
+        const retryAfter = res.headers?.[RPC_HEADERS.RETRY_AFTER];
+        const waitTime = retryAfter ? parseInt(String(retryAfter)) : RPC_DEFAULTS.RETRY_AFTER_MS;
+        
+        // 使用 Promise.race 允许在等待期间被信号中断
+        await new Promise((resolve, reject) => {
+          const timer = setTimeout(resolve, waitTime);
+          if (signal) {
+            const onAbort = () => {
+              clearTimeout(timer);
+              reject(signal.reason || new Error('Aborted'));
+            };
+            signal.addEventListener('abort', onAbort, { once: true });
+          }
+        });
+
+        const pollRes = await this.pollTaskStatus(reqId, fetchOptions);
+        res = pollRes;
+
+        if (res && res.status === 102) {
+          continue;
+        }
+
+        // Task is no longer 102! It must be completed or failed (which throws before this line).
+        if (args?.stream) {
+          return res; // directly return the fetch Response (stream)
+        }
+        return this.toObject(res, args);
       }
 
-      // Task is no longer 102! It must be completed or failed (which throws before this line).
+      // 对于正常结束的初始请求：
       if (args?.stream) {
-        return res; // directly return the fetch Response (stream)
+        return res;
       }
+
       return this.toObject(res, args);
+    } finally {
+      if (signal && abortListener) {
+        signal.removeEventListener('abort', abortListener);
+      }
     }
-
-    // 对于正常结束的初始请求：
-    if (args?.stream) {
-      return res;
-    }
-
-    return this.toObject(res, args);
   }
 
   /**
@@ -150,7 +191,7 @@ export abstract class ClientToolTransport extends ToolTransport implements IClie
     const pollHeaders = { ...(parentFetchOptions.headers || {}) };
     delete pollHeaders[RPC_HEADERS.TIMEOUT];
     pollHeaders[RPC_HEADERS.TOOL_ID || RPC_HEADERS.FUNC] = 'rpcTask';
-    pollHeaders[RPC_HEADERS.ACT] = 'get';
+    pollHeaders[RPC_HEADERS.ACT] = parentFetchOptions.act || 'get';
     pollHeaders[RPC_HEADERS.RES_ID] = taskId;
     pollHeaders[RPC_HEADERS.REQUEST_ID] = 'poll-' + Date.now().toString(36) + Math.random().toString(36).substring(2);
 
@@ -159,7 +200,7 @@ export abstract class ClientToolTransport extends ToolTransport implements IClie
       headers: pollHeaders
     };
 
-    return this._fetch('rpcTask', undefined, 'get', taskId, pollOptions);
+    return this._fetch('rpcTask', undefined, pollHeaders[RPC_HEADERS.ACT], taskId, pollOptions);
   }
 
   public abstract _fetch(name: string, args?: any, act?: ActionName | string, id?: any, fetchOptions?: any): any | Promise<any>;

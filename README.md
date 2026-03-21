@@ -6,12 +6,20 @@ This project is built on `@isdk/tool-func`. Before proceeding, please ensure you
 
 ## ✨ Core Features
 
+- **Trinity Architecture (V2.6+):** 
+  - **RpcTransportManager**: Centralized registry for protocols, logical routing audit, and transport instance lifecycle.
+  - **RpcServerDispatcher**: Decoupled execution engine with built-in concurrency isolation (Shadow Instances) and task tracking.
+  - **RpcActiveTaskTracker**: Cross-protocol task visibility with retention policies and background execution support (102 Processing).
 - **Layered Abstractions:** Provides a set of layered tool classes (`ServerTools`, `RpcMethodsServerTool`, `ResServerTools`) that allow you to choose the right level of abstraction for your needs.
 - **🌐 RESTful Interface:** Quickly create REST-style APIs using `ResServerTools`, which automatically handles standard operations like `get`, `list`, `post`, `put`, and `delete`.
 - **🔧 RPC Method Grouping:** Use `RpcMethodsServerTool` to bundle multiple related functions (methods) under a single tool, invoked via an `act` parameter.
 - **🔌 Automatic Client-Side Proxies:** The client (`ClientTools` and its subclasses) can automatically load tool definitions from the server and dynamically generate type-safe proxy functions, making remote calls as simple as local ones.
-- **🚀 Built-in HTTP Transport:** Comes with `HttpServerToolTransport` based on Node.js's `http` module and `HttpClientToolTransport` based on `fetch`, ready to use out of the box.
-- **🌊 Streaming Support:** Both server and client support `ReadableStream`, enabling easy implementation of streaming data responses.
+- **🚀 Built-in HTTP & Mailbox Transport:** 
+  - **HTTP**: Comes with `HttpServerToolTransport` (Node.js `http`) and `HttpClientToolTransport` (`fetch`).
+  - **Mailbox**: Native support for internal distributed mailbox protocols, ideal for cross-process or cross-thread communication.
+- **🚀 Multi-Instance Isolation:** Support for multiple transport instances with different `apiUrl`s in a single process without global state collision.
+- **🛡️ Execution Guarding:** Integrated deadline management (Soft/Hard deadlines) and physical-to-logical abort linkage.
+- **🌊 Streaming Support:** Both server and client support `ReadableStream` with full lifecycle management, including backpressure and automatic cleanup.
 
 ## 📦 Installation
 
@@ -62,30 +70,35 @@ export class UserTool extends ResServerTools {
 
 ### Step 2: Set Up and Start the Server
 
-In your server entry file, instantiate your tools, then set up and start the `HttpServerToolTransport`.
+In V2, we recommend using `RpcTransportManager` for lifecycle management and explicitly configuring the `RpcServerDispatcher`.
 
 ```typescript
 // ./server.ts
-import { HttpServerToolTransport, ResServerTools } from '@isdk/tool-rpc';
+import { HttpServerToolTransport, RpcTransportManager, RpcServerDispatcher, ServerTools } from '@isdk/tool-rpc';
 import { UserTool } from './tools/UserTool';
 
 async function startServer() {
-  // 1. Instantiate and register your tool.
-  // The name 'users' will be used as part of the URL (e.g., /api/users)
+  // 1. Register your tool instances in the global registry
   new UserTool('users').register();
 
-  // 2. Initialize the server transport.
-  const serverTransport = new HttpServerToolTransport();
+  // 2. Initialize the transport with a dedicated Dispatcher
+  const apiUrl = 'http://localhost:3000/api';
+  const serverTransport = new HttpServerToolTransport({
+    apiUrl,
+    dispatcher: new RpcServerDispatcher({ registry: ServerTools.items })
+  });
 
-  // 3. Mount the tool's base class. The transport will find all registered
-  //    instances of ResServerTools.
-  //    This creates API endpoints under the '/api' prefix.
-  serverTransport.mount(ResServerTools, '/api');
+  // 3. Configure the logical routes for this transport
+  // Expose the tool definitions for client-side discovery
+  serverTransport.addDiscoveryHandler(apiUrl, () => ServerTools.toJSON());
+  // Expose the RPC endpoint for tool execution
+  serverTransport.addRpcHandler(apiUrl);
 
-  // 4. Start the server.
-  const port = 3000;
-  await serverTransport.start({ port });
-  console.log(`✅ Tool server started, listening on http://localhost:${port}`);
+  // 4. Register the transport to the Manager and start all services
+  RpcTransportManager.instance.addServer(serverTransport);
+  await RpcTransportManager.instance.startAll();
+
+  console.log(`✅ Tool server started at ${apiUrl}`);
 }
 
 startServer();
@@ -93,11 +106,11 @@ startServer();
 
 ### Step 3: Set Up and Use the Client
 
-In your client-side code, initialize the `HttpClientToolTransport`, which will automatically load tool definitions from the server and create proxies.
+In V2, the client (`ResClientTools.loadFrom`) uses `RpcTransportManager` to automatically resolve and manage transport instances based on the `apiUrl`.
 
 ```typescript
 // ./client.ts
-import { HttpClientToolTransport, ResClientTools } from '@isdk/tool-rpc';
+import { HttpClientToolTransport, RpcTransportManager, ResClientTools } from '@isdk/tool-rpc';
 
 // Define a type for full type-safety, including the custom method
 type UserClientTool = ResClientTools & {
@@ -105,15 +118,14 @@ type UserClientTool = ResClientTools & {
 };
 
 async function main() {
-  const apiRoot = 'http://localhost:3000/api';
+  const apiUrl = 'http://localhost:3000/api';
 
-  // 1. Initialize the client transport.
-  const clientTransport = new HttpClientToolTransport(apiRoot);
+  // 1. Register the HTTP scheme (needed if not globally pre-registered)
+  RpcTransportManager.bindScheme('http', HttpClientToolTransport);
 
-  // 2. Mount the client tools. This action will:
-  //    a. Set the transport for ResClientTools.
-  //    b. Load API definitions from the server and create proxy tools.
-  await clientTransport.mount(ResClientTools);
+  // 2. Load API definitions from the server.
+  // This automatically creates/uses a transport instance for the given apiUrl.
+  await ResClientTools.loadFrom(undefined, { apiUrl });
 
   // 3. Get the dynamically created proxy for the remote tool.
   const userTool = ResClientTools.get('users') as UserClientTool;
@@ -132,7 +144,6 @@ async function main() {
   console.log('All Users:', allUsers); // [{...}, {...}]
 
   // Calls the custom RPC method $promote
-  // The client proxy automatically handles the `act` parameter.
   const admin = await userTool.promote({ id: '2' });
   console.log('Promoted User:', admin); // { id: '2', name: 'Bob', role: 'admin' }
 }
@@ -204,12 +215,26 @@ graph TD
     B -- Returns result to --> A;
 ```
 
-### 3. 🛡️ Physical Isolation and Single-Process Testing
+### 3. 🛡️ Concurrency Isolation (Shadow Instances)
 
-In a single-process environment (like local integration tests), the Server and Client share the same static `ToolFunc` registry. Running them directly causes the client proxy to attempt to overwrite the server's original instance, triggering an `already registered` error.
+V2 Architecture introduces **Shadow Instances** to solve `this.ctx` race conditions in asynchronous environments.
+- When a request arrives, the `Dispatcher` creates a new instance using `Object.create(tool)`.
+- **Property Shadowing**: `this.ctx = context` only affects the current execution instance, ensuring physical isolation during high concurrency while maintaining access to original tool properties.
 
-* **Solution**: Leverage JavaScript's static **Property Shadowing**.
-* **Operation**: Call `ClientTools.isolateRegistry()` in your test environment. This creates an independent **Hierarchical Registry Scope** for the class, isolating items, aliases, and refCounts. It uses prototype mechanisms to ensure the client proxy has its own namespace while still transparently inheriting from parent tools, perfectly simulating C/S isolation within a single process.
+### 4. 🚀 The Trinity Architecture (V2.6+)
+
+The core of `@isdk/tool-rpc` is built around three decoupled components:
+
+1.  **RpcTransportManager (The Registry & Lifecycle)**:
+    - **Physical Mapping**: Manages `apiUrl` to `IToolTransport` instances.
+    - **Routing Audit**: Performs `ListenAddr -> Set<RoutePath>` conflict detection to prevent route hijacking on shared physical ports.
+2.  **RpcServerDispatcher (The Logic Engine)**:
+    - **Normalization**: Translates protocol-specific objects into `ToolRpcContext`.
+    - **Deadlines**: Implements Soft Deadlines (triggering `102 Processing` for background execution) and Hard Deadlines (Terminating task with `408`).
+3.  **RpcActiveTaskTracker (The Task Ledger)**:
+    - **Observability**: Tracks all active and background tasks across protocols.
+    - **Retention**: Manages result retention policies (`Once`, `Permanent`, TTL).
+    - **Abort Linkage**: Bridges `AbortSignal` from physical connections to the execution layer.
 
 ## 🛠️ Advanced Architecture: Hierarchical Registries and Polymorphism
 
@@ -367,19 +392,19 @@ The architecture is built around a few key interfaces:
     1. **Exposing a Discovery Endpoint**: Create a route, typically `GET` (e.g., `/api`), which, when accessed by a client, returns the JSON definitions of all registered and available tools. This is achieved via the `addDiscoveryHandler` method.
     2. **Handling RPC Calls**: Create a generic RPC route (e.g., `/api/:toolId`) that receives requests, finds the corresponding tool by `toolId`, executes it, and returns the result. This is handled by the `addRpcHandler` method.
     3. Managing the server lifecycle (`start`, `stop`).
+    4. **Physical Awareness (V2)**: Methods like `getListenAddr()` and `getRoutes()` allow for physical port reuse and logical route auditing.
 - **`IClientToolTransport`**: The interface that a client-side transport must implement. Its core responsibilities are:
     1. **Loading API Definitions**: Call the `loadApis()` method, which accesses the server's discovery endpoint to get the definitions of all tools.
     2. **Executing Remote Calls**: Implement the `fetch()` method, which is responsible for serializing the client's tool call (function name and parameters), sending it to the server's RPC endpoint, and processing the response.
+    3. **Background Lifecycle (V2)**: Support for **Polling (102 Processing)** and **Logical Cancellation** linked to `AbortSignal`.
 
-### Built-in HTTP Transport
+### Built-in Transports
 
-The library provides a plug-and-play, HTTP-based transport implementation that requires no extra configuration:
+The library provides plug-and-play transport implementations:
 
-- **`HttpServerToolTransport`**: A server-side transport that uses Node.js's built-in `http` module to create a lightweight server. When you call `serverTransport.mount(ServerTools, '/api')`, it automatically:
-  - Creates a `GET /api` route for service discovery.
-  - Creates a `POST /api/:toolId` route (and supports other methods) to handle RPC calls for all tools. It intelligently parses tool parameters from the request body or URL parameters.
-
-- **`HttpClientToolTransport`**: A client-side transport that uses the cross-platform `fetch` API to send requests to the server. When you call `client.init()` (which uses `loadApis` internally), it requests `GET /api`. When you run a tool, it sends a JSON request with parameters to `POST /api/toolName`.
+- **`HttpServerToolTransport`**: A server-side transport that uses Node.js's built-in `http` module. In V2, it supports **Longest Prefix Match** routing, allowing multiple logical instances to share the same physical port.
+- **`HttpClientToolTransport`**: A client-side transport that uses the cross-platform `fetch` API. It supports automatic polling for background tasks.
+- **`Mailbox Transports`**: Native support for internal distributed mailbox protocols, ideal for cross-process or cross-thread communication with native physical isolation.
 
 ### Extending the Functionality: Creating Your Own Transport
 
