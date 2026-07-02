@@ -1,5 +1,4 @@
 import { RpcMethodsClientFuncParams, RpcMethodsClientTool } from "./rpc-methods-client-tool";
-import { throwError } from "@isdk/common-error";
 import type { ActionName } from "./consts";
 
 export interface ResClientFuncParams extends RpcMethodsClientFuncParams {

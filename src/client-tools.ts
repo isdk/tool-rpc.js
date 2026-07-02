@@ -24,7 +24,7 @@ export declare namespace ClientTools {
  */
 export interface ClientFuncItem extends RemoteFuncItem { }
 
-const NoTransportErrorMsg = 'A client transport has not been set. Use ClientTools.setTransport() or transport.mount(ClientTools) first.';
+// const NoTransportErrorMsg = 'A client transport has not been set. Use ClientTools.setTransport() or transport.mount(ClientTools) first.';
 
 /**
  * Represents a client-side proxy for a remote tool function.
