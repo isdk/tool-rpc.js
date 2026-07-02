@@ -1,5 +1,5 @@
 // @vitest-environment node
-// import { describe, expect, it } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
 import { type ResServerFuncParams, ResServerTools } from "../src/res-server-tools"
 import { ResClientTools } from '../src/res-client-tools'
@@ -16,7 +16,7 @@ class TestResTool extends ResServerTools {
   items: any = {}
 
   params: FuncParams = {
-    'id': { type: ['number', 'string'] },
+    'id': { type: ['number', 'string'] as any },
     'val': { type: 'any' },
   }
 
