@@ -68,7 +68,7 @@ export abstract class ServerToolTransport extends ToolTransport implements IServ
    */
   protected async processIncomingCall(rawReq: any, rawRes: any, registry?: any): Promise<void> {
     try {
-      const rpcReq = await this.toRpcRequest(rawReq);
+      const rpcReq = await this.toRpcRequest(rawReq, rawRes);
 
       // 架构层校验：调用所属 Manager 实例进行策略审计 (SSRF 防御、白名单等)
       this.manager.validateRpcRequest(rpcReq);
@@ -111,7 +111,7 @@ export abstract class ServerToolTransport extends ToolTransport implements IServ
     }
   }
 
-  protected abstract toRpcRequest(rawReq: any): Promise<ToolRpcRequest>;
+  protected abstract toRpcRequest(rawReq: any, rawRes?: any): Promise<ToolRpcRequest>;
   protected abstract sendRpcResponse(rpcRes: ToolRpcResponse, rawRes: any): Promise<void>;
 
   public abstract addDiscoveryHandler(apiUrl: string, handler: () => any): void;

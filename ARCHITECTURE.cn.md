@@ -187,9 +187,9 @@ const resCN = await chatTool.with({ apiUrl: 'https://cn.api/v1' }).run({ text: '
 ### 6.4 联邦寻址 (Federated Addressing)
 
 每一个 `ClientTools` 实例（Stub）手里都握着一份 `apiUrl` 地图。在调用 `run()` 时，它不再依赖全局唯一的 Transport，而是：
+
 1. 从 `this.apiUrl` 获取目标地址。
 2. 委托 `RpcTransportManager` 找到该地址对应的 Transport。
 3. 执行远程搬运。
 
 这种设计使得应用能够以“联邦化”的方式同时与数十个微服务进行通信，每个服务可以有不同的地址、不同的协议，且相互物理隔离。
-

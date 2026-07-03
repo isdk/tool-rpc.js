@@ -114,6 +114,11 @@ export abstract class ClientToolTransport extends ToolTransport implements IClie
     const reqId = fetchOptions.headers[RPC_HEADERS.REQUEST_ID] || Date.now().toString(36) + Math.random().toString(36).substring(2);
     fetchOptions.headers[RPC_HEADERS.REQUEST_ID] = reqId;
 
+    // 将 clientId 注入到 headers 中，各传输层自动通过 fetchOptions.headers 继承
+    if (fetchOptions.clientId) {
+      fetchOptions.headers[RPC_HEADERS.CLIENT_ID] = fetchOptions.clientId;
+    }
+
     return this.executeWithPolling(name, args, act, subName, fetchOptions);
   }
 

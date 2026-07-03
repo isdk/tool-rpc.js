@@ -18,6 +18,8 @@ export const RPC_HEADERS = {
   REQUEST_ID: 'req-id',
   /** 任务退避/轮询间隔参考 (ms) */
   RETRY_AFTER: 'rpc-retry-after',
+  /** 客户端标识 (用于 session 识别) */
+  CLIENT_ID: 'rpc-client-id',
 
   // 别名保留，方便过渡
   /** @deprecated use TOOL_ID instead */
@@ -95,6 +97,8 @@ export interface ToolRpcRequest {
   resId?: string;
   /** 追踪 ID */
   traceId?: string;
+  /** 客户端标识 (可选，用于 session 识别) */
+  clientId?: string;
   /** 本次请求唯一标识 */
   requestId: string;
   /** 已解构的业务参数负载 */

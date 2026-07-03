@@ -128,6 +128,7 @@ export class MailboxServerTransport extends ServerToolTransport {
       toolId: toolId as string,
       act: act as string,
       resId: resId as string,
+      clientId: rpcHeaders[RPC_HEADERS.CLIENT_ID] as string,
       traceId: traceId as string,
       requestId: reqId as string,
       params: body || {},

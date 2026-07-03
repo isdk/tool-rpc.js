@@ -42,9 +42,10 @@
 | `toolId` | string | 是 | 工具注册名 |
 | `act` | string | 否 | 子方法（如 `status`, `cancel`） |
 | `resId` | string | 否 | 资源 ID |
+| `clientId` | string | 否 | 客户端标识（用于 session 识别，自动透传至 header `rpc-client-id`） |
 | `requestId` | string | 是 | 唯一调用 ID（用于幂等、追踪） |
 | `params` | any | 是 | 业务参数 |
-| `headers` | object | 否 | 标准 Header（如 `rpc-timeout`, `rpc-act`） |
+| `headers` | object | 否 | 标准 Header（如 `rpc-timeout`, `rpc-act`, `rpc-client-id`） |
 | `signal` | AbortSignal | 否 | 取消信号 |
 
 #### ToolRpcResponse
@@ -322,7 +323,25 @@ console.log(result); // "Hello, World!"
 - `clientAddress` 必须指定，用于服务端回调或状态通知。
 - 需要确保服务端和客户端使用同一个 `Mailbox` 实例或相同 Provider（如内存、Redis 等）。
 
-### 4.4 自定义传输层
+### 4.4 客户端标识 (Client ID)
+
+`@isdk/tool-rpc` 支持在客户端请求中携带 `clientId` 以标识会话来源。该机制实现为**基类统一注入**，各传输层自动继承：
+
+```typescript
+// 客户端传入 clientId（任何传输层均可）
+const result = await someTool.run(
+  { name: 'World' },
+  { clientId: 'my-session-001' }
+);
+```
+
+- **客户端**：`ClientToolTransport.fetch()` 基类自动将 `fetchOptions.clientId` 注入到 header `rpc-client-id`。
+- **传输层**：HTTP、Mailbox 等客户端通过展开 `fetchOptions.headers` 自动透传，无需在各自实现中重复处理。
+- **服务端**：各协议 `toRpcRequest()` 从 header 解析 `rpc-client-id` 并赋值到 `ToolRpcRequest.clientId` 可选字段。
+
+业务代码可通过 `this.ctx.clientId`（若 `ToolRpcContext` 扩展）或 `this.ctx.headers['rpc-client-id']` 获取。
+
+### 4.5 自定义传输层
 
 实现 `IServerToolTransport` 或 `IClientToolTransport` 接口。例如集成 Fastify：
 

@@ -6,7 +6,7 @@
 
 ## ✨ 核心功能
 
-- **三位一体架构 (V2.6+):** 
+- **三位一体架构 (V2.6+):**
   - **RpcTransportManager (管理中心)**: 协议注册中心、逻辑路由审计及传输实例生命周期管理。
   - **RpcServerDispatcher (执行调度器)**: 独立于协议的执行引擎，内置并发隔离（影子实例）与任务追踪。
   - **RpcActiveTaskTracker (任务追踪器)**: 跨协议任务可见性，支持结果保留策略与后台执行 (102 Processing)。
@@ -16,7 +16,7 @@
 - **🔌 客户端自动代理:** 客户端 (`ClientTools` 及其子类) 能从服务器自动加载工具定义，并动态生成类型安全的代理函数。
 - **🚀 多实例并行隔离:** 支持在单个进程中运行多个具有不同 `apiUrl` 的传输实例，彻底消除全局状态冲突。
 - **🛡️ 执行死线守卫:** 集成两级超时管理（软/硬死线）以及物理链路与逻辑执行的中止联动。
-- **🚀 内置 HTTP & Mailbox 传输:** 
+- **🚀 内置 HTTP & Mailbox 传输:**
   - **HTTP**: 提供基于 Node.js `http` 模块的服务器和基于 `fetch` 的客户端。
   - **Mailbox**: 原生支持内部分布式信箱协议，适用于跨进程或跨线程通信。
 - **🌊 深度流式支持:** 服务器和客户端均支持 `ReadableStream` (Web & Node)，具备完整的生命周期管理、背压控制及自动清理机制。
@@ -218,6 +218,7 @@ graph TD
 ### 3. 🛡️ 并发隔离 (影子实例 Shadow Instances)
 
 V2 架构引入了**影子实例**机制，彻底解决了异步环境下的 `this.ctx` 竞态冲突。
+
 - 当请求到达时，`Dispatcher` 会利用 `Object.create(tool)` 创建一个新实例。
 - **属性遮蔽 (Property Shadowing)**：`this.ctx = context` 仅作用于当前执行实例，确保高并发下的物理隔离，同时保留对原始工具属性的访问。
 
@@ -225,13 +226,13 @@ V2 架构引入了**影子实例**机制，彻底解决了异步环境下的 `th
 
 `@isdk/tool-rpc` 的核心由三个解耦的组件构成：
 
-1.  **RpcTransportManager (管理中心)**:
+1. **RpcTransportManager (管理中心)**:
     - **物理映射**: 管理 `apiUrl` 到 `IToolTransport` 实例的映射。
     - **路由审计**: 执行 `ListenAddr -> Set<RoutePath>` 冲突检测，防止在共享物理端口上发生路由劫持。
-2.  **RpcServerDispatcher (执行调度器)**:
+2. **RpcServerDispatcher (执行调度器)**:
     - **归一化**: 将协议特定的对象转化为标准的 `ToolRpcContext`。
     - **死线裁决**: 实现软死线（触发 `102 Processing` 以转入后台执行）和硬死线（以 `408` 终止任务）。
-3.  **RpcActiveTaskTracker (任务账本)**:
+3. **RpcActiveTaskTracker (任务账本)**:
     - **可观测性**: 跨协议追踪所有活跃和后台任务。
     - **结果保留**: 管理任务结果的保留策略（`Once`, `Permanent`, TTL）。
     - **中止联动**: 将物理连接的 `AbortSignal` 桥接到执行层。
@@ -453,7 +454,6 @@ await runner.run(params);
 - **`Mailbox Transports` (信箱传输)**: 原生支持内部分布式信箱协议。
   - **特点**: 适用于跨进程或跨线程通信，天然具备物理隔离性。
   - **优势**: 在无需 HTTP Stack 的场景下提供高性能的工具调用能力。
-
 
 ### 功能扩展：创建您自己的传输
 

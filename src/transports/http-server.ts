@@ -241,7 +241,7 @@ export class HttpServerToolTransport extends ServerToolTransport {
       res.end(JSON.stringify({ error: message }));
    }
 
-   protected async toRpcRequest(rawReq: http.IncomingMessage): Promise<ToolRpcRequest> {
+   protected async toRpcRequest(rawReq: http.IncomingMessage, rawRes?: http.ServerResponse): Promise<ToolRpcRequest> {
       const headersStr: Record<string, string> = {};
       for (const [k, v] of Object.entries(rawReq.headers)) {
          if (Array.isArray(v)) {
@@ -303,11 +303,12 @@ export class HttpServerToolTransport extends ServerToolTransport {
          toolId: toolId,
          act: act,
          resId: resId,
+         clientId: headersStr[RPC_HEADERS.CLIENT_ID] as string,
          traceId: headersStr[RPC_HEADERS.TRACE_ID],
          requestId: (headersStr[RPC_HEADERS.REQUEST_ID] as string) || randomUUID(),
          params: params,
          headers: headersStr,
-         raw: { _req: rawReq, _res: null }
+         raw: { _req: rawReq, _res: rawRes || null }
       };
 
       return reqObj;
