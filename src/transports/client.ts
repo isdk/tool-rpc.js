@@ -3,6 +3,7 @@ import { ActionName } from '../consts';
 import { IToolTransport, ToolTransport, ToolTransportOptions } from "./base";
 import { RPC_HEADERS, RPC_DEFAULTS } from "./models";
 
+export { Funcs }
 export interface ClientToolTransportOptions extends ToolTransportOptions {
 }
 
@@ -149,7 +150,7 @@ export abstract class ClientToolTransport extends ToolTransport implements IClie
         // 读取 Retry-After 给出的参考轮询等待时间，避免洪水攻击 (支持标准与自定义头)
         const retryAfter = res.headers?.[RPC_HEADERS.RETRY_AFTER];
         const waitTime = retryAfter ? parseInt(String(retryAfter)) : RPC_DEFAULTS.RETRY_AFTER_MS;
-        
+
         // 使用 Promise.race 允许在等待期间被信号中断
         await new Promise((resolve, reject) => {
           const timer = setTimeout(resolve, waitTime);
