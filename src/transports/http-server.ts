@@ -3,7 +3,7 @@ import { URL } from 'url';
 import { Readable } from 'stream';
 import { ServerToolTransport, ServerToolTransportOptions } from './server';
 import { ToolRpcRequest, ToolRpcResponse, RPC_HEADERS, RpcStatusCode, RpcError } from './models';
-import { randomUUID } from 'crypto';
+import { uuidv4 } from '@isdk/hash';
 
 export interface HttpServerToolTransportOptions extends ServerToolTransportOptions, http.ServerOptions {
    /** 最大请求体大小 (字节)，默认 1MB */
@@ -305,7 +305,7 @@ export class HttpServerToolTransport extends ServerToolTransport {
          resId: resId,
          clientId: headersStr[RPC_HEADERS.CLIENT_ID] as string,
          traceId: headersStr[RPC_HEADERS.TRACE_ID],
-         requestId: (headersStr[RPC_HEADERS.REQUEST_ID] as string) || randomUUID(),
+         requestId: (headersStr[RPC_HEADERS.REQUEST_ID] as string) || uuidv4(),
          params: params,
          headers: headersStr,
          raw: { _req: rawReq, _res: rawRes || null }

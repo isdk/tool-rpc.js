@@ -7,8 +7,17 @@
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
+  "browser": {
+    "./dist/index.js": "./dist/browser.js",
+    "./dist/index.mjs": "./dist/browser.mjs"
+  },
   "exports": {
     ".": {
+      "browser": {
+        "types": "./dist/browser.d.ts",
+        "require": "./dist/browser.js",
+        "import": "./dist/browser.mjs"
+      },
       "types": "./dist/index.d.ts",
       "require": "./dist/index.js",
       "import": "./dist/index.mjs"
@@ -17,6 +26,11 @@
       "types": "./dist/transports.d.ts",
       "require": "./dist/transports.js",
       "import": "./dist/transports.mjs"
+    },
+    "./browser": {
+      "types": "./dist/browser.d.ts",
+      "require": "./dist/browser.js",
+      "import": "./dist/browser.mjs"
     }
   },
   "files": [
@@ -31,6 +45,7 @@
   },
   "dependencies": {
     "@isdk/common-error": "^0.2.0",
+    "@isdk/hash": "workspace:^",
     "@isdk/tool-func": "workspace:^",
     "@mboxlabs/mailbox": "workspace:^",
     "lodash-es": "^4.17.23",

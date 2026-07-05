@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { RpcTransportManager } from './manager';
+import { RpcTransportManager } from './server-manager';
 import { ToolTransport, IToolTransport } from './base';
 import { IClientToolTransport } from './client';
 import { IServerToolTransport } from './server';

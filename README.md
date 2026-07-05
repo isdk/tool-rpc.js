@@ -14,8 +14,9 @@ This project is built on `@isdk/tool-func`. Before proceeding, please ensure you
 - **🌐 RESTful Interface:** Quickly create REST-style APIs using `ResServerTools`, which automatically handles standard operations like `get`, `list`, `post`, `put`, and `delete`.
 - **🔧 RPC Method Grouping:** Use `RpcMethodsServerTool` to bundle multiple related functions (methods) under a single tool, invoked via an `act` parameter.
 - **🔌 Automatic Client-Side Proxies:** The client (`ClientTools` and its subclasses) can automatically load tool definitions from the server and dynamically generate type-safe proxy functions, making remote calls as simple as local ones.
+- **🌐 Browser Compatible (`@isdk/tool-rpc/browser`):** A dedicated browser entry that exports only client-side modules. No Node.js built-in dependencies (`http`, `stream`, `crypto`, etc.). Includes `RpcClientTransportManager` — a lightweight browser-friendly transport manager.
 - **🚀 Built-in HTTP & Mailbox Transport:** 
-  - **HTTP**: Comes with `HttpServerToolTransport` (Node.js `http`) and `HttpClientToolTransport` (`fetch`).
+  - **HTTP**: Comes with `HttpServerToolTransport` (Node.js `http`) and `HttpClientToolTransport` (`fetch`, browser-compatible).
   - **Mailbox**: Native support for internal distributed mailbox protocols, ideal for cross-process or cross-thread communication.
 - **🚀 Multi-Instance Isolation:** Support for multiple transport instances with different `apiUrl`s in a single process without global state collision.
 - **🛡️ Execution Guarding:** Integrated deadline management (Soft/Hard deadlines) and physical-to-logical abort linkage.
@@ -374,6 +375,53 @@ This is the highest-level abstraction, providing a resource-centric, RESTful-sty
     const user = await userRes.get({ id: '1' }); // Sends GET /api/users/1
     const allUsers = await userRes.list();       // Sends GET /api/users
     ```
+
+## 🌐 Browser Usage
+
+`@isdk/tool-rpc/browser` is a dedicated browser entry point that ships **only** client-side code — no Node.js built-in modules (`http`, `stream`, `crypto`, etc.) are referenced.
+
+### Installation
+
+```bash
+npm install @isdk/tool-rpc
+```
+
+### Import from the browser entry
+
+```typescript
+import {
+  ClientTools,
+  HttpClientToolTransport,
+  RpcClientTransportManager,
+  RPC_HEADERS,
+} from '@isdk/tool-rpc/browser'
+
+// Register HTTP scheme
+RpcClientTransportManager.bindScheme('http', HttpClientToolTransport)
+
+// Create a client and call remote tools
+await ClientTools.loadFrom(undefined, { apiUrl: 'http://localhost:3000/api/' })
+const greet = ClientTools.get('greet')
+const result = await greet.run({ name: 'Browser' })
+```
+
+### Key differences from Node.js
+
+| Aspect | Node.js (`@isdk/tool-rpc`) | Browser (`@isdk/tool-rpc/browser`) |
+|--------|---------------------------|-------------------------------------|
+| Manager | `RpcTransportManager` (full version with server lifecycle) | `RpcClientTransportManager` (lightweight, client-only) |
+| Server transports | `HttpServerToolTransport`, `MailboxServerTransport` | Not included |
+| `uuid` generation | Via `@isdk/hash` (cross-platform) | Via `@isdk/hash` (cross-platform) |
+| Bundle size | Larger (includes server code) | Smaller (client-side only) |
+
+### Bundler auto-resolution
+
+When using bundlers (webpack 5+, Rollup, Vite), the `browser` field in `package.json` automatically resolves `@isdk/tool-rpc` to the browser entry. This means you can also write:
+
+```typescript
+// Bundlers automatically resolve to the browser entry
+import { ClientTools } from '@isdk/tool-rpc'
+```
 
 ## 🔌 The Transport Layer
 

@@ -3,7 +3,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { ClientTools as ToolFunc } from "../src/client-tools"
-import { RpcTransportManager } from "../src/transports/manager"
+import { RpcClientTransportManager } from "../src/transports/client-manager"
 
 describe('ClientTools', () => {
   beforeEach(() => {
@@ -144,7 +144,7 @@ describe('ClientTools', () => {
       const tool = srv.get('testTool') as any;
 
       // Mock getClient to check options
-      const getClientSpy = vi.spyOn(RpcTransportManager.instance, 'getClient').mockImplementation((url, options) => {
+      const getClientSpy = vi.spyOn(RpcClientTransportManager.instance, 'getClient').mockImplementation((url, options) => {
         return { fetch: async () => options } as any;
       });
 
@@ -160,13 +160,125 @@ describe('ClientTools', () => {
       const mockTransport = {
         fetch: async (name: string, params: any, act: string, sub: any, options: any) => options.apiUrl
       };
-      const getClientSpy = vi.spyOn(RpcTransportManager.instance, 'getClient').mockImplementation(() => mockTransport as any);
+      const getClientSpy = vi.spyOn(RpcClientTransportManager.instance, 'getClient').mockImplementation(() => mockTransport as any);
 
       const tool = ToolFunc.register({ name: 'dynamicTool' }) as any;
 
       // Dynamic binding call
       const result = await tool.with({ apiUrl: 'http://dynamic-target' }).run();
       expect(result).toBe('http://dynamic-target');
+
+      getClientSpy.mockRestore();
+    });
+
+    it('should pass all parameters correctly via fetch()', async () => {
+      const apiUrl = 'http://fetch-params-test/api';
+      const srv = ToolFunc.connect(apiUrl);
+
+      // Mock transport to capture fetch call parameters
+      const capturedCalls: any[] = [];
+      const mockTransport = {
+        fetch: async (name: string, args: any, act: string, subName: any, options: any, toolTimeout: any) => {
+          capturedCalls.push({ name, args, act, subName, options, toolTimeout });
+          return 'fetch-result';
+        }
+      };
+      const getClientSpy = vi.spyOn(RpcClientTransportManager.instance, 'getClient').mockReturnValue(mockTransport as any);
+
+      srv.loadFromSync({ 'fetchTest': { name: 'fetchTest', params: {}, timeout: 5000 } } as any);
+      const tool = srv.get('fetchTest') as any;
+
+      // Test 1: Basic fetch via run()
+      const result1 = await tool.run({ msg: 'hello' });
+      expect(result1).toBe('fetch-result');
+      expect(capturedCalls.length).toBe(1);
+      expect(capturedCalls[0].name).toBe('fetchTest');
+      expect(capturedCalls[0].args).toEqual({ msg: 'hello' });
+      expect(capturedCalls[0].toolTimeout).toBe(5000);
+
+      // Test 2: Fetch with explicit action and subName
+      capturedCalls.length = 0;
+      const result2 = await tool.fetch({ id: '123' }, 'get', '456', { customOption: true });
+      expect(result2).toBe('fetch-result');
+      expect(capturedCalls.length).toBe(1);
+      expect(capturedCalls[0].name).toBe('fetchTest');
+      expect(capturedCalls[0].args).toEqual({ id: '123' });
+      expect(capturedCalls[0].act).toBe('get');
+      expect(capturedCalls[0].subName).toBe('456');
+
+      getClientSpy.mockRestore();
+    });
+
+    it('should reuse cached transport for the same apiUrl', async () => {
+      const apiUrl = 'http://cache-reuse-test/api';
+
+      // Mock a minimal transport class for getClient to instantiate
+      class MockCacheTransport {
+        apiUrl: string;
+        options?: any;
+        constructor(url: string, options?: any) {
+          this.apiUrl = url;
+          this.options = options;
+        }
+        fetch = async () => 'cached-result'
+      }
+
+      // Register scheme so getClient can resolve and cache transports
+      RpcClientTransportManager.bindScheme('http', MockCacheTransport)
+
+      // First call: creates and caches a new transport
+      const transport1 = RpcClientTransportManager.instance.getClient(apiUrl)
+      expect(transport1).toBeInstanceOf(MockCacheTransport)
+      expect(transport1.apiUrl).toBe(apiUrl)
+
+      // Second call: should return the SAME cached instance
+      const transport2 = RpcClientTransportManager.instance.getClient(apiUrl)
+      expect(transport2).toBe(transport1)
+
+      // Different URL should create a NEW transport
+      const transport3 = RpcClientTransportManager.instance.getClient('http://cache-reuse-test/other')
+      expect(transport3).toBeInstanceOf(MockCacheTransport)
+      expect(transport3).not.toBe(transport1)
+
+      // Clean up
+      RpcClientTransportManager.clearSchemes()
+    });
+
+    it('should discover and register tools via loadFrom()', async () => {
+      const apiUrl = 'http://discovery-test/api';
+      const srv = ToolFunc.connect(apiUrl);
+
+      // Mock transport with loadApis that returns tool definitions
+      const mockTransport = {
+        fetch: async () => 'mock',
+        loadApis: vi.fn().mockResolvedValue({
+          'discoveredTool': { name: 'discoveredTool', params: { x: { type: 'number' } }, timeout: 3000 },
+          'anotherTool': { name: 'anotherTool', params: {} },
+        } as any),
+      };
+
+      // Mock getClient to return our mock transport
+      const getClientSpy = vi.spyOn(RpcClientTransportManager.instance, 'getClient').mockReturnValue(mockTransport as any);
+
+      // Call loadFrom without items to trigger server discovery
+      await srv.loadFrom(undefined, { apiUrl });
+
+      // Verify loadApis was called
+      expect(mockTransport.loadApis).toHaveBeenCalledTimes(1);
+
+      // Verify tools were registered on the connected service
+      const discoveredTool = srv.get('discoveredTool');
+      expect(discoveredTool).toBeDefined();
+      expect(discoveredTool).toBeInstanceOf(ToolFunc);
+      expect(discoveredTool.apiUrl).toBe(apiUrl);
+
+      const anotherTool = srv.get('anotherTool');
+      expect(anotherTool).toBeDefined();
+      expect(anotherTool.apiUrl).toBe(apiUrl);
+
+      // Test that discovered tools can be called (via our mock)
+      const result = await discoveredTool.run({ x: 42 });
+      expect(result).toBe('mock');
 
       getClientSpy.mockRestore();
     });

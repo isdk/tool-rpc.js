@@ -3,7 +3,7 @@ import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { ToolFunc } from '@isdk/tool-func'
 import { ServerTools } from "../src/server-tools"
 import { ClientTools } from '../src/client-tools'
-import { findPort } from '@isdk/util'
+import { findPort, sleep } from '@isdk/util'
 import { HttpClientToolTransport } from '../src/transports/http-client'
 import { HttpServerToolTransport } from '../src/transports/http-server'
 import { RpcServerDispatcher } from '../src/transports/dispatcher'
@@ -99,6 +99,7 @@ describe('Timeout and ExpectedDuration', () => {
     // Setup Dispatcher Registry
     RpcServerDispatcher.instance.registry = ServerTools;
 
+    await sleep(100)
     const port = await findPort(3000)
     apiRoot = `http://localhost:${port}/api`
 
@@ -106,6 +107,7 @@ describe('Timeout and ExpectedDuration', () => {
     server.addRpcHandler(apiRoot)
     server.addDiscoveryHandler(apiRoot, () => ServerTools.toJSON())
 
+    await sleep(100)
     await server.start({ port })
 
     const clientTransport = new HttpClientToolTransport(apiRoot);

@@ -14,10 +14,11 @@
 - **🌐 RESTful 接口:** 使用 `ResServerTools` 快速创建符合 REST 风格的 API，自动处理 `get`, `list`, `post`, `put`, `delete` 等标准操作。
 - **🔧 RPC 方法分组:** 使用 `RpcMethodsServerTool` 将多个相关函数（方法）捆绑在单个工具下，通过 `act` 参数进行调用。
 - **🔌 客户端自动代理:** 客户端 (`ClientTools` 及其子类) 能从服务器自动加载工具定义，并动态生成类型安全的代理函数。
+- **🌐 浏览器兼容 (`@isdk/tool-rpc/browser`):** 独立的浏览器入口，仅导出客户端模块。不依赖任何 Node.js 内置模块 (`http`, `stream`, `crypto` 等)。包含轻量级的浏览器端传输管理器 `RpcClientTransportManager`。
 - **🚀 多实例并行隔离:** 支持在单个进程中运行多个具有不同 `apiUrl` 的传输实例，彻底消除全局状态冲突。
 - **🛡️ 执行死线守卫:** 集成两级超时管理（软/硬死线）以及物理链路与逻辑执行的中止联动。
 - **🚀 内置 HTTP & Mailbox 传输:**
-  - **HTTP**: 提供基于 Node.js `http` 模块的服务器和基于 `fetch` 的客户端。
+  - **HTTP**: 提供基于 Node.js `http` 模块的服务器和基于 `fetch` 的客户端（浏览器兼容）。
   - **Mailbox**: 原生支持内部分布式信箱协议，适用于跨进程或跨线程通信。
 - **🌊 深度流式支持:** 服务器和客户端均支持 `ReadableStream` (Web & Node)，具备完整的生命周期管理、背压控制及自动清理机制。
 
@@ -417,6 +418,53 @@ await runner.run(params);
     const user = await userRes.get({ id: '1' }); // 发送 GET /api/users/1
     const allUsers = await userRes.list();       // 发送 GET /api/users
     ```
+
+## 🌐 浏览器端使用
+
+`@isdk/tool-rpc/browser` 是专用的浏览器入口，仅包含**客户端**代码——不依赖任何 Node.js 内置模块（`http`, `stream`, `crypto` 等）。
+
+### 安装
+
+```bash
+npm install @isdk/tool-rpc
+```
+
+### 从浏览器入口导入
+
+```typescript
+import {
+  ClientTools,
+  HttpClientToolTransport,
+  RpcClientTransportManager,
+  RPC_HEADERS,
+} from '@isdk/tool-rpc/browser'
+
+// 注册 HTTP 协议
+RpcClientTransportManager.bindScheme('http', HttpClientToolTransport)
+
+// 创建客户端并调用远程工具
+await ClientTools.loadFrom(undefined, { apiUrl: 'http://localhost:3000/api/' })
+const greet = ClientTools.get('greet')
+const result = await greet.run({ name: '浏览器' })
+```
+
+### 与 Node.js 版本的主要区别
+
+| 方面 | Node.js (`@isdk/tool-rpc`) | 浏览器 (`@isdk/tool-rpc/browser`) |
+|------|----------------------------|-----------------------------------|
+| 管理器 | `RpcTransportManager` (完整版，含服务端生命周期) | `RpcClientTransportManager` (轻量版，仅客户端) |
+| 服务端传输 | `HttpServerToolTransport`, `MailboxServerTransport` | 不包含 |
+| UUID 生成 | 通过 `@isdk/hash` (跨平台) | 通过 `@isdk/hash` (跨平台) |
+| 包体积 | 较大 (含服务端代码) | 更小 (仅客户端) |
+
+### 打包工具自动解析
+
+使用 webpack 5+、Rollup、Vite 等打包工具时，`package.json` 中的 `browser` 字段会自动将 `@isdk/tool-rpc` 解析到浏览器入口。你也可以直接写：
+
+```typescript
+// 打包工具自动解析到浏览器入口
+import { ClientTools } from '@isdk/tool-rpc'
+```
 
 ## 🔌 传输层 (Transport Layer)
 

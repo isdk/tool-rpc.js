@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { HttpServerToolTransport } from './http-server';
-import { RpcTransportManager } from './manager';
+import { RpcTransportManager } from './server-manager';
 import { ServerToolTransport } from './server';
 import http from 'http';
 

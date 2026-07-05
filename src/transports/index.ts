@@ -10,4 +10,4 @@ export * from './http-server';
 export * from './http-client';
 export * from './mailbox-client';
 export * from './mailbox-server';
-export * from './manager';
+export * from './server-manager';

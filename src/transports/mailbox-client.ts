@@ -2,6 +2,7 @@ import { ClientToolTransport, ClientToolTransportOptions } from "./client";
 import { ActionName } from "../consts";
 import { RPC_HEADERS } from "./models";
 import { Mailbox, MailMessage } from '@mboxlabs/mailbox';
+import { uuidv4 } from '@isdk/hash';
 
 export interface MailboxClientTransportOptions extends ClientToolTransportOptions {
   mailbox?: Mailbox;
@@ -89,7 +90,7 @@ export class MailboxClientTransport extends ClientToolTransport {
   }
 
   public async _fetch(name: string, args?: any, act?: ActionName | string, id?: any, fetchOptions?: any) {
-    const reqId = fetchOptions?.headers?.['req-id'] || crypto.randomUUID();
+    const reqId = fetchOptions?.headers?.['req-id'] || uuidv4();
     const targetAddressStr = this.serverAddress;
 
     const messageHeaders: any = {

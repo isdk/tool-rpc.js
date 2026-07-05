@@ -73,6 +73,95 @@ describe('HttpClientToolTransport', () => {
         expect((res.headers as any)['retry-after']).toBe('1000');
     });
 
+    it('should convert HTTP 202 with status:102 body to processing response', async () => {
+        (globalThis.fetch as any).mockResolvedValue({
+            status: 202,
+            ok: true,
+            headers: new Headers({ 
+                'content-type': 'application/json',
+                'x-custom': 'header-val'
+            }),
+            clone: () => ({
+                json: () => Promise.resolve({ 
+                    status: 102, 
+                    message: 'Task moved to background' 
+                })
+            })
+        });
+
+        const res = await transport._fetch('my-tool', { x: 1 }, 'run');
+
+        expect(res.status).toBe(102);
+        // HTTP response headers should be preserved
+        expect((res.headers as any)['content-type']).toBe('application/json');
+        expect((res.headers as any)['x-custom']).toBe('header-val');
+    });
+
+    it('should merge 102 body headers with HTTP response headers', async () => {
+        (globalThis.fetch as any).mockResolvedValue({
+            status: 202,
+            ok: true,
+            headers: new Headers({ 
+                'content-type': 'application/json',
+                'rpc-retry-after': '1000',
+                'x-server': 'test'
+            }),
+            clone: () => ({
+                json: () => Promise.resolve({ 
+                    status: 102,
+                    headers: {
+                        'rpc-retry-after': '500',
+                        'rpc-request-id': 'req-abc-123'
+                    }
+                })
+            })
+        });
+
+        const res = await transport._fetch('my-tool', undefined, undefined, undefined);
+
+        expect(res.status).toBe(102);
+        // Body header should override HTTP response header (rpc-retry-after)
+        expect((res.headers as any)['rpc-retry-after']).toBe('500');
+        // Body-only header should be present
+        expect((res.headers as any)['rpc-request-id']).toBe('req-abc-123');
+        // HTTP-only header should be present
+        expect((res.headers as any)['x-server']).toBe('test');
+    });
+
+    it('should pass through normal 202 response without status:102 body', async () => {
+        (globalThis.fetch as any).mockResolvedValue({
+            status: 202,
+            ok: true,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            clone: () => ({
+                json: () => Promise.resolve({ status: 200, data: 'normal' })
+            }),
+            json: () => Promise.resolve({ status: 200, data: 'normal' })
+        });
+
+        const res = await transport._fetch('my-tool', undefined, undefined, undefined);
+
+        // Should return the original Response, not a 102 status object
+        expect(res.status).toBe(202);
+        expect((res as any).status).toBe(202);
+    });
+
+    it('should fall through on non-JSON 202 response', async () => {
+        (globalThis.fetch as any).mockResolvedValue({
+            status: 202,
+            ok: true,
+            headers: new Headers({ 'content-type': 'text/plain' }),
+            clone: () => ({
+                json: () => Promise.reject(new Error('Not JSON'))
+            })
+        });
+
+        const res = await transport._fetch('my-tool', undefined, undefined, undefined);
+
+        // Should return the original Response (202), not error or 102
+        expect(res.status).toBe(202);
+    });
+
     it('should throw Error if HTTP fails with non 102', async () => {
         (globalThis.fetch as any).mockResolvedValue({
             ok: false,

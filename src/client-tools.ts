@@ -2,7 +2,7 @@ import { throwError } from "@isdk/common-error";
 import { Funcs, ToolFunc } from "@isdk/tool-func";
 import { RemoteToolFuncSchema, type RemoteFuncItem, type ActionName } from "./consts";
 import type { IClientToolTransport } from "./transports/client";
-import { RpcTransportManager } from "./transports/manager";
+import { RpcClientTransportManager } from "./transports/client-manager";
 import { defaultsDeep } from "lodash-es";
 
 // * Declaration merging to extend the `ClientTools` class with `ClientFuncItem` properties.
@@ -69,25 +69,23 @@ export class ClientTools extends ToolFunc {
   }
 
   /**
-   * Injects the client-side transport implementation.
-   * @deprecated Use RpcTransportManager.instance.register(transport) or manager.getClient(apiUrl)
+   * Injects the client-side transport implementation.    * @deprecated Use RpcClientTransportManager.instance.register(transport) or manager.getClient(apiUrl)
    * @param {IClientToolTransport} transport - The transport instance to use.
    */
   static setTransport(transport: IClientToolTransport) {
     if (transport) {
-      RpcTransportManager.instance.register(transport);
+      RpcClientTransportManager.instance.register(transport);
       if (typeof transport.mount === 'function') {
         transport.mount(this);
       }
     }
   }
 
-  /**
-   * @deprecated Use RpcTransportManager.instance.getClient(apiUrl)
+  /**    * @deprecated Use RpcClientTransportManager.instance.getClient(apiUrl)
    */
   static get transport() {
     // This is problematic for multiple transports, returning a guess or throwing
-    console.warn('ClientTools.transport is deprecated. Use instance.transport or manager.getClient(apiUrl)');
+    console.warn('ClientTools.transport is deprecated. Use instance.transport or RpcClientTransportManager.instance.getClient(apiUrl)');
     return (this as any)._transport;
   }
 
@@ -103,7 +101,7 @@ export class ClientTools extends ToolFunc {
       if (!apiUrl) {
         throwError('apiUrl is required for ClientTools.loadFrom when items is not provided', 'ClientTools');
       }
-      const transport = RpcTransportManager.instance.getClient(apiUrl!, options);
+      const transport = RpcClientTransportManager.instance.getClient(apiUrl!, options);
       items = await transport.loadApis(options);
       if (!this.apiUrl) this.apiUrl = apiUrl;
     }
@@ -163,7 +161,7 @@ export class ClientTools extends ToolFunc {
   get transport(): IClientToolTransport | undefined {
     const apiUrl = this.apiUrl;
     if (apiUrl) {
-      return RpcTransportManager.instance.getClient(apiUrl);
+      return RpcClientTransportManager.instance.getClient(apiUrl);
     }
   }
 
@@ -175,7 +173,7 @@ export class ClientTools extends ToolFunc {
     if (!apiUrl) {
       throwError('apiUrl is required for ClientTools.fetch', 'ClientTools');
     }
-    const transport = RpcTransportManager.instance.getClient(apiUrl, fetchOptions);
+    const transport = RpcClientTransportManager.instance.getClient(apiUrl, fetchOptions);
     const result = await transport.fetch(this.name!, objParam, act, subName, fetchOptions, this.timeout)
     return result
   }

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { RpcTransportManager } from './manager';
+import { RpcTransportManager } from './server-manager';
 import { HttpServerToolTransport } from './http-server';
 import { RpcServerDispatcher } from './dispatcher';
 import { RpcActiveTaskTracker, RpcActiveTaskHandle } from './task-tracker';

@@ -1,4 +1,4 @@
-import { RpcTransportManager } from "./manager";
+import { RpcClientTransportManager } from "./client-manager";
 
 /**
  * 通用的 RPC 处理函数句柄类型
@@ -7,7 +7,7 @@ export type RpcMethodHandler = (params: any, context?: any) => Promise<any> | an
 
 
 export interface ToolTransportOptions {
-  manager?: RpcTransportManager;
+  manager?: RpcClientTransportManager;
   apiUrl?: string;
   [key: string]: any;
 }
@@ -19,7 +19,7 @@ export interface IToolTransport {
   /**
    * 所属管理器引用
    */
-  manager?: RpcTransportManager;
+  manager?: RpcClientTransportManager;
 
   /**
    * 调用的基准 API 地点（URI）
@@ -54,11 +54,11 @@ export interface IToolTransport {
 export abstract class ToolTransport implements IToolTransport {
   declare apiUrl: string;
   declare options?: ToolTransportOptions;
-  public manager: RpcTransportManager;
+  public manager: RpcClientTransportManager;
 
   constructor(options?: ToolTransportOptions) {
     this.options = options;
-    this.manager = options?.manager || RpcTransportManager.instance;
+    this.manager = options?.manager || RpcClientTransportManager.instance;
     if (options?.apiUrl) {
       this.apiUrl = options.apiUrl;
     }

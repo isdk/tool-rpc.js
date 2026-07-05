@@ -1,5 +1,5 @@
-import { randomUUID } from 'crypto';
 import { createCallbacksTransformer } from '@isdk/tool-func';
+import { uuidv4 } from '@isdk/hash';
 
 import { ServerTools } from '../server-tools';
 import { RpcActiveTaskTracker, RpcActiveTaskHandle } from './task-tracker';
@@ -162,7 +162,7 @@ export class RpcServerDispatcher {
 
     const context: ToolRpcContext = {
       requestId: request.requestId,
-      traceId: request.traceId || (request.headers[RPC_HEADERS.TRACE_ID] as string) || randomUUID(),
+      traceId: request.traceId || (request.headers[RPC_HEADERS.TRACE_ID] as string) || uuidv4(),
       headers: request.headers,
       signal: abortController.signal,
       dispatcher: this,

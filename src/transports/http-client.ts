@@ -106,6 +106,30 @@ export class HttpClientToolTransport extends ClientToolTransport {
             };
          }
 
+         // [202 Accepted → 102 Processing]
+         // The server maps 102 (PROCESSING) to 202 (Accepted) for HTTP semantics.
+         // Check the body — if it contains status: 102, treat it as a processing
+         // response to trigger the executeWithPolling polling loop.
+         if (response.status === 202) {
+            try {
+               const cloned = response.clone();
+               const body = await cloned.json();
+               if (body && body.status === 102) {
+                  const headers: Record<string, string> = {};
+                  response.headers.forEach((v, k) => { headers[k] = v; });
+                  // Merge any headers from the 102 body (e.g. rpc-retry-after, rpc-request-id)
+                  if (body.headers && typeof body.headers === 'object') {
+                     for (const [k, v] of Object.entries(body.headers)) {
+                        headers[k] = String(v);
+                     }
+                  }
+                  return { status: 102, headers };
+               }
+            } catch {
+               // Not JSON or not a 102 body — fall through to normal handling
+            }
+         }
+
          if (!response.ok && response.status !== 102) {
             let errMsg = response.statusText;
             let errDetails: any = {};

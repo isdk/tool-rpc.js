@@ -94,7 +94,7 @@ describe('res server api', () => {
     RpcServerDispatcher.instance.registry = ServerTools;
 
     await sleep(100)
-    const port = await findPort(3003)
+    const port = await findPort(3005)
     apiRoot = `http://localhost:${port}/api`
 
     server = new HttpServerToolTransport({ port, apiUrl: apiRoot })

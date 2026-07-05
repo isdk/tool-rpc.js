@@ -1,6 +1,7 @@
 import { defaultsDeep } from 'lodash-es';
 import { ToolTransport, type IToolTransport, type ToolTransportOptions } from './base';
 import { RpcServerDispatcher } from './dispatcher';
+import { RpcTransportManager } from './server-manager';
 import { ToolRpcRequest, ToolRpcResponse } from './models';
 
 export interface ServerToolTransportOptions extends ToolTransportOptions {
@@ -46,6 +47,10 @@ export abstract class ServerToolTransport extends ToolTransport implements IServ
 
   constructor(options?: ServerToolTransportOptions) {
     super(options);
+    // Ensure server-side transports use RpcTransportManager (full version with SSRF protection)
+    if (!options?.manager) {
+      this.manager = RpcTransportManager.instance;
+    }
     this.dispatcher = options?.dispatcher || RpcServerDispatcher.instance;
   }
 

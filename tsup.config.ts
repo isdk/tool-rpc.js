@@ -6,6 +6,7 @@ export default defineConfig({
   entry: {
     'index': 'src/index.ts',
     'transports': 'src/transports/index.ts',
+    'browser': 'src/browser.ts',
   },
   format: ['cjs', 'esm'],
   // Inject cjs and esm shims:https://tsup.egoist.dev/#inject-cjs-and-esm-shims
