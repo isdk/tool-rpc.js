@@ -1,0 +1,15 @@
+[**@isdk/tool-rpc**](../README.md)
+
+***
+
+[@isdk/tool-rpc](../globals.md) / Funcs
+
+# Interface: Funcs
+
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:361
+
+A map of registered `ToolFunc` instances, indexed by their names.
+
+## Indexable
+
+> \[`name`: `string`\]: `ToolFunc`

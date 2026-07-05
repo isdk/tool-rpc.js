@@ -4,14 +4,13 @@
 
 [@isdk/tool-rpc](../globals.md) / RpcMethodHandler
 
-# Type Alias: RpcMethodHandler()
+# Type Alias: RpcMethodHandler
 
 > **RpcMethodHandler** = (`params`, `context?`) => `Promise`\<`any`\> \| `any`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:14](https://github.com/isdk/tool-rpc.js/blob/1c4d9feeb982e305e597719fcf1bcdf46906f1cb/src/transports/base.ts#L14)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:6](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/base.ts#L6)
 
-The generic handler for a remote procedure call (RPC) method.
-It receives the parameters and returns the result.
+通用的 RPC 处理函数句柄类型
 
 ## Parameters
 
@@ -19,16 +18,10 @@ It receives the parameters and returns the result.
 
 `any`
 
-The parameters for the RPC method.
-
 ### context?
 
 `any`
 
-Optional context, like the raw request object from the underlying framework.
-
 ## Returns
 
 `Promise`\<`any`\> \| `any`
-
-The result of the RPC method.

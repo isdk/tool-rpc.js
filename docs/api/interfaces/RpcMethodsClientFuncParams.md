@@ -6,7 +6,7 @@
 
 # Interface: RpcMethodsClientFuncParams
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/rpc-methods-client-tool.ts:4](https://github.com/isdk/tool-rpc.js/blob/1c4d9feeb982e305e597719fcf1bcdf46906f1cb/src/rpc-methods-client-tool.ts#L4)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/rpc-methods-client-tool.ts:4](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/rpc-methods-client-tool.ts#L4)
 
 ## Extended by
 
@@ -14,12 +14,12 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/rpc-methods-client-tool.ts:4](
 
 ## Indexable
 
-\[`name`: `string`\]: `any`
+> \[`name`: `string`\]: `any`
 
 ## Properties
 
 ### act?
 
-> `optional` **act**: `string`
+> `optional` **act?**: `string`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/rpc-methods-client-tool.ts:5](https://github.com/isdk/tool-rpc.js/blob/1c4d9feeb982e305e597719fcf1bcdf46906f1cb/src/rpc-methods-client-tool.ts#L5)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/rpc-methods-client-tool.ts:5](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/rpc-methods-client-tool.ts#L5)

@@ -8,7 +8,7 @@
 
 > `const` **ClientToolFuncSchema**: `object`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:149](https://github.com/isdk/tool-rpc.js/blob/1c4d9feeb982e305e597719fcf1bcdf46906f1cb/src/client-tools.ts#L149)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:201](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/client-tools.ts#L201)
 
 **`Internal`**
 
@@ -37,7 +37,7 @@ to corresponding HTTP methods. Defaults to 'post'.
 
 ###### value
 
-`"get"` | `"post"` | `"put"` | `"delete"` | `"patch"` | `"list"` | `"res"`
+`"get"` \| `"post"` \| `"put"` \| `"delete"` \| `"patch"` \| `"list"` \| `"res"`
 
 ###### dest
 
@@ -70,6 +70,17 @@ This is a server-side setting.
 
 > **type**: `string` = `'boolean'`
 
+### expectedDuration
+
+> **expectedDuration**: `object`
+
+The expected duration of the remote call in milliseconds.
+Used for UX improvements like progress bars.
+
+#### expectedDuration.type
+
+> **type**: `string` = `'number'`
+
 ### ~~fetchOptions~~
 
 > **fetchOptions**: `object`
@@ -83,3 +94,24 @@ Use `transport` instead.
 #### fetchOptions.type
 
 > **type**: `string` = `'object'`
+
+### stream
+
+> **stream**: `object`
+
+If true, indicate the tool function will return a stream.
+
+#### stream.type
+
+> **type**: `string` = `'boolean'`
+
+### timeout
+
+> **timeout**: `object`
+
+The timeout configuration for the remote call.
+Can be a number (milliseconds) or an object for fine-grained control.
+
+#### timeout.type
+
+> **type**: `string`[]

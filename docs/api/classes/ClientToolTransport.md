@@ -6,9 +6,9 @@
 
 # Abstract Class: ClientToolTransport
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:36](https://github.com/isdk/tool-rpc.js/blob/1c4d9feeb982e305e597719fcf1bcdf46906f1cb/src/transports/client.ts#L36)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:16](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/client.ts#L16)
 
-A concrete client transport implementation that uses the browser/node `fetch` API.
+所有传输协议 (Client/Server) 统一的基础能力接口。
 
 ## Extends
 
@@ -17,6 +17,7 @@ A concrete client transport implementation that uses the browser/node `fetch` AP
 ## Extended by
 
 - [`HttpClientToolTransport`](HttpClientToolTransport.md)
+- [`MailboxClientTransport`](MailboxClientTransport.md)
 
 ## Implements
 
@@ -26,15 +27,19 @@ A concrete client transport implementation that uses the browser/node `fetch` AP
 
 ### Constructor
 
-> **new ClientToolTransport**(`apiRoot`): `ClientToolTransport`
+> **new ClientToolTransport**(`apiUrl`, `options?`): `ClientToolTransport`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:41](https://github.com/isdk/tool-rpc.js/blob/1c4d9feeb982e305e597719fcf1bcdf46906f1cb/src/transports/client.ts#L41)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:20](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/client.ts#L20)
 
 #### Parameters
 
-##### apiRoot
+##### apiUrl
 
 `string`
+
+##### options?
+
+[`ClientToolTransportOptions`](../interfaces/ClientToolTransportOptions.md)
 
 #### Returns
 
@@ -46,64 +51,105 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:41](https
 
 ## Properties
 
-### apiRoot
+### apiUrl
 
-> **apiRoot**: `string`
+> **apiUrl**: `string`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:37](https://github.com/isdk/tool-rpc.js/blob/1c4d9feeb982e305e597719fcf1bcdf46906f1cb/src/transports/client.ts#L37)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:17](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/client.ts#L17)
 
-The root endpoint for the remote service.
-For HTTP, this is a URL. For IPC, it could be a channel name.
+调用的基准 API 地点（URI）
+必须能够支持处理如 scheme, hostname, port, 乃至 auth (user:pass)。
+对于扁平协议，不必支持 path 路由（具体通过 header 进行）。
 
 #### Implementation of
 
-[`IClientToolTransport`](../interfaces/IClientToolTransport.md).[`apiRoot`](../interfaces/IClientToolTransport.md#apiroot)
+[`IClientToolTransport`](../interfaces/IClientToolTransport.md).[`apiUrl`](../interfaces/IClientToolTransport.md#apiurl)
 
 #### Overrides
 
-[`ToolTransport`](ToolTransport.md).[`apiRoot`](ToolTransport.md#apiroot)
+[`ToolTransport`](ToolTransport.md).[`apiUrl`](ToolTransport.md#apiurl)
+
+***
+
+### manager
+
+> **manager**: [`RpcTransportManager`](RpcTransportManager.md)
+
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:57](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/base.ts#L57)
+
+所属管理器引用
+
+#### Implementation of
+
+[`IClientToolTransport`](../interfaces/IClientToolTransport.md).[`manager`](../interfaces/IClientToolTransport.md#manager)
+
+#### Inherited from
+
+[`ToolTransport`](ToolTransport.md).[`manager`](ToolTransport.md#manager)
 
 ***
 
 ### options?
 
-> `optional` **options**: `any`
+> `optional` **options?**: [`ClientToolTransportOptions`](../interfaces/ClientToolTransportOptions.md)
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:36](https://github.com/isdk/tool-rpc.js/blob/1c4d9feeb982e305e597719fcf1bcdf46906f1cb/src/transports/base.ts#L36)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:18](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/client.ts#L18)
 
-Additional options for the transport start or fetch, passed by mount.
+具体协议额外的配置或选项扩展
 
 #### Implementation of
 
 [`IClientToolTransport`](../interfaces/IClientToolTransport.md).[`options`](../interfaces/IClientToolTransport.md#options)
 
-#### Inherited from
+#### Overrides
 
 [`ToolTransport`](ToolTransport.md).[`options`](ToolTransport.md#options)
 
-***
+## Accessors
 
-### Tools
+### apiRoot
 
-> **Tools**: *typeof* [`ClientTools`](ClientTools.md)
+#### Get Signature
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:38](https://github.com/isdk/tool-rpc.js/blob/1c4d9feeb982e305e597719fcf1bcdf46906f1cb/src/transports/client.ts#L38)
+> **get** **apiRoot**(): `string`
 
-#### Implementation of
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:27](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/client.ts#L27)
 
-[`IClientToolTransport`](../interfaces/IClientToolTransport.md).[`Tools`](../interfaces/IClientToolTransport.md#tools)
+##### Deprecated
 
-#### Overrides
+use apiUrl instead
 
-[`ToolTransport`](ToolTransport.md).[`Tools`](ToolTransport.md#tools)
+##### Returns
+
+`string`
+
+#### Set Signature
+
+> **set** **apiRoot**(`val`): `void`
+
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:29](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/client.ts#L29)
+
+##### Deprecated
+
+use apiUrl instead
+
+##### Parameters
+
+###### val
+
+`string`
+
+##### Returns
+
+`void`
 
 ## Methods
 
 ### \_fetch()
 
-> `abstract` **\_fetch**(`name`, `args?`, `act?`, `subName?`, `fetchOptions?`): `any`
+> `abstract` **\_fetch**(`name`, `args?`, `act?`, `id?`, `fetchOptions?`): `any`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:75](https://github.com/isdk/tool-rpc.js/blob/1c4d9feeb982e305e597719fcf1bcdf46906f1cb/src/transports/client.ts#L75)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:212](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/client.ts#L212)
 
 #### Parameters
 
@@ -119,7 +165,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:75](https
 
 `string`
 
-##### subName?
+##### id?
 
 `any`
 
@@ -130,46 +176,14 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:75](https
 #### Returns
 
 `any`
-
-***
-
-### \_mount()
-
-> **\_mount**(`clientTools`, `apiPrefix`, `options?`): `Promise`\<`Funcs`\>
-
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:49](https://github.com/isdk/tool-rpc.js/blob/1c4d9feeb982e305e597719fcf1bcdf46906f1cb/src/transports/client.ts#L49)
-
-#### Parameters
-
-##### clientTools
-
-*typeof* [`ClientTools`](ClientTools.md)
-
-##### apiPrefix
-
-`string`
-
-##### options?
-
-`any`
-
-#### Returns
-
-`Promise`\<`Funcs`\>
-
-#### Overrides
-
-[`ToolTransport`](ToolTransport.md).[`_mount`](ToolTransport.md#_mount)
 
 ***
 
 ### fetch()
 
-> **fetch**(`name`, `args?`, `act?`, `subName?`, `fetchOptions?`): `Promise`\<`any`\>
+> **fetch**(`name`, `args?`, `act?`, `subName?`, `fetchOptions?`, `toolTimeout?`): `Promise`\<`any`\>
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:64](https://github.com/isdk/tool-rpc.js/blob/1c4d9feeb982e305e597719fcf1bcdf46906f1cb/src/transports/client.ts#L64)
-
-Fetches data from the server.
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:49](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/client.ts#L49)
 
 #### Parameters
 
@@ -177,35 +191,29 @@ Fetches data from the server.
 
 `string`
 
-The name of the tool function to fetch.
-
 ##### args?
 
 `any`
-
-The object parameters to pass to the server.
 
 ##### act?
 
 `string`
 
-The action to perform on the server.
-
 ##### subName?
 
 `any`
 
-The name of the sub-resource to fetch.
-
 ##### fetchOptions?
+
+`any`
+
+##### toolTimeout?
 
 `any`
 
 #### Returns
 
 `Promise`\<`any`\>
-
-A promise that resolves with the fetched data.
 
 #### Implementation of
 
@@ -215,17 +223,19 @@ A promise that resolves with the fetched data.
 
 ### loadApis()
 
-> **loadApis**(): `Promise`\<`Funcs`\>
+> **loadApis**(`options?`): `Promise`\<[`Funcs`](../interfaces/Funcs.md)\>
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:58](https://github.com/isdk/tool-rpc.js/blob/1c4d9feeb982e305e597719fcf1bcdf46906f1cb/src/transports/client.ts#L58)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:41](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/client.ts#L41)
 
-Connects to the server's discovery endpoint to get the list of available tools.
+#### Parameters
+
+##### options?
+
+`any`
 
 #### Returns
 
-`Promise`\<`Funcs`\>
-
-A promise that resolves to a map of tool function metadata.
+`Promise`\<[`Funcs`](../interfaces/Funcs.md)\>
 
 #### Implementation of
 
@@ -235,47 +245,59 @@ A promise that resolves to a map of tool function metadata.
 
 ### mount()
 
-> **mount**(`Tools`, `apiRoot?`, `options?`): `any`
+> **mount**(`toolsClass`): `void`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:42](https://github.com/isdk/tool-rpc.js/blob/1c4d9feeb982e305e597719fcf1bcdf46906f1cb/src/transports/base.ts#L42)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:35](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/client.ts#L35)
+
+Mounts the transport to a tools class, setting the default apiUrl for that class.
 
 #### Parameters
 
-##### Tools
-
-*typeof* `ToolFunc`
-
-##### apiRoot?
-
-`string`
-
-##### options?
+##### toolsClass
 
 `any`
+
+The tools class (e.g., ClientTools) to mount to.
 
 #### Returns
 
-`any`
-
-#### Implementation of
-
-[`IClientToolTransport`](../interfaces/IClientToolTransport.md).[`mount`](../interfaces/IClientToolTransport.md#mount)
-
-#### Inherited from
-
-[`ToolTransport`](ToolTransport.md).[`mount`](ToolTransport.md#mount)
+`void`
 
 ***
 
-### setApiRoot()
+### pollTaskStatus()
 
-> **setApiRoot**(`apiRoot`): `void`
+> **pollTaskStatus**(`taskId`, `parentFetchOptions?`): `Promise`\<`any`\>
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:38](https://github.com/isdk/tool-rpc.js/blob/1c4d9feeb982e305e597719fcf1bcdf46906f1cb/src/transports/base.ts#L38)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:196](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/client.ts#L196)
+
+模块化复用的轮询探查接口
 
 #### Parameters
 
-##### apiRoot
+##### taskId
+
+`string`
+
+##### parentFetchOptions?
+
+`any` = `{}`
+
+#### Returns
+
+`Promise`\<`any`\>
+
+***
+
+### setApiUrl()
+
+> **setApiUrl**(`apiUrl`): `void`
+
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:67](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/base.ts#L67)
+
+#### Parameters
+
+##### apiUrl
 
 `string`
 
@@ -285,7 +307,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:38](https:/
 
 #### Inherited from
 
-[`ToolTransport`](ToolTransport.md).[`setApiRoot`](ToolTransport.md#setapiroot)
+[`ToolTransport`](ToolTransport.md).[`setApiUrl`](ToolTransport.md#setapiurl)
 
 ***
 
@@ -293,7 +315,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:38](https:/
 
 > `abstract` **toObject**(`res`, `args?`): `any`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:76](https://github.com/isdk/tool-rpc.js/blob/1c4d9feeb982e305e597719fcf1bcdf46906f1cb/src/transports/client.ts#L76)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:213](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/client.ts#L213)
 
 #### Parameters
 

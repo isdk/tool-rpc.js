@@ -6,10 +6,9 @@
 
 # Interface: IServerToolTransport
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:9](https://github.com/isdk/tool-rpc.js/blob/1c4d9feeb982e305e597719fcf1bcdf46906f1cb/src/transports/server.ts#L9)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:10](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/server.ts#L10)
 
-Defines the public interface for a server-side transport,
-responsible for exposing ServerTools to the network.
+所有传输协议 (Client/Server) 统一的基础能力接口。
 
 ## Extends
 
@@ -17,58 +16,110 @@ responsible for exposing ServerTools to the network.
 
 ## Indexable
 
-\[`name`: `string`\]: `any`
+> \[`name`: `string`\]: `any`
 
 ## Properties
 
-### apiRoot
+### apiUrl
 
-> **apiRoot**: `string`
+> **apiUrl**: `string`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:22](https://github.com/isdk/tool-rpc.js/blob/1c4d9feeb982e305e597719fcf1bcdf46906f1cb/src/transports/base.ts#L22)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:29](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/base.ts#L29)
 
-The root endpoint for the remote service.
-For HTTP, this is a URL. For IPC, it could be a channel name.
+调用的基准 API 地点（URI）
+必须能够支持处理如 scheme, hostname, port, 乃至 auth (user:pass)。
+对于扁平协议，不必支持 path 路由（具体通过 header 进行）。
 
 #### Inherited from
 
-[`IToolTransport`](IToolTransport.md).[`apiRoot`](IToolTransport.md#apiroot)
+[`IToolTransport`](IToolTransport.md).[`apiUrl`](IToolTransport.md#apiurl)
+
+***
+
+### canStream?
+
+> `optional` **canStream?**: `boolean`
+
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:14](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/server.ts#L14)
+
+是否支持原生的流式传输 (如 HTTP 支持, Mailbox 通常不支持)
+
+***
+
+### dispatcher
+
+> **dispatcher**: [`RpcServerDispatcher`](../classes/RpcServerDispatcher.md)
+
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:11](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/server.ts#L11)
+
+***
+
+### manager?
+
+> `optional` **manager?**: [`RpcTransportManager`](../classes/RpcTransportManager.md)
+
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:22](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/base.ts#L22)
+
+所属管理器引用
+
+#### Inherited from
+
+[`IToolTransport`](IToolTransport.md).[`manager`](IToolTransport.md#manager)
 
 ***
 
 ### options?
 
-> `optional` **options**: `any`
+> `optional` **options?**: [`ToolTransportOptions`](ToolTransportOptions.md)
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:26](https://github.com/isdk/tool-rpc.js/blob/1c4d9feeb982e305e597719fcf1bcdf46906f1cb/src/transports/base.ts#L26)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:34](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/base.ts#L34)
 
-Additional options for the transport start or fetch, passed by mount.
+具体协议额外的配置或选项扩展
 
 #### Inherited from
 
 [`IToolTransport`](IToolTransport.md).[`options`](IToolTransport.md#options)
 
-***
+## Methods
 
-### Tools
+### close()?
 
-> **Tools**: *typeof* `ToolFunc`
+> `optional` **close**(): `void` \| `Promise`\<`void`\>
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:17](https://github.com/isdk/tool-rpc.js/blob/1c4d9feeb982e305e597719fcf1bcdf46906f1cb/src/transports/base.ts#L17)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:49](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/base.ts#L49)
+
+物理层关闭句柄 (可选)
+
+#### Returns
+
+`void` \| `Promise`\<`void`\>
 
 #### Inherited from
 
-[`IToolTransport`](IToolTransport.md).[`Tools`](IToolTransport.md#tools)
+[`IToolTransport`](IToolTransport.md).[`close`](IToolTransport.md#close)
 
-## Methods
+***
+
+### getListenAddr()
+
+> **getListenAddr**(): `string` \| `string`[]
+
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:30](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/server.ts#L30)
+
+获取物理层面的监听地址标识。
+默认返回 apiUrl。用于识别物理底座复用。
+
+#### Returns
+
+`string` \| `string`[]
+
+***
 
 ### getRaw()?
 
 > `optional` **getRaw**(): `any`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:40](https://github.com/isdk/tool-rpc.js/blob/1c4d9feeb982e305e597719fcf1bcdf46906f1cb/src/transports/server.ts#L40)
-
-Gets the underlying raw server instance.
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:38](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/server.ts#L38)
 
 #### Returns
 
@@ -76,46 +127,18 @@ Gets the underlying raw server instance.
 
 ***
 
-### mount()
+### getRoutes()
 
-> **mount**(`serverTools`, `apiPrefix?`, `options?`): `void`
+> **getRoutes**(): `string`[]
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:22](https://github.com/isdk/tool-rpc.js/blob/1c4d9feeb982e305e597719fcf1bcdf46906f1cb/src/transports/server.ts#L22)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:36](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/server.ts#L36)
 
-Mounts the ServerTools registry, creating the necessary API routes.
-
-This method is responsible for integrating the tool-handling logic with a
-running server instance.
-
-#### Parameters
-
-##### serverTools
-
-*typeof* [`ServerTools`](../classes/ServerTools.md)
-
-The ServerTools class containing the tool definitions.
-
-##### apiPrefix?
-
-`string`
-
-An optional prefix for all API routes (e.g., '/api').
-
-##### options?
-
-`any`
-
-A container for transport-specific options. For example,
-  an HTTP-based transport would expect an `{ server: http.Server }` object
-  to attach its route handlers to.
+获取该实例声明负责的逻辑路由列表。
+默认返回 ["/"] 表示接管该物理地址下的全量路径。
 
 #### Returns
 
-`void`
-
-#### Overrides
-
-[`IToolTransport`](IToolTransport.md).[`mount`](IToolTransport.md#mount)
+`string`[]
 
 ***
 
@@ -123,9 +146,9 @@ A container for transport-specific options. For example,
 
 > **start**(`options?`): `Promise`\<`any`\>
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:28](https://github.com/isdk/tool-rpc.js/blob/1c4d9feeb982e305e597719fcf1bcdf46906f1cb/src/transports/server.ts#L28)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:19](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/server.ts#L19)
 
-Starts the transport layer, making it listen for incoming connections.
+启动物理监听
 
 #### Parameters
 
@@ -133,11 +156,13 @@ Starts the transport layer, making it listen for incoming connections.
 
 `any`
 
-Protocol-specific options (e.g., { port, host }).
-
 #### Returns
 
 `Promise`\<`any`\>
+
+#### Overrides
+
+[`IToolTransport`](IToolTransport.md).[`start`](IToolTransport.md#start)
 
 ***
 
@@ -145,9 +170,9 @@ Protocol-specific options (e.g., { port, host }).
 
 > **stop**(`force?`): `Promise`\<`void`\>
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:35](https://github.com/isdk/tool-rpc.js/blob/1c4d9feeb982e305e597719fcf1bcdf46906f1cb/src/transports/server.ts#L35)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:24](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/server.ts#L24)
 
-Stops the server instance gracefully.
+停止物理监听
 
 #### Parameters
 
@@ -155,10 +180,10 @@ Stops the server instance gracefully.
 
 `boolean`
 
-Optional flag to force shutdown immediately
-
 #### Returns
 
 `Promise`\<`void`\>
 
-Promise<void> when server is fully stopped
+#### Overrides
+
+[`IToolTransport`](IToolTransport.md).[`stop`](IToolTransport.md#stop)
