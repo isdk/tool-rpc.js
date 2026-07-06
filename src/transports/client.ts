@@ -1,9 +1,9 @@
-import { Funcs } from "@isdk/tool-func";
+import { type Funcs } from "@isdk/tool-func";
 import { ActionName } from '../consts';
 import { IToolTransport, ToolTransport, ToolTransportOptions } from "./base";
 import { RPC_HEADERS, RPC_DEFAULTS } from "./models";
 
-export { Funcs }
+export type { Funcs }
 export interface ClientToolTransportOptions extends ToolTransportOptions {
 }
 
