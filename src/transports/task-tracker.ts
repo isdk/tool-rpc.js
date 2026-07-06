@@ -30,7 +30,7 @@ export class RpcActiveTaskHandle {
   /** [流式专用] 持有输出流引用以便中止 */
   private outputStream?: ReadableStream;
   /** 全局运行死线定时器 */
-  private runtimeTimer?: NodeJS.Timeout;
+  private runtimeTimer?: ReturnType<typeof setTimeout>;
 
   constructor(
     public readonly requestId: string,
@@ -173,7 +173,7 @@ export class RpcActiveTaskHandle {
  */
 export class RpcActiveTaskTracker {
   private tasks = new Map<string, RpcActiveTaskHandle>();
-  private sweepInterval?: NodeJS.Timeout | any;
+  private sweepInterval?: ReturnType<typeof setInterval> | any;
 
   /**
    * @param ttlMs 默认 5 分钟 (300000ms)，超过此时间未被查询的心跳将被干掉。

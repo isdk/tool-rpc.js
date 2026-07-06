@@ -12,9 +12,9 @@ export interface RpcDeadlineHooks {
  * 统一管控服务端响应超时 (102) 与硬执行死线 (408/Signal Abort)
  */
 export class RpcDeadlineGuard {
-  private softTimer?: NodeJS.Timeout;
-  private hardTimer?: NodeJS.Timeout;
-  private graceTimer?: NodeJS.Timeout;
+  private softTimer?: ReturnType<typeof setTimeout>;
+  private hardTimer?: ReturnType<typeof setTimeout>;
+  private graceTimer?: ReturnType<typeof setTimeout>;
   private rejector?: (reason?: any) => void;
   private promise: Promise<never>;
 

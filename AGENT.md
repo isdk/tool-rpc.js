@@ -423,26 +423,34 @@ Dispatcher 在执行时为每个请求创建 `Object.create(tool)` 的影子实�
 
 ### 8.1 Browser Entry (`@isdk/tool-rpc/browser`)
 
-`@isdk/tool-rpc` 提供了独立的浏览器入口 `@isdk/tool-rpc/browser`，仅包含客户端代码，不依赖任何 Node.js 内置模块。
+`@isdk/tool-rpc` 提供了独立的浏览器入口 `@isdk/tool-rpc/browser`，不依赖任何 Node.js 内置模块（`http`, `stream`, `crypto` 等）。该入口包含客户端模块、抽象服务端类以及完整的传输基础设施，仅排除 Node.js 特有的服务端传输层。
 
 ### 8.2 导出内容
 
 浏览器入口导出的模块包括：
 - **客户端工具**: `ClientTools`, `RpcMethodsClientTool`, `ResClientTools`
 - **客户端传输**: `ClientToolTransport`, `HttpClientToolTransport`, `IClientToolTransport`
-- **浏览器管理器**: `RpcClientTransportManager`（轻量版，不含服务端生命周期管理）
+- **抽象服务端类**: `ServerTools`, `RpcMethodsServerTool`, `ResServerTools`
+- **传输基础设施**:
+  - `RpcTransportManager` — 完整版传输管理器（含服务端生命周期管理）
+  - `RpcClientTransportManager` — 轻量版客户端管理器
+  - `RpcServerDispatcher` — 执行调度器（影子实例、超时裁决）
+  - `ServerToolTransport` — 服务端传输基类
+  - `RpcActiveTaskTracker` / `RpcActiveTaskHandle` — 任务追踪
+  - `RpcDeadlineGuard` — 死线守卫
+  - `RpcTaskResource` — 系统内置的 rpcTask 资源
 - **共享类型和常量**: `RPC_HEADERS`, `RPC_DEFAULTS`, `RpcStatusCode`, `RpcError`, `ToolTransport`, `ToolRpcRequest` 等
 
-**不包含**的服务端模块：`ServerTools`, `HttpServerToolTransport`, `RpcTransportManager`, `RpcServerDispatcher`, `RpcActiveTaskTracker` 等。
+**不包含**的 Node.js 特有模块：`HttpServerToolTransport`、`MailboxServerTransport`、`MailboxClientTransport`。
 
 ### 8.3 管理器架构（Manager Split）
 
-为了实现浏览器兼容，原有的 `RpcTransportManager` 拆分为两个类：
+原有的 `RpcTransportManager` 拆分为两个类，但浏览器入口现在同时导出两者：
 
 | 类 | 作用域 | 说明 |
 |-----|--------|------|
 | `RpcClientTransportManager` | 浏览器 + Node.js | 轻量版，仅含 `register()`, `getClient()`, `bindScheme()`, `clearSchemes()` 等客户端方法 |
-| `RpcTransportManager` | Node.js 专属 | 继承自 `RpcClientTransportManager`，额外增加 `addServer()`, `startAll()`, `stopAll()`, `validateRpcRequest()` 等服务端方法 |
+| `RpcTransportManager` | 浏览器 + Node.js | 继承自 `RpcClientTransportManager`，额外增加 `addServer()`, `startAll()`, `stopAll()`, `validateRpcRequest()` 等服务端方法 |
 
 ```
 src/transports/
@@ -450,21 +458,44 @@ src/transports/
 ├── server-manager.ts    RpcTransportManager extends RpcClientTransportManager (Node.js 完整版)
 ├── base.ts              ToolTransport基类，使用 RpcClientTransportManager
 ├── server.ts            ServerToolTransport，构造函数中覆盖 manager 为 RpcTransportManager.instance
+├── browser.ts           browser entry barrel (浏览器 + Node.js)
 └── index.ts             导出 server-manager（Node.js 入口）
 ```
 
 **Node.js**: `import { RpcTransportManager } from '@isdk/tool-rpc'`（完整功能）
-**浏览器**: `import { RpcClientTransportManager } from '@isdk/tool-rpc/browser'`（轻量版）
+**浏览器**: `import { RpcTransportManager } from '@isdk/tool-rpc/browser'`（完整功能）
 
 ### 8.4 使用示例
 
 ```typescript
-// 浏览器端
-import { ClientTools, HttpClientToolTransport, RpcClientTransportManager } from '@isdk/tool-rpc/browser'
+// 浏览器端：完整的内存 RPC 循环
+import {
+  ClientTools, ServerTools, RpcServerDispatcher,
+  HttpClientToolTransport, RpcTransportManager,
+} from '@isdk/tool-rpc/browser'
 
-RpcClientTransportManager.bindScheme('http', HttpClientToolTransport)
+// 注册 HTTP 协议
+RpcTransportManager.bindScheme('http', HttpClientToolTransport)
+
+// 注册服务端工具
+ServerTools.register({
+  name: 'greet',
+  func: ({ name }) => `Hello, ${name}!`,
+})
+
+// 创建调度器（可选，用于直接 dispatch）
+const dispatcher = new RpcServerDispatcher({ registry: ServerTools.items })
+await dispatcher.dispatch({
+  apiUrl: 'memory://local',
+  toolId: 'greet',
+  requestId: 'req-001',
+  params: { name: 'World' },
+  headers: {},
+})
+// → { status: 200, data: 'Hello, World!' }
+
+// 客户端远程调用
 await ClientTools.loadFrom(undefined, { apiUrl: 'http://localhost:3000/api/' })
-
 const greet = ClientTools.get('greet')
 const result = await greet.run({ name: 'World' })
 ```
@@ -473,9 +504,12 @@ const result = await greet.run({ name: 'World' })
 
 每次构建后，`test/browser-entry.test.ts` 会自动验证：
 - 所有客户端模块正确导出
-- 无服务端模块泄漏到 browser 入口
+- 所有抽象服务端模块和传输基础设施正确导出
+- Node.js 特有模块（`HttpServerToolTransport`, `MailboxServerTransport` 等）不泄漏到 browser 入口
 - 构建产物 (`dist/browser.js`/`.mjs`) 不含 Node 内置模块引用
-- 类型声明 (`dist/browser.d.ts`) 不含服务端类型
+- 类型声明 (`dist/browser.d.ts`) 包含客户端与服务端抽象类型，但不含 Node.js 特有服务器传输类型
+
+此外，`test/http-client-browser.test.ts` 提供了 52 项纯浏览器模拟环境的测试，覆盖 URL 构建、请求方法、RPC 头注入、102 轮询、超时、流空闲超时、API 发现、超时协商等完整能力。
 
 ## 九、附录：接口速查
 

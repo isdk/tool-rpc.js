@@ -12,3 +12,9 @@
 
 - [ ] **增强 `loadFrom` 的灵活性**
   - 支持从已有的元数据（如父类的 `items`）同步定义，而不仅仅是通过网络 `fetch`。
+
+## 测试
+
+- [] Web Worker Test: 安装 @vitest/web-worker，创建真正的集成测试（PostMessge + 完整RPC循环）
+- [] 排查 RpcError 问题，在箭头函数`func: ()=> throw new RpcError(...)`中报"not defined"
+- [] Service Worker 测试： 添加Service Worker RPC 测试

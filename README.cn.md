@@ -14,7 +14,7 @@
 - **🌐 RESTful 接口:** 使用 `ResServerTools` 快速创建符合 REST 风格的 API，自动处理 `get`, `list`, `post`, `put`, `delete` 等标准操作。
 - **🔧 RPC 方法分组:** 使用 `RpcMethodsServerTool` 将多个相关函数（方法）捆绑在单个工具下，通过 `act` 参数进行调用。
 - **🔌 客户端自动代理:** 客户端 (`ClientTools` 及其子类) 能从服务器自动加载工具定义，并动态生成类型安全的代理函数。
-- **🌐 浏览器兼容 (`@isdk/tool-rpc/browser`):** 独立的浏览器入口，仅导出客户端模块。不依赖任何 Node.js 内置模块 (`http`, `stream`, `crypto` 等)。包含轻量级的浏览器端传输管理器 `RpcClientTransportManager`。
+- **🌐 浏览器兼容 (`@isdk/tool-rpc/browser`):** 独立的浏览器入口，包含客户端模块、抽象服务端类（`ServerTools`、`RpcMethodsServerTool`、`ResServerTools`）和完整的传输基础设施（`RpcServerDispatcher`、`RpcTransportManager`、`RpcActiveTaskTracker` 等）。仅排除 Node.js 特有的服务端传输层（`HttpServerToolTransport`、`MailboxServerTransport`）。
 - **🚀 多实例并行隔离:** 支持在单个进程中运行多个具有不同 `apiUrl` 的传输实例，彻底消除全局状态冲突。
 - **🛡️ 执行死线守卫:** 集成两级超时管理（软/硬死线）以及物理链路与逻辑执行的中止联动。
 - **🚀 内置 HTTP & Mailbox 传输:**
@@ -421,7 +421,7 @@ await runner.run(params);
 
 ## 🌐 浏览器端使用
 
-`@isdk/tool-rpc/browser` 是专用的浏览器入口，仅包含**客户端**代码——不依赖任何 Node.js 内置模块（`http`, `stream`, `crypto` 等）。
+`@isdk/tool-rpc/browser` 是专用的浏览器入口，包含客户端模块、抽象服务端类和完整的传输基础设施——仅排除了 Node.js 特有的服务端传输层（`http`, `stream` 等）。
 
 ### 安装
 
@@ -433,16 +433,34 @@ npm install @isdk/tool-rpc
 
 ```typescript
 import {
+  // 客户端模块
   ClientTools,
   HttpClientToolTransport,
   RpcClientTransportManager,
+  // 抽象服务端类
+  ServerTools,
+  RpcMethodsServerTool,
+  ResServerTools,
+  // 传输基础设施
+  RpcTransportManager,
+  RpcServerDispatcher,
+  RpcActiveTaskTracker,
   RPC_HEADERS,
 } from '@isdk/tool-rpc/browser'
 
-// 注册 HTTP 协议
-RpcClientTransportManager.bindScheme('http', HttpClientToolTransport)
+// 在浏览器中构建完整的内存 RPC 服务器 + 客户端
+RpcTransportManager.bindScheme('http', HttpClientToolTransport)
 
-// 创建客户端并调用远程工具
+// 注册工具
+ServerTools.register({
+  name: 'greet',
+  func: ({ name }) => `Hello, ${name}!`,
+})
+
+// 创建调度器
+const dispatcher = new RpcServerDispatcher({ registry: ServerTools.items })
+
+// 远程调用
 await ClientTools.loadFrom(undefined, { apiUrl: 'http://localhost:3000/api/' })
 const greet = ClientTools.get('greet')
 const result = await greet.run({ name: '浏览器' })
@@ -452,10 +470,12 @@ const result = await greet.run({ name: '浏览器' })
 
 | 方面 | Node.js (`@isdk/tool-rpc`) | 浏览器 (`@isdk/tool-rpc/browser`) |
 |------|----------------------------|-----------------------------------|
-| 管理器 | `RpcTransportManager` (完整版，含服务端生命周期) | `RpcClientTransportManager` (轻量版，仅客户端) |
-| 服务端传输 | `HttpServerToolTransport`, `MailboxServerTransport` | 不包含 |
+| 管理器 | `RpcTransportManager` (完整版，含服务端生命周期) | `RpcTransportManager` + `RpcClientTransportManager` |
+| 服务端传输 | `HttpServerToolTransport`, `MailboxServerTransport` | 不包含 ❌ |
+| 抽象服务端类 | `ServerTools`, `RpcMethodsServerTool`, `ResServerTools` | 全部包含 ✅ |
+| 传输基础设施 | `RpcServerDispatcher`, `RpcActiveTaskTracker`, `RpcDeadlineGuard` | 全部包含 ✅ |
 | UUID 生成 | 通过 `@isdk/hash` (跨平台) | 通过 `@isdk/hash` (跨平台) |
-| 包体积 | 较大 (含服务端代码) | 更小 (仅客户端) |
+| 包体积 | 较大 (包含 Node.js 服务端传输) | 更小 (排除 Node-`http`/`mailbox` 传输)
 
 ### 打包工具自动解析
 

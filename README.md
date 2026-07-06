@@ -14,7 +14,7 @@ This project is built on `@isdk/tool-func`. Before proceeding, please ensure you
 - **🌐 RESTful Interface:** Quickly create REST-style APIs using `ResServerTools`, which automatically handles standard operations like `get`, `list`, `post`, `put`, and `delete`.
 - **🔧 RPC Method Grouping:** Use `RpcMethodsServerTool` to bundle multiple related functions (methods) under a single tool, invoked via an `act` parameter.
 - **🔌 Automatic Client-Side Proxies:** The client (`ClientTools` and its subclasses) can automatically load tool definitions from the server and dynamically generate type-safe proxy functions, making remote calls as simple as local ones.
-- **🌐 Browser Compatible (`@isdk/tool-rpc/browser`):** A dedicated browser entry that exports only client-side modules. No Node.js built-in dependencies (`http`, `stream`, `crypto`, etc.). Includes `RpcClientTransportManager` — a lightweight browser-friendly transport manager.
+- **🌐 Browser Compatible (`@isdk/tool-rpc/browser`):** A dedicated browser entry that includes client modules, abstract server-side classes (`ServerTools`, `RpcMethodsServerTool`, `ResServerTools`), and full transport infrastructure (`RpcServerDispatcher`, `RpcTransportManager`, `RpcActiveTaskTracker`, etc.). Only excludes Node.js-specific server transports (`HttpServerToolTransport`, `MailboxServerTransport`).
 - **🚀 Built-in HTTP & Mailbox Transport:** 
   - **HTTP**: Comes with `HttpServerToolTransport` (Node.js `http`) and `HttpClientToolTransport` (`fetch`, browser-compatible).
   - **Mailbox**: Native support for internal distributed mailbox protocols, ideal for cross-process or cross-thread communication.
@@ -378,7 +378,7 @@ This is the highest-level abstraction, providing a resource-centric, RESTful-sty
 
 ## 🌐 Browser Usage
 
-`@isdk/tool-rpc/browser` is a dedicated browser entry point that ships **only** client-side code — no Node.js built-in modules (`http`, `stream`, `crypto`, etc.) are referenced.
+`@isdk/tool-rpc/browser` is a dedicated browser entry point that ships client modules, server-side abstractions, and full transport infrastructure — except Node.js-specific server transports (`http`, `stream`, etc.) are excluded.
 
 ### Installation
 
@@ -390,16 +390,34 @@ npm install @isdk/tool-rpc
 
 ```typescript
 import {
+  // Client modules
   ClientTools,
   HttpClientToolTransport,
   RpcClientTransportManager,
+  // Server-side abstractions
+  ServerTools,
+  RpcMethodsServerTool,
+  ResServerTools,
+  // Transport infrastructure
+  RpcTransportManager,
+  RpcServerDispatcher,
+  RpcActiveTaskTracker,
   RPC_HEADERS,
 } from '@isdk/tool-rpc/browser'
 
-// Register HTTP scheme
-RpcClientTransportManager.bindScheme('http', HttpClientToolTransport)
+// Build a complete in-memory RPC server & client in the browser
+RpcTransportManager.bindScheme('http', HttpClientToolTransport)
 
-// Create a client and call remote tools
+// Register a tool
+ServerTools.register({
+  name: 'greet',
+  func: ({ name }) => `Hello, ${name}!`,
+})
+
+// Create a dispatcher
+const dispatcher = new RpcServerDispatcher({ registry: ServerTools.items })
+
+// Call remotely
 await ClientTools.loadFrom(undefined, { apiUrl: 'http://localhost:3000/api/' })
 const greet = ClientTools.get('greet')
 const result = await greet.run({ name: 'Browser' })
@@ -409,10 +427,12 @@ const result = await greet.run({ name: 'Browser' })
 
 | Aspect | Node.js (`@isdk/tool-rpc`) | Browser (`@isdk/tool-rpc/browser`) |
 |--------|---------------------------|-------------------------------------|
-| Manager | `RpcTransportManager` (full version with server lifecycle) | `RpcClientTransportManager` (lightweight, client-only) |
-| Server transports | `HttpServerToolTransport`, `MailboxServerTransport` | Not included |
+| Manager | `RpcTransportManager` (full version with server lifecycle) | `RpcTransportManager` + `RpcClientTransportManager` |
+| Server transports | `HttpServerToolTransport`, `MailboxServerTransport` | Not included ❌ |
+| Server-side abstractions | `ServerTools`, `RpcMethodsServerTool`, `ResServerTools` | All included ✅ |
+| Transport infrastructure | `RpcServerDispatcher`, `RpcActiveTaskTracker`, `RpcDeadlineGuard` | All included ✅ |
 | `uuid` generation | Via `@isdk/hash` (cross-platform) | Via `@isdk/hash` (cross-platform) |
-| Bundle size | Larger (includes server code) | Smaller (client-side only) |
+| Bundle size | Larger (includes Node.js server transports) | Smaller (omits Node-`http`/`mailbox` transports)
 
 ### Bundler auto-resolution
 
