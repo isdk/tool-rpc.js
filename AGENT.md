@@ -343,12 +343,17 @@ const result = await someTool.run(
 
 ### 4.5 自定义传输层
 
-实现 `IServerToolTransport` 或 `IClientToolTransport` 接口。例如集成 Fastify：
+实现 `IServerToolTransport` 或 `IClientToolTransport` 接口；服务端建议直接继承 `ServerToolTransport` 基类，以复用路由声明内核（多前缀、归一化、`remount`）。例如集成 Fastify：
 
 ```typescript
-class FastifyServerTransport implements IServerToolTransport {
-  // 必须实现：getListenAddr(), getRoutes(), start(), stop()
-  // 以及 addRpcHandler(), addDiscoveryHandler() 等
+// 优先继承基类：路由簿记（toPathname / toMatchPrefix / claimRoute / getRoutes / remount）已有默认实现
+class FastifyServerTransport extends ServerToolTransport {
+  // 必须实现：toRpcRequest(), sendRpcResponse(), _start(), stop(),
+  //           addRpcHandler(apiUrl, { registry, remount }), addDiscoveryHandler(apiUrl, handler, { remount })
+  // 两个 handler 方法内部应调用基类的 claimRoute()：它负责归一化、多前缀簿记与 remount 决策；
+  // 返回 null 表示该前缀已声明，只需替换 registry/handler，不应再注册物理路由。
+  // 仅当需要上报框架原生的重复路由错误时才覆写 onDuplicateRoute()
+  // 物理底座标识与 apiUrl 不同时才覆写 getListenAddr()
 }
 ```
 
@@ -366,7 +371,7 @@ await manager.startAll();
 ## 五、关键注意事项
 
 ### 5.1 路径规范化
-所有逻辑路由必须以 `/` 结尾（Trailing Slash Normalization），否则路由匹配可能失败。
+逻辑路由（`getRoutes()`）以 **canonical 形式**声明：以 `/` 开头、**不带**尾随斜杠（根路由为 `/`），由 `ServerToolTransport.toPathname()` 归一化。前缀匹配与物理路由表的 key 由 `toMatchPrefix()` 补尾随斜杠后派生——**匹配阶段**仍遵循 Trailing Slash Normalization，`/api` 不会误匹配 `/apix`。声明路由请用 `claimRoute()`，不要手写字符串拼接。
 
 ### 5.2 影子实例隔离
 Dispatcher 在执行时为每个请求创建 `Object.create(tool)` 的影子实例，`this.ctx` 仅属于本次调用。**严禁在工具函数中修改原始对象的属性**。
@@ -517,12 +522,13 @@ const result = await greet.run({ name: 'World' })
 
 ```typescript
 interface IServerToolTransport {
-  getListenAddr(): string;          // 物理地址（如 ':3000'）
-  getRoutes(): string[];            // 逻辑路由列表（以 '/' 结尾）
+  getListenAddr(): string | string[]; // 物理地址（如 ':3000'）
+  getRoutes(): string[];            // 逻辑路由（canonical 前缀，无尾随斜杠）
   start(): Promise<void>;
   stop(): Promise<void>;
-  addRpcHandler(apiUrl: string): void;
-  addDiscoveryHandler(apiUrl: string, handler: Function): void;
+  // 以下两个在 ServerToolTransport 基类上，内部通过 claimRoute() 登记前缀
+  addRpcHandler(apiUrl: string, options?: RouteClaimOptions): void;             // { registry?, remount? }
+  addDiscoveryHandler(apiUrl: string, handler: Function, options?: RouteClaimOptions): void;
 }
 ```
 

@@ -29,8 +29,9 @@
     - **`getListenAddr()`**: 返回物理层面的监听地址标识（如 `:3000` 或 `localhost:8080`）。
       - **归一化要求**：实现类需将 `127.0.0.1`、`[::1]` 等回环地址归一化为 `localhost`，以确保物理底座池的精确命中。
       - **监听范围**：`:port` 表示监听 `0.0.0.0`，`host:port` 表示精确绑定。
-    - **`getRoutes()`**: 返回该实例声明负责的逻辑路由列表。
-      - **规范化要求**：所有路径必须以 `/` 结尾（Trailing Slash Normalization），以确保 `RpcTransportManager` 审计表中的字符串匹配与物理层的分发逻辑保持 100% 字面量一致。
+    - **`getRoutes()`**: 返回该实例声明负责的逻辑路由列表（每个前缀一条）。
+      - **规范化要求（已修订）**：逻辑路由以 **canonical 形式**存储——以 `/` 开头、**不带**尾随斜杠（根路由为 `/`），并压缩重复斜杠；由 `ServerToolTransport.toPathname()` 统一实现。前缀匹配与物理路由表的 key 则由 `toMatchPrefix()` 派生（补尾随斜杠，根仍为 `/`），以保证 `/api` 不会误匹配 `/apix`。即：**审计比对用 canonical 形式，分发匹配用 match 形式**，两者由基类同一组 helper 派生，实现类不再手写拼接。
+      - **声明方式**：调用基类的 `claimRoute(apiUrl, kind, options)`，它同时完成归一化、多前缀簿记（`prefix -> { apiUrl, registry, discoveryHandler }`）与重复声明的 `remount` 决策（`'replace'` 默认 / `'throw'`）。
     - **`HttpServerToolTransport`** (基于 Node.js 原生 http 模块，支持物理复用)。
     - **`MailboxServerToolTransport`** (基于内部分布式信箱，天然物理独占)。
   - **`IClientToolTransport`** (客户端协议规范)：
@@ -174,7 +175,7 @@ V2 架构通过 `IServerToolTransport` 的扩展接口实现了对底层物理�
   - **地址归一化 (Normalization)**：自动将 `localhost` 等回环地址统一处理，确保同一物理端口仅开启一个 `http.Server`，最大限度实现资源共享。
   - **引用计数 (Ref Counting)**：通过计数器追踪物理 Server 的逻辑持有者数量。当最后一个逻辑 Transport 实例调用 `stop()` 时，物理底座自动回收并安全关闭监听端口。
   - **路由分发逻辑 (Routing)**：物理端口接收到请求后，采用 **“最长前缀匹配” (Longest Prefix Match)** 算法扫描逻辑实例。
-    - **路径规范化**：所有路径在审计与分发前均需完成 **Trailing Slash Normalization**（尾随斜杠补齐），杜绝因路径拼接不规范导致的路由错配。
+    - **路径规范化**：审计与 `getRoutes()` 使用 canonical 前缀（无尾随斜杠）；写入与比对物理分发表时再由 `toMatchPrefix()` 完成 **Trailing Slash Normalization**（尾随斜杠补齐），杜绝因路径拼接不规范导致的路由错配。
     - **HTTPS 考量**：若未来涉及 HTTPS 共享，建议在物理底座池键名中加入协议前缀以区分 TLS/TCP 复用。
 - **Mailbox 独占性保护**：
   - `MailboxServerTransport` 默认接管全量路径 (`/`)。在 Manager 的路由审计下，这意味着对于同一个 Mailbox 地址，系统只允许激活一个 Transport 实例，从而在分布式信箱环境中天然保护了物理执行的唯一性。

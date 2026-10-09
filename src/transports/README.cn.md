@@ -90,7 +90,7 @@ throw new RpcError('Access Denied', 403, 'forbidden', { ip: '1.2.3.4' });
 
 * **物理与逻辑解耦审计 (Server Auditing)**：
   * `addServer(transport)`：在注册服务端实例时，Manager 会提取其物理底座地址 (`getListenAddr`) 与逻辑管辖路由 (`getRoutes`)。
-  * **路由冲突检测**：通过内部审计表校验，禁止在同一物理底座上重复注册完全相同的逻辑路由，从架构层面杜绝路由劫持风险。
+  * **路由冲突检测**：通过内部审计表校验，禁止在同一物理底座上重复注册完全相同的逻辑路由，从架构层面杜绝路由劫持风险。审计 key 是 canonical 前缀（见 8.1），因此同一前缀在不同 transport 间可比；但 `getListenAddr()` 的返回形式尚未统一，跨 transport 的审计目前仅在同类 transport 内生效。
   * **关于 `mount` (已废弃)**：`mount(tools, prefix)` 虽作为兼容 API 存在（@deprecated），但在 V2 中推荐直接使用 `addServer`。V2 的路由是由 Transport 实例通过 `apiUrl` 内部派生并经 `getRoutes()` 声明的，而非外部强制指定。
 * **bindScheme (协议绑定)**：
   * **静态绑定**：`bindScheme(['http', 'https'], HttpClient)`。将 Scheme 直接映射到具体的 Transport 类。
@@ -215,7 +215,8 @@ await manager.stopAll();
 *   **物理底座复用 (Physical Reuse)**：支持多个逻辑 Transport 实例共享同一个物理端口（Node.js `http.Server`）。通过静态池管理，基于归一化的物理监听地址 (`getListenAddr`) 实现。
 *   **地址归一化 (Normalization)**：自动处理回环地址（`127.0.0.1` -> `localhost`），确保底座识别的精确性。支持 `:port` (0.0.0.0) 和 `host:port` 精确绑定。
 *   **精准路由分发 (Longest Prefix Match)**：当物理端口接收到请求时，采用“最长前缀匹配”算法扫描逻辑实例。
-*   **路径规范化 (Trailing Slash)**：要求所有逻辑路由（`getRoutes()`）均采用 **Trailing Slash Normalization**（尾随斜杠补齐）。这确保了 `RpcTransportManager` 审计时的字面量比对与物理层的分发逻辑 100% 对应。
+*   **路径规范化 (Canonical + Trailing Slash)**：逻辑路由（`getRoutes()`）以 canonical 形式声明——以 `/` 开头、不带尾随斜杠（根为 `/`）；写入物理分发表的 key 由基类 `toMatchPrefix()` 补尾随斜杠，保证 `/api` 不会误匹配 `/apix`。归一化与匹配 key 均由 `ServerToolTransport` 的 helper 统一派生，实现方不再手写字符串拼接。
+*   **多前缀与重复声明 (Route Claims + Remount)**：`addRpcHandler()` / `addDiscoveryHandler()` 通过基类 `claimRoute()` 登记前缀，同一实例可服务多个前缀，各自的 registry / discovery handler 互不覆盖（请求期按前缀解析）。对已声明前缀再次声明时，默认 `'replace'`（替换并告警，不重复注册物理路由）；传 `options.remount = 'throw'` 则经 `onDuplicateRoute()` 抛错，自带路由表的后端可覆写该钩子以上报框架原生错误。
 *   **引用计数管理 (Ref Counting)**：逻辑实例通过引用计数自动控制物理 Server 的生命周期，实现“最后一人离开时关灯”。
 *   **寻址优先级**：Header 显式指令 > URL Path 降级解析 (`/api/tool/resId`模式)。
 *   **HTTP 102 信号映射**：由于多数现代 fetch 工具（如 `undici`）对 1xx 信息性状态码的处理存在不确定性，V2 在物理层将 `102 Processing` 逻辑映射为 **`202 Accepted`**，并返回包含任务 ID 的 Body 负载，确保客户端能稳定解析。

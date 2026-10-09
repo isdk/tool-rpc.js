@@ -504,6 +504,7 @@ import { ClientTools } from '@isdk/tool-rpc'
     2. **处理 RPC 调用**: 创建一个通用的 RPC 路由（例如 `/api/:toolId`），它接收请求，根据 `toolId` 查找对应的工具，执行它，然后返回结果。这是通过 `addRpcHandler` 方法实现的。
     3. 管理服务器生命周期 (`start`, `stop`)。
     4. **物理感知 (V2)**: 通过 `getListenAddr()` 和 `getRoutes()` 实现物理端口复用与逻辑路由审计。
+    5. **路由声明与重复挂载 (V2)**: `addRpcHandler()` / `addDiscoveryHandler()` 会在 `ServerToolTransport` 基类中声明（claim）其路径前缀，因此一个 transport 可同时服务多个前缀，各自绑定独立的注册表与发现处理器。逻辑路由以 canonical 形式上报（以 `/` 开头、不带尾随斜杠），前缀匹配用的尾斜杠形式由 `toMatchPrefix()` 派生。对已声明的前缀再次声明时，默认替换其注册表/处理器并告警；传入 `options.remount = 'throw'` 则改为抛错——自带路由表的后端可覆写 `onDuplicateRoute()` 上报框架原生的重复路由错误。
 - **`IClientToolTransport`**: 客户端传输必须实现的接口。其核心职责是：
     1. **加载 API 定义**: 调用 `loadApis()` 方法，该方法会访问服务器的发现端点以获取所有工具的定义。
     2. **执行远程调用**: 实现 `fetch()` 方法，该方法负责将客户端的工具调用（函数名和参数）序列化，发送到服务器的 RPC 端点，并处理响应。
