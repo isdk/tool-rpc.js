@@ -116,7 +116,7 @@ describe('Transport V2: Extreme Stress & Edge Cases', () => {
       const listenAddr = instances[0].getListenAddr() as string;
 
       for (let i = 0; i < levels; i++) {
-         const targetPath = instances[i].getRoutes()[0] + 'action';
+         const targetPath = instances[i].getRoutes()[0] + '/action';
          const mockRes = { statusCode: 200, setHeader: vi.fn(), end: vi.fn() } as any;
          const req = { url: targetPath, method: 'POST', headers: { host: 'localhost' } } as any;
 

@@ -1,7 +1,7 @@
 import http from 'http';
 import { URL } from 'url';
 import { Readable } from 'stream';
-import { ServerToolTransport, ServerToolTransportOptions } from './server';
+import { RouteClaimOptions, ServerToolTransport, ServerToolTransportOptions } from './server';
 import { ToolRpcRequest, ToolRpcResponse, RPC_HEADERS, RpcStatusCode, RpcError } from './models';
 import { uuidv4 } from '@isdk/hash';
 
@@ -24,6 +24,9 @@ interface HttpBinding {
    initPromise?: Promise<void>;
 }
 
+/** 物理分发命中的前缀，挂在原始请求上，供请求期解析所属逻辑路由。 */
+const HTTP_CLAIM = Symbol('tool-rpc.httpClaim');
+
 /**
  * HTTP 服务端传输协议。
  * 支持在同一物理端口上通过 URL Path 挂载多个逻辑 Transport 实例。
@@ -32,8 +35,7 @@ export class HttpServerToolTransport extends ServerToolTransport {
    /** 静态物理底座池: "host:port" -> Binding */
    private static sharedServers = new Map<string, HttpBinding>();
 
-   private managedPaths: string[] = [];
-   private discoveryHandlerInfo: { prefix: string; handler: () => any } | null = null;
+   /** 最近一次声明的 RPC 前缀（归一化）；请求期优先使用命中的 claim。 */
    private rpcPrefix: string = '';
    private maxBodySize: number;
 
@@ -59,34 +61,40 @@ export class HttpServerToolTransport extends ServerToolTransport {
          : `:${port}`;
    }
 
-   public getRoutes(): string[] {
-      return this.managedPaths.length > 0 ? this.managedPaths : [this.rpcPrefix || '/'];
+   public addDiscoveryHandler(apiUrl: string, handler: () => any, options?: RouteClaimOptions): void {
+      if (!this.apiUrl) this.apiUrl = apiUrl;
+      // 发现处理器登记在基类的 claim 上（按前缀），同一实例声明多个前缀时互不覆盖；
+      // 重复声明同一前缀由 remount 决定替换还是抛错。
+      this.claimRoute(apiUrl, 'discovery', { discoveryHandler: handler, remount: options?.remount });
    }
 
-   public addDiscoveryHandler(apiUrl: string, handler: () => any): void {
+   public addRpcHandler(apiUrl: string, options?: RouteClaimOptions) {
       if (!this.apiUrl) this.apiUrl = apiUrl;
-      const url = new URL(apiUrl);
-      let prefix = url.pathname;
-      if (!prefix.endsWith('/')) {
-         prefix += '/';
-      }
-      this.discoveryHandlerInfo = { prefix, handler };
-      if (!this.managedPaths.includes(prefix)) {
-         this.managedPaths.push(prefix);
-      }
+      const claim = this.claimRoute(apiUrl, 'rpc', { registry: options?.registry, remount: options?.remount });
+      if (!claim) return;
+      this.rpcPrefix = claim.prefix;
    }
 
-   public addRpcHandler(apiUrl: string, options?: any) {
-      if (!this.apiUrl) this.apiUrl = apiUrl;
-      const url = new URL(apiUrl);
-      let prefix = url.pathname;
-      if (!prefix.endsWith('/')) {
-         prefix += '/';
+   /** 请求期解析：本次请求归属的逻辑前缀（由物理分发命中，或回退到最近声明的）。 */
+   private claimPrefixOf(req: http.IncomingMessage): string {
+      const claimed = (req as any)[HTTP_CLAIM];
+      if (claimed) {return this.toPathname(claimed);}
+
+      // 未经物理分发（直接调用，或兜底到 defaultInstance）时，
+      // 在本实例声明过的前缀里做最长前缀匹配，而不是只看最后一次声明。
+      const url = req.url || '/';
+      const pathname = url.split('?')[0];
+      const normalized = pathname.endsWith('/') ? pathname : `${pathname}/`;
+      let best = this.rpcPrefix || '/';
+      let bestLen = -1;
+      for (const prefix of this.routeClaims.keys()) {
+         const match = this.toMatchPrefix(prefix);
+         if (normalized.startsWith(match) && match.length > bestLen) {
+            bestLen = match.length;
+            best = prefix;
+         }
       }
-      this.rpcPrefix = prefix;
-      if (!this.managedPaths.includes(prefix)) {
-         this.managedPaths.push(prefix);
-      }
+      return best;
    }
 
    /**
@@ -127,10 +135,10 @@ export class HttpServerToolTransport extends ServerToolTransport {
          await binding.initPromise;
       }
 
-      // 注册当前实例的路由
+      // 注册当前实例的路由（物理表用带尾斜杠的匹配 key，避免 /api 误匹配 /apix）
       binding.refCount++;
       for (const path of this.getRoutes()) {
-         binding.routes.set(path, this);
+         binding.routes.set(this.toMatchPrefix(path), this);
       }
       if (!binding.defaultInstance) binding.defaultInstance = this;
    }
@@ -144,7 +152,7 @@ export class HttpServerToolTransport extends ServerToolTransport {
 
       // 清理路由映射
       for (const path of this.getRoutes()) {
-         binding.routes.delete(path);
+         binding.routes.delete(this.toMatchPrefix(path));
       }
       if (binding.defaultInstance === this) {
          binding.defaultInstance = binding.routes.values().next().value;
@@ -184,13 +192,21 @@ export class HttpServerToolTransport extends ServerToolTransport {
 
       // 匹配最长前缀路由
       let bestMatch: HttpServerToolTransport | undefined;
+      let bestPrefix: string | undefined;
       let longestPrefix = -1;
 
       for (const [prefix, instance] of binding.routes.entries()) {
          if (normalizedPath.startsWith(prefix) && prefix.length > longestPrefix) {
             longestPrefix = prefix.length;
             bestMatch = instance;
+            bestPrefix = prefix;
          }
+      }
+
+      // 把命中的前缀交给请求，后续按它解析 registry / 发现处理器，
+      // 而不是依赖实例上“最后一次声明”的那条。
+      if (bestMatch && bestPrefix) {
+         (req as any)[HTTP_CLAIM] = bestMatch.toPathname(bestPrefix);
       }
 
       const target = bestMatch || binding.defaultInstance;
@@ -213,10 +229,14 @@ export class HttpServerToolTransport extends ServerToolTransport {
       const pathname = url.split('?')[0];
       const normalizedPath = pathname.endsWith('/') ? pathname : pathname + '/';
 
+      const claimPrefix = this.claimPrefixOf(req);
+      const matchPrefix = this.toMatchPrefix(claimPrefix);
+
       // 1. Discovery Handler
-      if (this.discoveryHandlerInfo && method === 'GET' && normalizedPath === this.discoveryHandlerInfo.prefix) {
+      const discoveryHandler = this.routeDiscoveryHandler(claimPrefix);
+      if (discoveryHandler && method === 'GET' && normalizedPath === matchPrefix) {
          try {
-            const result = this.discoveryHandlerInfo.handler();
+            const result = discoveryHandler();
             res.setHeader('Content-Type', 'application/json');
             res.statusCode = 200;
             res.end(JSON.stringify(result));
@@ -226,8 +246,8 @@ export class HttpServerToolTransport extends ServerToolTransport {
          return;
       }
 
-      // 2. RPC Handler (基于 rpcPrefix 的业务流水线)
-      if (this.rpcPrefix && normalizedPath.startsWith(this.rpcPrefix)) {
+      // 2. RPC Handler (基于命中前缀的业务流水线)
+      if (normalizedPath.startsWith(matchPrefix)) {
          await this.processIncomingCall(req, res);
          return;
       }
@@ -255,8 +275,10 @@ export class HttpServerToolTransport extends ServerToolTransport {
       let act = headersStr[RPC_HEADERS.ACT];
       let resId = headersStr[RPC_HEADERS.RES_ID];
 
+      const matchPrefix = this.toMatchPrefix(this.claimPrefixOf(rawReq));
+
       if (!toolId && rawReq.url) {
-         const urlPath = rawReq.url.split('?')[0].substring(this.rpcPrefix.length);
+         const urlPath = rawReq.url.split('?')[0].substring(matchPrefix.length);
          const parts = urlPath.split('/').map(s => s === undefined ? s : decodeURIComponent(s)).filter(Boolean);
          if (parts.length > 0) {
             toolId = parts[0];
@@ -299,7 +321,7 @@ export class HttpServerToolTransport extends ServerToolTransport {
       // });
 
       const reqObj: ToolRpcRequest = {
-         apiUrl: this.apiUrl || `http://${rawReq.headers.host}${this.rpcPrefix}`,
+         apiUrl: this.apiUrl || `http://${rawReq.headers.host}${matchPrefix}`,
          toolId: toolId,
          act: act,
          resId: resId,

@@ -1,4 +1,4 @@
-import { ServerToolTransport, ServerToolTransportOptions } from './server';
+import { RouteClaimOptions, ServerToolTransport, ServerToolTransportOptions } from './server';
 import { Mailbox, MailMessage } from '@mboxlabs/mailbox';
 import { ToolRpcRequest, ToolRpcResponse, RPC_HEADERS, RpcStatusCode, RpcError } from './models';
 
@@ -42,6 +42,10 @@ export class MailboxServerTransport extends ServerToolTransport {
     this.pullInterval = options.pullInterval || 1000;
   }
 
+  /**
+   * 注意：与基类 toPathname 不同，这里要求 urlStr 是完整 URL，
+   * 解析失败一律退回 '/'（既有语义，测试依赖）。
+   */
   protected extractPath(urlStr: string): string {
     try {
       const url = new URL(urlStr);
@@ -54,12 +58,31 @@ export class MailboxServerTransport extends ServerToolTransport {
     }
   }
 
-  public addDiscoveryHandler(apiUrl: string, handler: () => any): void {
-    const prefix = this.extractPath(apiUrl);
-    this.discoveryHandlerInfo = { prefix, handler };
+  /**
+   * Mailbox 的 apiUrl 是地址而不是 http URL，沿用 extractPath 的解析结果，
+   * 再归一为基类的 canonical 形式（无尾斜杠），避免 claim key 里混入 scheme。
+   */
+  protected toPathname(apiUrl: string): string {
+    return this.extractPath(apiUrl).replace(/\/+$/, '') || '/';
   }
 
-  public addRpcHandler(apiUrl: string, options?: any) {
+  /**
+   * Mailbox 默认接管全量路径：这是设计文档规定的独占保护（同一 mailbox 地址
+   * 只允许一个服务端实例），不能因为声明了具体前缀就缩小成该前缀。
+   */
+  public getRoutes(): string[] {
+    return ['/'];
+  }
+
+  public addDiscoveryHandler(apiUrl: string, handler: () => any, options?: RouteClaimOptions): void {
+    // mailbox 按地址路由而非按路径路由，这里只保留「最近一次声明」的 handler；
+    // 但重复声明的处理（替换 + 告警 / 抛错）与 remount 选项仍由基类统一裁决。
+    this.claimRoute(apiUrl, 'discovery', { discoveryHandler: handler, remount: options?.remount });
+    this.discoveryHandlerInfo = { prefix: this.toPathname(apiUrl), handler };
+  }
+
+  public addRpcHandler(apiUrl: string, options?: RouteClaimOptions) {
+    this.claimRoute(apiUrl, 'rpc', { remount: options?.remount });
     this.apiPrefix = this.extractPath(apiUrl);
   }
 

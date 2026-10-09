@@ -23,7 +23,8 @@ describe('Transport V2 Resource Management & Multiplexing', () => {
 
       // Verify specific route after adding handler
       t1.addRpcHandler('http://localhost:3001/v1');
-      expect(t1.getRoutes()).toEqual(['/v1/']);
+      // 逻辑路由是归一化前缀；物理匹配 key（'/v1/'）由 toMatchPrefix 派生
+      expect(t1.getRoutes()).toEqual(['/v1']);
     });
   });
 

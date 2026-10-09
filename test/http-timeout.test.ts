@@ -196,8 +196,9 @@ describe('Timeout and ExpectedDuration', () => {
   });
 
   it('should support timeout during API discovery (loadFrom)', async () => {
-    const originalHandler = (server as any).discoveryHandlerInfo.handler;
-    (server as any).discoveryHandlerInfo.handler = async () => {
+    const claim = (server as any).routeClaims.get('/api')
+    const originalHandler = claim.discoveryHandler
+    claim.discoveryHandler = async () => {
       await new Promise(resolve => setTimeout(resolve, 500));
       return originalHandler();
     };
@@ -209,7 +210,7 @@ describe('Timeout and ExpectedDuration', () => {
       expect(err.name).toMatch(/AbortError|Error/i);
     }
 
-    (server as any).discoveryHandlerInfo.handler = originalHandler;
+    claim.discoveryHandler = originalHandler;
   });
 
   it('should handle concurrent requests with different timeouts', async () => {
