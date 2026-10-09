@@ -24,10 +24,10 @@ describe('HttpServerToolTransport', () => {
 
    it('should correctly derive listen address', () => {
       const t1 = new HttpServerToolTransport({ apiUrl: 'http://localhost:3000/api' });
-      expect(t1.getListenAddr()).toBe('localhost:3000');
+      expect(t1.getBaseUrl()).toBe('http://localhost:3000');
 
       const t2 = new HttpServerToolTransport({ apiUrl: 'http://0.0.0.0:8080/v1' });
-      expect(t2.getListenAddr()).toBe(':8080');
+      expect(t2.getBaseUrl()).toBe('http://*:8080');
    });
 
    it('should extract target routing from headers first (Waterfall priority 1)', async () => {

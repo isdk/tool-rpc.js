@@ -113,7 +113,7 @@ describe('Transport V2: Extreme Stress & Edge Cases', () => {
       const shuffled = [...instances].sort(() => Math.random() - 0.5);
       await Promise.all(shuffled.map(inst => inst.start()));
 
-      const listenAddr = instances[0].getListenAddr() as string;
+      const listenAddr = instances[0].getBaseUrl() as string;
 
       for (let i = 0; i < levels; i++) {
          const targetPath = instances[i].getRoutes()[0] + '/action';

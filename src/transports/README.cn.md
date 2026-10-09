@@ -89,8 +89,8 @@ throw new RpcError('Access Denied', 403, 'forbidden', { ip: '1.2.3.4' });
 ### 3.1 核心职责与 API 详述
 
 * **物理与逻辑解耦审计 (Server Auditing)**：
-  * `addServer(transport)`：在注册服务端实例时，Manager 会提取其物理底座地址 (`getListenAddr`) 与逻辑管辖路由 (`getRoutes`)。
-  * **路由冲突检测**：通过内部审计表校验，禁止在同一物理底座上重复注册完全相同的逻辑路由，从架构层面杜绝路由劫持风险。审计 key 是 canonical 前缀（见 8.1），因此同一前缀在不同 transport 间可比；但 `getListenAddr()` 的返回形式尚未统一，跨 transport 的审计目前仅在同类 transport 内生效。
+  * `addServer(transport)`：在注册服务端实例时，Manager 会提取其物理底座声明身份 (`getBaseUrl`) 与逻辑管辖路由 (`getRoutes`)。
+  * **路由冲突检测**：通过内部审计表校验，禁止在同一物理底座上重复注册完全相同的逻辑路由，从架构层面杜绝路由劫持风险。审计 key 是 canonical 前缀（见 8.1），因此同一前缀在不同 transport 间可比；声明身份已统一为 canonical 物理 URI（`physical-uri.ts` 的 `canonicalPhysicalUri`），所以 HTTP transport 与 Fastify transport 共用一个端口时能真正报出 `Routing Conflict`（以前两边 key 形式不同，跳 transport 的审计只在同类 transport 内生效）。比较规则见 `samePhysicalBase`：通配 authority（`http://*:3000`）包含具体 host（`http://localhost:3000`）——实测两者在两个方向上都 EADDRINUSE；而两个不同具体 host 同端口可共存，不能塌缩。
   * **关于 `mount` (已废弃)**：`mount(tools, prefix)` 虽作为兼容 API 存在（@deprecated），但在 V2 中推荐直接使用 `addServer`。V2 的路由是由 Transport 实例通过 `apiUrl` 内部派生并经 `getRoutes()` 声明的，而非外部强制指定。
 * **bindScheme (协议绑定)**：
   * **静态绑定**：`bindScheme(['http', 'https'], HttpClient)`。将 Scheme 直接映射到具体的 Transport 类。
@@ -212,8 +212,11 @@ await manager.stopAll();
 ## 8. 传输层实现细节
 
 ### 8.1 HttpServerToolTransport
-*   **物理底座复用 (Physical Reuse)**：支持多个逻辑 Transport 实例共享同一个物理端口（Node.js `http.Server`）。通过静态池管理，基于归一化的物理监听地址 (`getListenAddr`) 实现。
-*   **地址归一化 (Normalization)**：自动处理回环地址（`127.0.0.1` -> `localhost`），确保底座识别的精确性。支持 `:port` (0.0.0.0) 和 `host:port` 精确绑定。
+*   **物理底座复用 (Physical Reuse)**：支持多个逻辑 Transport 实例共享同一个物理端口（Node.js `http.Server`）。通过静态池管理，基于归一化的声明身份 (`getBaseUrl`) 实现；实际绑定观测请用 `getBoundAddress()`，它不参与池 key。
+*   **bind 参数属于声明 (Declared Bind Options)**：`start({ host, port })` 是调用方**声明**的绑定，会改写声明身份（`withBindOptions`）——apiUrl 里的旧端口就此过时，不会继续占着它误报冲突。反之 `port: 0`（由内核挑端口）属于观测，不改写 key，所以审计 key 跨 start 边界仍稳定。apiUrl 是裸 path 前缀（只说了路由、没说底座）时，由 bind 参数加上传输层 `defaultBindOptions()` 的确定默认值**造**出底座 URI（`physicalUriFromBind`），于是 `/api` 与 `/v2` 两个实例能共用同一个 socket 而不是各自 EADDRINUSE。
+*   **地址归一化 (Normalization)**：声明身份是 canonical URI，如 `http://localhost:3000`（精确绑定）或 `http://*:8080`（通配监听）；回环别名（`127.0.0.1` / `[::1]`）归一为 `localhost`，默认端口由 URL 自身丢弃（`http://h:80` 与 `http://h` 同 key）。非回环 host 记为通配：本 transport 对非回环 host 一律监听 0.0.0.0（监听不属于本机的主机名会 EADDRNOTAVAIL），它占的底座就是 `*:port`。
+*   **底座复用方向性**：已监听通配的底座可被声明具体 host 的实例复用（不会再 listen 第二次）；反向不行，已有具体绑定时再监听 0.0.0.0 会 EADDRINUSE。
+*   **unix socket 底座**：`start({ path })`（也认 `socketPath` / `socket`）监听 unix socket，声明身份就是 `unix:<path>`，`getBoundAddress()` 返回同一形式。`unix:` 之后按 URI 规范处理：入参**先按段 percent-encode 再进 URI**，要原值用 `unixSocketPath()` decode（空格→`%20`、`#`→`%23`、字面 `%`→`%25`、非 ASCII→UTF-8 百分号序列）。词法归一（折叠 `//`、去尾斜杠、消 `.` / `..`）在**已编码**空间做，所以 `/` 只作分隔符、段内 `%2F` 是字面斜杠。两条不变量：`unixSocketPath(canonical)` 就是实际 listen 的路径；编码幂等且单射——`/tmp/a b.sock` → `unix:/tmp/a%20b.sock`，而 `/tmp/a%20b.sock` → `unix:/tmp/a%2520b.sock`，两个可共存的合法文件名不会塌成同一个 key（塌了会误报冲突、还会复用错 socket）。socket 声明优先于 host/port（否则声明身份与真实监听会错开）。同一 socket 上重复挂载同一逻辑路由会被 Manager 报 `Routing Conflict`；不同 socket 文件就是不同底座。
 *   **精准路由分发 (Longest Prefix Match)**：当物理端口接收到请求时，采用“最长前缀匹配”算法扫描逻辑实例。
 *   **路径规范化 (Canonical + Trailing Slash)**：逻辑路由（`getRoutes()`）以 canonical 形式声明——以 `/` 开头、不带尾随斜杠（根为 `/`）；写入物理分发表的 key 由基类 `toMatchPrefix()` 补尾随斜杠，保证 `/api` 不会误匹配 `/apix`。归一化与匹配 key 均由 `ServerToolTransport` 的 helper 统一派生，实现方不再手写字符串拼接。
 *   **多前缀与重复声明 (Route Claims + Remount)**：`addRpcHandler()` / `addDiscoveryHandler()` 通过基类 `claimRoute()` 登记前缀，同一实例可服务多个前缀，各自的 registry / discovery handler 互不覆盖（请求期按前缀解析）。对已声明前缀再次声明时，默认 `'replace'`（替换并告警，不重复注册物理路由）；传 `options.remount = 'throw'` 则经 `onDuplicateRoute()` 抛错，自带路由表的后端可覆写该钩子以上报框架原生错误。

@@ -8,12 +8,12 @@ describe('Transport V2 Resource Management & Multiplexing', () => {
   const PORT = 3004;
   const BASE_URL = `http://localhost:${PORT}`;
 
-  describe('1. Architecture Transparency', () => {    it('getListenAddr should define physical base', () => {
+  describe('1. Architecture Transparency', () => {    it('getBaseUrl should define physical base', () => {
       const t1 = new HttpServerToolTransport({ apiUrl: 'http://localhost:3001/v1' });
-      expect(t1.getListenAddr()).toBe('localhost:3001');
+      expect(t1.getBaseUrl()).toBe('http://localhost:3001');
 
       const t2 = new HttpServerToolTransport({ apiUrl: 'http://0.0.0.0:3002/api' });
-      expect(t2.getListenAddr()).toBe(':3002');
+      expect(t2.getBaseUrl()).toBe('http://*:3002');
     });
 
     it('getRoutes should define logical scope', () => {
@@ -144,11 +144,11 @@ describe('Transport V2 Resource Management & Multiplexing', () => {
 
       await t1.stop();
       expect(closeSpy).not.toHaveBeenCalled(); // Still one user (t2)
-      expect((HttpServerToolTransport as any).sharedServers.has(`localhost:${PORT}`)).toBe(true);
+      expect((HttpServerToolTransport as any).sharedServers.has(`http://localhost:${PORT}`)).toBe(true);
 
       await t2.stop();
       expect(closeSpy).toHaveBeenCalled(); // Should close now
-      expect((HttpServerToolTransport as any).sharedServers.has(`localhost:${PORT}`)).toBe(false);
+      expect((HttpServerToolTransport as any).sharedServers.has(`http://localhost:${PORT}`)).toBe(false);
     });
 
     describe('3.1 Advanced Edge Cases', () => {
@@ -226,9 +226,9 @@ describe('Transport V2 Resource Management & Multiplexing', () => {
         const t2 = new HttpServerToolTransport({ apiUrl: `http://127.0.0.1:${PORT}/v2` });
         const t3 = new HttpServerToolTransport({ apiUrl: `http://[::1]:${PORT}/v3` });
 
-        expect(t1.getListenAddr()).toBe(`localhost:${PORT}`);
-        expect(t2.getListenAddr()).toBe(`localhost:${PORT}`);
-        expect(t3.getListenAddr()).toBe(`localhost:${PORT}`); // Normalized [::1] to localhost
+        expect(t1.getBaseUrl()).toBe(`http://localhost:${PORT}`);
+        expect(t2.getBaseUrl()).toBe(`http://localhost:${PORT}`);
+        expect(t3.getBaseUrl()).toBe(`http://localhost:${PORT}`); // Normalized [::1] to localhost
 
         await t1.start();
         await t2.start();
@@ -251,7 +251,7 @@ describe('Transport V2 Resource Management & Multiplexing', () => {
         await t1.start(); // t1 becomes defaultInstance
         await t2.start();
 
-        const addr = t1.getListenAddr();
+        const addr = t1.getBaseUrl();
         const binding = (HttpServerToolTransport as any).sharedServers.get(addr);
         expect(binding.defaultInstance).toBe(t1);
 
@@ -271,7 +271,7 @@ describe('Transport V2 Resource Management & Multiplexing', () => {
       await Promise.all([t1.start(), t2.start()]);
 
       expect(t1.getRaw()).toBe(t2.getRaw());
-      expect((HttpServerToolTransport as any).sharedServers.get(t1.getListenAddr()).refCount).toBe(2);
+      expect((HttpServerToolTransport as any).sharedServers.get(t1.getBaseUrl()).refCount).toBe(2);
 
       await t1.stop();
       await t2.stop();
@@ -285,7 +285,7 @@ describe('Transport V2 Resource Management & Multiplexing', () => {
       manager.addServer(t1);
       await t1.start();
 
-      const addr = t1.getListenAddr();
+      const addr = t1.getBaseUrl();
       expect((HttpServerToolTransport as any).sharedServers.has(addr)).toBe(true);
 
       await manager.stopAll();

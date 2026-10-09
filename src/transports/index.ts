@@ -1,5 +1,6 @@
 export * from './models';
 export * from './base';
+export * from './physical-uri';
 export * from './server';
 export * from './client';
 export * from './dispatcher';

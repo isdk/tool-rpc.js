@@ -7,6 +7,7 @@ export * from './http-client';
 export * from './client-manager';
 export * from './compat';
 // Server-side transport infrastructure (browser-compatible)
+export * from './physical-uri';
 export * from './server';
 export * from './dispatcher';
 export * from './server-manager';

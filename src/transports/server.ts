@@ -1,5 +1,6 @@
 import { defaultsDeep } from 'lodash-es';
 import { ToolTransport, type IToolTransport, type ToolTransportOptions } from './base';
+import { BindOptions, canonicalPhysicalUri, hasUriScheme, physicalUriFromBind, withBindOptions } from './physical-uri';
 import { RpcServerDispatcher } from './dispatcher';
 import { RpcTransportManager } from './server-manager';
 import { ToolRpcRequest, ToolRpcResponse } from './models';
@@ -56,8 +57,23 @@ export interface IServerToolTransport extends IToolTransport {
   stop(force?: boolean): Promise<void>;
 
   /**
-   * 获取物理层面的监听地址标识。
-   * 默认返回 apiUrl。用于识别物理底座复用。
+   * 声明身份：该实例所在物理底座的 canonical URI（scheme + authority，不含 path）。
+   * 构造期即可得；`start()` 里的显式 bind 参数会改写它，内核观测（port 0）不会。
+   * Manager 的路由审计、物理底座复用池、请求分发都以它为 key。默认返回 apiUrl；
+   * 无 URL 表示的 transport 应自行构造一个 URI 代替（如 unix:/run/ai.sock、mem://bus-a）。
+   * 声明为可选，以免第三方直接 implements 该接口的类编译失败。
+   */
+  getBaseUrl?(): string | string[];
+
+  /**
+   * 实际绑定观测：仅在 start 之后可得，未监听时返回 undefined。
+   * 只用于日志与 port 0 场景下补全声明身份，不得作为审计 / 池 key。
+   */
+  getBoundAddress?(): string | undefined;
+
+  /**
+   * @deprecated 改用 getBaseUrl()（声明身份）或 getBoundAddress()（绑定观测）。
+   * 本名保留为别名，首次调用会警告一次。
    */
   getListenAddr(): string | string[];
 
@@ -85,8 +101,95 @@ export abstract class ServerToolTransport extends ToolTransport implements IServ
     this.dispatcher = options?.dispatcher || RpcServerDispatcher.instance;
   }
 
+  /** 已对 getListenAddr() 警告过的标记（每实例只警告一次，避免刷屏）。 */
+  private listenAddrWarned: boolean = false;
+  /** 再入保护：防止「覆写 getListenAddr 又调用 super」时无限递归。 */
+  private baseUrlResolving: boolean = false;
+
+  /**
+   * 声明身份：物理底座的 canonical URI（见 physical-uri.ts）。
+   * = apiUrl 派生的身份，被 `start()` 传入的显式 bind 参数改写后的结果。
+   * 只有调用方声明的 bind 会改写它，内核观测（port 0）不会，所以 key 跨 start
+   * 边界仍然稳定。无 URL 表示的 transport（unix socket、进程内总线）请覆写 apiUrlIdentity()。
+   */
+  public getBaseUrl(): string | string[] {
+    // 向后兼容：第三方子类可能仍覆写已废弃的 getListenAddr()。
+    // 检测到覆写时沿用其结果，避免升级后物理底座 key 漂移。
+    if (!this.baseUrlResolving && this.getListenAddr !== ServerToolTransport.prototype.getListenAddr) {
+      this.baseUrlResolving = true;
+      try {
+        return this.getListenAddr();
+      } finally {
+        this.baseUrlResolving = false;
+      }
+    }
+    return this.resolvedBaseUrl();
+  }
+
+  /**
+   * 声明身份的实际计算：apiUrl 派生值 + 显式 bind 改写。
+   * 覆写 getBaseUrl() 的子类（如 HTTP，需要收窄成 string）请复用它，
+   * 免得漏掉 bind 改写。
+   */
+  protected resolvedBaseUrl(): string {
+    return this.bindBaseUrl ?? this.apiUrlIdentity();
+  }
+
+  /**
+   * 仅由 apiUrl 派生的声明身份（默认归一化 apiUrl：去 path、回环/通配 host 归一）。
+   * 无 URL 表示的 transport 覆写本方法自行构造 URI（`unix:/run/ai.sock`、`mem://bus-a`）。
+   */
+  protected apiUrlIdentity(): string {
+    return canonicalPhysicalUri(this.apiUrl);
+  }
+
+  /**
+   * 显式 bind 参数改写后的声明身份；未显式指定时 undefined（沿用 apiUrl 派生值）。
+   * 每次 start() 都重新计算，不累加：上一轮的 bind 参数不应泄漏到下一轮。
+   */
+  protected bindBaseUrl?: string;
+
+  /**
+   * 把 `start({ host, port, path })` 这类**声明式**的 bind 参数并入声明身份。
+   * 必须在 _start 之前调用：审计与底座复用池的 key 都得在 bind 之前定下来。
+   * 只认调用方给的参数（start 入参 + options 预置）与 defaultBindOptions() 里
+   * 声明的确定默认值；其余实现细节不算声明。
+   */
+  protected applyBindOptions(options?: BindOptions): void {
+    this.bindBaseUrl = withBindOptions(this.apiUrlIdentity(), options);
+    if (this.bindBaseUrl || hasUriScheme(this.apiUrl)) {return;}
+    // apiUrl 连 scheme 都没有（裸 path 前缀）：它只说了路由，没说底座。
+    // 这时 bind 参数（含传输层自己的确定默认值）就是关于底座的唯一声明，
+    // 不补就会把“同一端口”的 transport 当成不同底座。
+    this.bindBaseUrl = physicalUriFromBind(defaultsDeep({}, options, this.defaultBindOptions()));
+  }
+
+  /**
+   * 本 transport 确定的默认监听参数（写进声明身份用）。默认无：基类没有物理
+   * 监听概念，也不得猜。有真实监听的 transport 请只在这里放**与 _start 一致**的值。
+   */
+  protected defaultBindOptions(): BindOptions | undefined {
+    return undefined;
+  }
+
+  /**
+   * 实际绑定观测。基类无物理监听概念，默认 undefined；
+   * 有真实 socket 的协议覆写（参见 HttpServerToolTransport）。
+   */
+  public getBoundAddress(): string | undefined {
+    return undefined;
+  }
+
+  /**
+   * @deprecated 改用 getBaseUrl()。本名语义含糊（容易被读成“监听之后拿到的地址”），
+   * 它实际返回的是声明身份；绑定观测请用 getBoundAddress()。
+   */
   public getListenAddr(): string | string[] {
-    return this.apiUrl;
+    if (!this.listenAddrWarned) {
+      this.listenAddrWarned = true;
+      console.warn(`[tool-rpc] ${this.constructor.name}.getListenAddr() is deprecated: use getBaseUrl() for the declared identity, or getBoundAddress() for the observed bind.`);
+    }
+    return this.getBaseUrl();
   }
 
   /**
@@ -100,6 +203,7 @@ export abstract class ServerToolTransport extends ToolTransport implements IServ
 
   public start(options?: any): Promise<any> {
     if (this.options) { options = defaultsDeep(options, this.options); }
+    this.applyBindOptions(options);
     return this._start(options);
   };
 

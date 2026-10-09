@@ -1,6 +1,16 @@
 import http from 'http';
+import { AddressInfo } from 'net';
 import { URL } from 'url';
 import { Readable } from 'stream';
+import {
+   BindOptions,
+   canonicalPhysicalUri,
+   parsePhysicalUri,
+   samePhysicalBase,
+   unixSocketPath,
+   unixSocketUri,
+   withWildcardHost,
+} from './physical-uri';
 import { RouteClaimOptions, ServerToolTransport, ServerToolTransportOptions } from './server';
 import { ToolRpcRequest, ToolRpcResponse, RPC_HEADERS, RpcStatusCode, RpcError } from './models';
 import { uuidv4 } from '@isdk/hash';
@@ -45,20 +55,75 @@ export class HttpServerToolTransport extends ServerToolTransport {
       this.canStream = true;
    }
 
-   public getListenAddr(): string {
-      const url = new URL(this.apiUrl);
-      const port = url.port || (url.protocol === 'https:' ? '443' : '80');
-      let hostname = url.hostname;
+   /** 本实例实际挂到的池 key（复用通配底座时与自身声明身份不同）。 */
+   private bindingKey?: string;
 
-      // 归一化本地回环地址，确保物理复用
-      if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]') {
-         hostname = 'localhost';
+   /**
+    * apiUrl 派生的声明身份：canonical 物理 URI（`http://localhost:3000` / `http://*:8080`）。
+    * 作为底座池 key 与分发 key；`start({ host, port, path })` 的显式 bind 参数
+    * 会改写它（基类 applyBindOptions），因为那才是本实例真正要占的底座。
+    *
+    * 非回环 host 记为通配：不显式指定 host 时，本 transport 对非回环 host 一律监听
+    * 0.0.0.0（监听不属于本机的主机名会 EADDRNOTAVAIL），它占的底座就是 `*:port`。
+    * 因此 `http://a.example:8080` 与 `http://b.example:8080` 仍是同一个底座，
+    * 与实测的 bind 行为一致（而不是丢掉 host 信息：它本来就没绑定那个 host）。
+    * 显式指定 host 时不走这条规则：绑哪个就是哪个，见 withBindOptions。
+    */
+   protected apiUrlIdentity(): string {
+      const uri = canonicalPhysicalUri(this.apiUrl);
+      const parsed = parsePhysicalUri(uri);
+      if (parsed.opaque || parsed.wildcard || parsed.host === 'localhost') {return uri;}
+      return withWildcardHost(uri);
+   }
+
+   /**
+    * 声明身份（本 transport 只有一个底座，所以这里收窄成 string）。
+    * 池 key、分发 key、审计 key 均取此值，bind 改写由基类 resolvedBaseUrl() 提供。
+    */
+   public getBaseUrl(): string {
+      return this.resolvedBaseUrl();
+   }
+
+   /**
+    * `_start()` 在调用方未声明时的监听默认值（必须与那里一致）。apiUrl 是裸 path
+    * 前缀时，它决定了能不能造出底座 URI：否则 `http://h:3000` 与 `/api`（也监听
+    * 3000）会各自建一个 server，第二个必 EADDRINUSE。
+    */
+   protected defaultBindOptions(): BindOptions {
+      return { port: 3000, host: '0.0.0.0' };
+   }
+
+   /**
+    * 实际绑定观测：取自已复用/已监听的 http.Server。
+    * 未 start 时返回 undefined；port 0 时它才是真实端口。
+    */
+   public getBoundAddress(): string | undefined {
+      const binding = this.currentBinding();
+      const bound = binding?.server.address() as AddressInfo | string | null;
+      if (!bound) {return undefined;}
+      // unix socket 的 address() 返回 socket 路径，不是 host:port
+      if (typeof bound === 'string') {return unixSocketUri(bound);}
+      return `${bound.address}:${bound.port}`;
+   }
+
+   /** 本实例当前依附的底座（未 start 时按声明身份查）。 */
+   private currentBinding(): HttpBinding | undefined {
+      const key = this.bindingKey ?? this.getBaseUrl();
+      return HttpServerToolTransport.sharedServers.get(key);
+   }
+
+   /**
+    * 底座复用查找：精确 key，或已监听通配地址且 scheme+port 相同的底座。
+    * 只有「已有通配、现在要具体 host」这个方向可复用；反向必须新建
+    * （实测：已有具体绑定时再监听 0.0.0.0 会 EADDRINUSE）。
+    */
+   private static findBinding(addr: string): { key: string; binding: HttpBinding } | undefined {
+      const exact = HttpServerToolTransport.sharedServers.get(addr);
+      if (exact) {return { key: addr, binding: exact };}
+      for (const [key, binding] of HttpServerToolTransport.sharedServers) {
+         if (parsePhysicalUri(key).wildcard && samePhysicalBase(key, addr)) {return { key, binding };}
       }
-
-      // 返回 host:port 形式表示精确绑定，或 :port 形式表示监听 0.0.0.0
-      return (hostname === 'localhost')
-         ? `${hostname}:${port}`
-         : `:${port}`;
+      return undefined;
    }
 
    public addDiscoveryHandler(apiUrl: string, handler: () => any, options?: RouteClaimOptions): void {
@@ -100,32 +165,45 @@ export class HttpServerToolTransport extends ServerToolTransport {
    /**
     * 启动物理监听（支持复用）
     */
-   public async _start(options: { port?: number; host?: string }): Promise<void> {
-      const addr = this.getListenAddr();
-      let binding = HttpServerToolTransport.sharedServers.get(addr);
+   public async _start(options: BindOptions = {}): Promise<void> {
+      const addr = this.getBaseUrl();
+      const found = HttpServerToolTransport.findBinding(addr);
+      let binding = found?.binding;
+      const key = found?.key ?? addr;
 
       if (!binding) {
-         const server = http.createServer((req, res) => HttpServerToolTransport.handleIncomingHttpRequest(addr, req, res));
+         const server = http.createServer((req, res) => HttpServerToolTransport.handleIncomingHttpRequest(key, req, res));
          binding = { server, refCount: 0, routes: new Map() };
-         HttpServerToolTransport.sharedServers.set(addr, binding);
+         HttpServerToolTransport.sharedServers.set(key, binding);
 
-         const port = options.port !== undefined ? options.port : parseInt(addr.split(':').pop() || '3000');
-         const host = options.host || (addr.startsWith(':') ? '0.0.0.0' : addr.split(':')[0]);
+         const parsed = parsePhysicalUri(key);
+         const unixPath = unixSocketPath(key);
+         // bind 参数里的 port 可能是字符串（来自环境变量之类），监听前要成数
+         const defaults = this.defaultBindOptions();
+         const port = options.port !== undefined ? Number(options.port) : (parsed.port ? parseInt(parsed.port) : Number(defaults.port));
+         // 只有回环 host 才绑定到具体地址；其余一律监听通配（与旧行为一致）
+         const host = options.host || (parsed.host === 'localhost' ? 'localhost' : defaults.host);
 
          binding.initPromise = new Promise<void>((resolve, reject) => {
             binding!.server.on('error', (err) => {
                reject(err);
             });
-            binding!.server.listen(port, host, () => {
+            const onListening = () => {
                binding!.server.off('error', reject);
                resolve();
-            });
+            };
+            // unix 身份：底座就是那个 socket 文件，没有 host/port 可言
+            if (unixPath) {
+               binding!.server.listen(unixPath, onListening);
+            } else {
+               binding!.server.listen(port, host, onListening);
+            }
          });
 
          try {
             await binding.initPromise;
          } catch (err) {
-            HttpServerToolTransport.sharedServers.delete(addr);
+            HttpServerToolTransport.sharedServers.delete(key);
             throw err;
          } finally {
             binding.initPromise = undefined;
@@ -134,6 +212,9 @@ export class HttpServerToolTransport extends ServerToolTransport {
          // 等待正在进行的物理初始化完成
          await binding.initPromise;
       }
+
+      // 记住实际底座：复用通配底座时，它与本实例的声明身份不是同一个 key
+      this.bindingKey = key;
 
       // 注册当前实例的路由（物理表用带尾斜杠的匹配 key，避免 /api 误匹配 /apix）
       binding.refCount++;
@@ -144,8 +225,9 @@ export class HttpServerToolTransport extends ServerToolTransport {
    }
 
    public async stop(force?: boolean): Promise<void> {
-      const addr = this.getListenAddr();
+      const addr = this.bindingKey ?? this.getBaseUrl();
       const binding = HttpServerToolTransport.sharedServers.get(addr);
+      this.bindingKey = undefined;
       if (!binding) {
          return;
       }
@@ -404,7 +486,6 @@ export class HttpServerToolTransport extends ServerToolTransport {
    }
 
    public getRaw(): http.Server | undefined {
-      const addr = this.getListenAddr();
-      return HttpServerToolTransport.sharedServers.get(addr)?.server;
+      return this.currentBinding()?.server;
    }
 }

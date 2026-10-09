@@ -26,7 +26,7 @@ class MockServerTransport extends ToolTransport implements IServerToolTransport 
   addDiscoveryHandler = vi.fn();
   addRpcHandler = vi.fn();
   getRaw = vi.fn();
-  getListenAddr() { return this.apiUrl || 'mock://server'; }
+  getBaseUrl() { return this.apiUrl || 'mock://server'; }
   getRoutes = vi.fn().mockReturnValue(['/']);
 }
 

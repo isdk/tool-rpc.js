@@ -1,5 +1,6 @@
 import { IToolTransport } from "./base";
 import { IServerToolTransport } from "./server";
+import { samePhysicalBase } from "./physical-uri";
 import { ToolRpcRequest } from "./models";
 import { isRegExpStr, toRegExp } from "util-ex";
 import { RpcClientTransportManager } from "./client-manager";
@@ -59,26 +60,44 @@ export class RpcTransportManager extends RpcClientTransportManager {
   public addServer(transport: IServerToolTransport, apiUrl?: string) {
     const targetUrl = apiUrl || transport.apiUrl;
 
-    // 执行冲突审计
-    const addrs = Array.isArray(transport.getListenAddr()) 
-      ? transport.getListenAddr() as string[] 
-      : [transport.getListenAddr() as string];
+    // 执行冲突审计（key = 声明身份；旧名 getListenAddr 仅作兼容回落）
+    const declared = transport.getBaseUrl?.() ?? transport.getListenAddr();
+    const addrs = Array.isArray(declared)
+      ? declared as string[]
+      : [declared as string];
     const routes = transport.getRoutes();
 
     for (const addr of addrs) {
-      if (!this.routeAudit.has(addr)) {
-        this.routeAudit.set(addr, new Set());
+      // 归入已有同一物理底座的审计桶（通配 authority 包含具体 host），否则新建
+      const bucketKey = this.findAuditBucket(addr) ?? addr;
+      if (!this.routeAudit.has(bucketKey)) {
+        this.routeAudit.set(bucketKey, new Set());
       }
-      const registeredRoutes = this.routeAudit.get(addr)!;
+      const registeredRoutes = this.routeAudit.get(bucketKey)!;
       for (const route of routes) {
         if (registeredRoutes.has(route)) {
-          throw new Error(`Routing Conflict: Physical address "${addr}" already has a transport managing route "${route}"`);
+          const base = bucketKey === addr
+            ? `"${addr}"`
+            : `"${bucketKey}" (covers "${addr}")`;
+          throw new Error(`Routing Conflict: Physical address ${base} already has a transport managing route "${route}"`);
         }
         registeredRoutes.add(route);
       }
     }
 
     this.register(transport, targetUrl);
+  }
+
+  /**
+   * 找到与 addr 指向同一物理底座的已有审计桶。
+   * 依据实测：`0.0.0.0:3000` 与 `localhost:3000` 在两个方向上都 EADDRINUSE，
+   * 所以必须当作同一底座；而两个不同具体 host 同端口可共存，不能塌缩。
+   */
+  private findAuditBucket(addr: string): string | undefined {
+    for (const key of this.routeAudit.keys()) {
+      if (samePhysicalBase(key, addr)) {return key;}
+    }
+    return undefined;
   }
 
   /**
