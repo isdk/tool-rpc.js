@@ -3,7 +3,8 @@ import { beforeEach, describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Funcs, ToolFunc } from '@isdk/tool-func'
 import { ServerTools } from "../src/server-tools"
 import { ClientTools } from '../src/client-tools'
-import { findPort, sleep } from '@isdk/util'
+import { sleep } from '@isdk/util'
+import { startOnKernelPort } from './helpers/ports'
 import { HttpServerToolTransport } from '../src/transports/http-server'
 import { HttpClientToolTransport } from '../src/transports/http-client'
 import { RpcServerDispatcher } from '../src/transports/dispatcher'
@@ -172,14 +173,14 @@ describe('server api', () => {
     RpcServerDispatcher.instance.registry = ServerTools;
 
     await sleep(50)
-    const port = await findPort(3000)
+
+    // 裸 path 前缀声明路由 + 内核分配端口：避开 findPort 探测与 bind 之间的 TOCTOU
+    server = new HttpServerToolTransport()
+    server.addRpcHandler('/api')
+    server.addDiscoveryHandler('/api', () => ServerTools.toJSON())
+
+    const port = await startOnKernelPort(server)
     apiRoot = `http://localhost:${port}/api`
-
-    server = new HttpServerToolTransport({ port, apiUrl: apiRoot })
-    server.addRpcHandler(apiRoot)
-    server.addDiscoveryHandler(apiRoot, () => ServerTools.toJSON())
-
-    await server.start({ port })
 
     const clientTransport = new HttpClientToolTransport(apiRoot);
     ClientTools.setTransport(clientTransport);

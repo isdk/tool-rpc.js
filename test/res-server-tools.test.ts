@@ -10,7 +10,8 @@ import { ClientTools } from '../src/client-tools'
 import { HttpServerToolTransport } from '../src/transports/http-server'
 import { HttpClientToolTransport } from '../src/transports/http-client'
 import { RpcServerDispatcher } from '../src/transports/dispatcher'
-import { findPort, sleep } from "@isdk/util"
+import { sleep } from "@isdk/util"
+import { startOnKernelPort } from './helpers/ports'
 
 class TestResTool extends ResServerTools {
   items: any = {}
@@ -94,15 +95,15 @@ describe('res server api', () => {
     RpcServerDispatcher.instance.registry = ServerTools;
 
     await sleep(100)
-    const port = await findPort(3005)
+
+    // 路由用裸 path 前缀声明（只说路由、不说底座），端口等监听之后再拼：
+    // 先 findPort 再 bind 在并行 worker 之间有 TOCTOU 窗口，会随机 EADDRINUSE。
+    server = new HttpServerToolTransport()
+    server.addRpcHandler('/api')
+    server.addDiscoveryHandler('/api', () => ServerTools.toJSON())
+
+    const port = await startOnKernelPort(server)
     apiRoot = `http://localhost:${port}/api`
-
-    server = new HttpServerToolTransport({ port, apiUrl: apiRoot })
-    server.addRpcHandler(apiRoot)
-    server.addDiscoveryHandler(apiRoot, () => ServerTools.toJSON())
-
-    await sleep(100)
-    await server.start({ port, host: 'localhost' })
 
     const res = new TestResTool('res')
     res.register()

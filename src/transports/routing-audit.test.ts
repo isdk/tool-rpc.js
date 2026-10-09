@@ -132,10 +132,12 @@ describe('Transport V2: Routing Audit & Prefix Matching', () => {
 
    it('should correctly dispatch using Longest Prefix Match (LPM)', async () => {
       // 模拟两个具有嵌套关系的 Transport
-      // 先拿到可用端口再构造 apiUrl：否则 apiUrl 里写死的 3005 会强制绑定该端口，
-      // 与并行运行的其他套件（同样 findPort(3005)）撞车，随机 EADDRINUSE。
+      // 这里必须预先拿到一个真实端口：两个 transport 要在 apiUrl 里写同一个 authority，
+      // 才能落到同一个物理底座上做最长前缀匹配（port 0 会让两边各自听一个端口）。
+      // 端口段用 3316：本仓库其他套件都不探这个数，避开跨 worker 撞端口
+      // （findPort 的串行只在进程内，vitest 每个测试文件一个 worker）。
       await sleep(100)
-      const port = await findPort(3005)
+      const port = await findPort(3316)
 
       // T1 负责 /
       const t1 = new HttpServerToolTransport({ dispatcher, apiUrl: `http://localhost:${port}/` });

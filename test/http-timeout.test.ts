@@ -3,7 +3,8 @@ import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { ToolFunc } from '@isdk/tool-func'
 import { ServerTools } from "../src/server-tools"
 import { ClientTools } from '../src/client-tools'
-import { findPort, sleep } from '@isdk/util'
+import { sleep } from '@isdk/util'
+import { startOnKernelPort } from './helpers/ports'
 import { HttpClientToolTransport } from '../src/transports/http-client'
 import { HttpServerToolTransport } from '../src/transports/http-server'
 import { RpcServerDispatcher } from '../src/transports/dispatcher'
@@ -100,15 +101,14 @@ describe('Timeout and ExpectedDuration', () => {
     RpcServerDispatcher.instance.registry = ServerTools;
 
     await sleep(100)
-    const port = await findPort(3000)
+
+    // 裸 path 前缀声明路由 + 内核分配端口：避开 findPort 探测与 bind 之间的 TOCTOU
+    server = new HttpServerToolTransport()
+    server.addRpcHandler('/api')
+    server.addDiscoveryHandler('/api', () => ServerTools.toJSON())
+
+    const port = await startOnKernelPort(server)
     apiRoot = `http://localhost:${port}/api`
-
-    server = new HttpServerToolTransport({ port, apiUrl: apiRoot })
-    server.addRpcHandler(apiRoot)
-    server.addDiscoveryHandler(apiRoot, () => ServerTools.toJSON())
-
-    await sleep(100)
-    await server.start({ port })
 
     const clientTransport = new HttpClientToolTransport(apiRoot);
     ClientTools.setTransport(clientTransport);
