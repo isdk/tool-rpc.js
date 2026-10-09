@@ -80,7 +80,11 @@ npx tsup --dts --dts-resolve       # 构建 dist（下游包只看到 dist）
 
 - **端口不要先探测再 bind**。`findPort()` 是「探测 → 关闭 → 交给被测代码 bind」，中间有 TOCTOU 窗口；它内部的串行与递增重试只在**单进程**内有效，而 vitest 每个测试文件跑在独立 worker 里，两个套件从同一个起始端口出发就会同时认为它空闲，后 bind 的那个随机 `EADDRINUSE`（以前 `res-server-tools` 与 `routing-audit` 都从 3005 起，就是这么撞的）。
   - 只需要「一个可用端口」时：用 `test/helpers/ports.ts` 的 `startOnKernelPort()`——`port: 0` 由内核在 listen 时原子分配，没有窗口；端口从 `getBoundAddress()`（绑定观测）读，不是从声明身份读。路由要在 start 前声明，所以用**裸 path 前缀**（`/api`）声明路由，端口等监听后再拼给客户端。
-  - 确实需要预先知道端口时（例如两个 transport 要在 apiUrl 里写同一个 authority 才能落到同一底座）：给该文件留**只属于它的端口段**（`routing-audit` 用 3316），全仓每个文件一个起始端口，不重叠。
+  - 确实需要预先知道端口时（例如两个 transport 要在 apiUrl 里写同一个 authority 才能落到同一底座，port 0 会让它们各听一个端口）：用 `test/helpers/ports.ts` 的 `withReservedPort(from, factory, host?)`（`@isdk/util` ≥ 0.3.13 的 `withFreePort`）。它把探测与 bind 之间的窗口压到 factory 自己的 setup，并且窗口内真被抢走时**换下一个号码重跑 factory**，而不是让用例随机 `EADDRINUSE`。
+    - factory 必须可重跑，且只放「构造 transport + 监听」：监听成功后端口就归我们，之后的断言不可能再冲突，放进来反而会让重试重跑断言。`_start` 失败时会把脏底座从共享池删掉（`sharedServers.delete(key)`），所以换号重跑不留残留。
+    - factory 的**返回值**就是 `withReservedPort` 的返回值：要拿端口就在末尾 `return p`，否则拿到的是 `undefined`（踩过：`pool.get('http://*:undefined')`）。
+    - 只有第一个真的 `listen` 的实例需要预留；挂到同一底座上的后续实例走 refCount，不会再 listen，不会 EADDRINUSE。
+    - `physical-identity.test.ts` 仍用 `findPort`：那些用例故意同时拿**两个**端口（一个写死在 apiUrl 里当过时身份），不是「预留一个」能表达的；它们用 3301–3326 这段不常见号码，彼此不重叠。
 - unix socket 文件：Node 的 `close()` **不会**删除 socket 文件（Fastify 会删），重启到同一路径要先清掉旧文件。测试里用唯一临时路径 + `finally` unlink。
 - socket 路径有长度上限（Linux 约 104 字节），临时目录名要短。
 - 底座是引用计数的共享池：测试里 start 出来的第二个 transport 若没 `stop()`，`stop(true)` 也不会关掉 server，进程会挂住不退出。

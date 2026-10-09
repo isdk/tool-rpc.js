@@ -4,7 +4,8 @@ import { HttpServerToolTransport } from './http-server';
 import { ServerToolTransport } from './server';
 import { RpcServerDispatcher } from './dispatcher';
 import http from 'http';
-import { findPort, sleep } from '@isdk/util';
+import { sleep } from '@isdk/util';
+import { withReservedPort } from '../../test/helpers/ports';
 
 /** 另一种 transport 类：只用基类的声明身份，不自己碰 host 归一。 */
 class OtherKindTransport extends ServerToolTransport {
@@ -110,14 +111,20 @@ describe('Transport V2: Routing Audit & Prefix Matching', () => {
 
    it('reuses a wildcard binding for a transport that declares a specific host', async () => {
       await sleep(100);
-      const port = await findPort(3313);
 
-      const wildcard = new HttpServerToolTransport({ dispatcher, apiUrl: `http://0.0.0.0:${port}/api1` });
-      wildcard.addRpcHandler(`http://0.0.0.0:${port}/api1`);
-      const specific = new HttpServerToolTransport({ dispatcher, apiUrl: `http://localhost:${port}/api2` });
-      specific.addRpcHandler(`http://localhost:${port}/api2`);
+      // 两个实例要在 apiUrl 里写同一个端口，号码必须预先知道；用预留而非 findPort，
+      // 被抢走时换号重跑。只有 wildcard 真的 listen，所以 factory 里只起它。
+      let wildcard!: HttpServerToolTransport;
+      let specific!: HttpServerToolTransport;
+      const port = await withReservedPort(3313, async (p) => {
+         wildcard = new HttpServerToolTransport({ dispatcher, apiUrl: `http://0.0.0.0:${p}/api1` });
+         wildcard.addRpcHandler(`http://0.0.0.0:${p}/api1`);
+         specific = new HttpServerToolTransport({ dispatcher, apiUrl: `http://localhost:${p}/api2` });
+         specific.addRpcHandler(`http://localhost:${p}/api2`);
+         await wildcard.start();
+         return p;
+      });
 
-      await wildcard.start();
       // 具体 host 的实例挂到已有的通配底座上，不会再 listen 一次（否则必 EADDRINUSE）
       await specific.start();
 
@@ -134,22 +141,24 @@ describe('Transport V2: Routing Audit & Prefix Matching', () => {
       // 模拟两个具有嵌套关系的 Transport
       // 这里必须预先拿到一个真实端口：两个 transport 要在 apiUrl 里写同一个 authority，
       // 才能落到同一个物理底座上做最长前缀匹配（port 0 会让两边各自听一个端口）。
-      // 端口段用 3316：本仓库其他套件都不探这个数，避开跨 worker 撞端口
-      // （findPort 的串行只在进程内，vitest 每个测试文件一个 worker）。
+      // 预先拿端口就有探测与 bind 之间的窗口，所以走预留：号码被抢走就换下一个重跑。
       await sleep(100)
-      const port = await findPort(3316)
+      let t1!: HttpServerToolTransport
+      let t2!: HttpServerToolTransport
+      const port = await withReservedPort(3316, async (p) => {
+         // T1 负责 /
+         t1 = new HttpServerToolTransport({ dispatcher, apiUrl: `http://localhost:${p}/` });
+         t1.addRpcHandler(`http://localhost:${p}/`);
 
-      // T1 负责 /
-      const t1 = new HttpServerToolTransport({ dispatcher, apiUrl: `http://localhost:${port}/` });
-      t1.addRpcHandler(`http://localhost:${port}/`);
+         // T2 负责更精确的 /api/v2/
+         t2 = new HttpServerToolTransport({ dispatcher, apiUrl: `http://localhost:${p}/api/v2` });
+         t2.addRpcHandler(`http://localhost:${p}/api/v2`);
 
-      // T2 负责更精确的 /api/v2/
-      const t2 = new HttpServerToolTransport({ dispatcher, apiUrl: `http://localhost:${port}/api/v2` });
-      t2.addRpcHandler(`http://localhost:${port}/api/v2`);
-
-      // 绕过真实网络监听，仅测试分发逻辑
-      await t1.start();
-      await t2.start();
+         // 绕过真实网络监听，仅测试分发逻辑
+         await t1.start();
+         await t2.start();
+         return p
+      }, 'localhost')
 
       const addr = t1.getBaseUrl() as string;
       const mockRes = {

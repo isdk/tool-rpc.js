@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { findPort, sleep } from '@isdk/util';
+import { sleep } from '@isdk/util';
+import { withReservedPort } from './helpers/ports';
 import { NotFoundError } from '@isdk/common-error';
 
 import { ToolFunc, Funcs } from '@isdk/tool-func'
@@ -101,15 +102,16 @@ describe('FastifyRestfulToolTransport', () => {
     const rpc = new TestRpcTool('rpcTest')
     RpcMethodsServerTool.register(rpc)
 
-    const port = await findPort(3003);
-    apiRoot = `http://localhost:${port}/api`;
-
     // 2. Use the new, specialized transport to mount all tools
-    serverTransport = new HttpServerToolTransport({ port, apiUrl: apiRoot });
-    serverTransport.addRpcHandler(apiRoot);
-    serverTransport.addDiscoveryHandler(apiRoot, () => ServerTools.toJSON());
+    // apiRoot 里要写端口，所以号码必须预先知道；用预留而非 findPort，被抢走就换号重跑
+    await withReservedPort(3003, async (port) => {
+      apiRoot = `http://localhost:${port}/api`;
+      serverTransport = new HttpServerToolTransport({ port, apiUrl: apiRoot });
+      serverTransport.addRpcHandler(apiRoot);
+      serverTransport.addDiscoveryHandler(apiRoot, () => ServerTools.toJSON());
 
-    await serverTransport.start({ port, host: 'localhost' });
+      await serverTransport.start({ port, host: 'localhost' });
+    }, 'localhost');
 
     // 3. Setup the client transport and load tools
     const clientTransport = new HttpClientToolTransport(apiRoot);

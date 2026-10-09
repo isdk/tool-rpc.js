@@ -1,3 +1,4 @@
+import { withFreePort } from '@isdk/util'
 import type { IServerToolTransport } from '../../src/transports/server'
 
 /**
@@ -20,6 +21,28 @@ export async function startOnKernelPort(
 ): Promise<number> {
   await transport.start({ port: 0, host })
   return kernelPort(transport)
+}
+
+/**
+ * 给「必须预先知道端口号」的用例预留一个端口。
+ *
+ * 这类用例不能用 `startOnKernelPort`：它们把端口写进 apiUrl 来派生声明身份（或让两个
+ * transport 落到同一个物理底座），号码必须是已知的。
+ *
+ * 但也不要直接用 `findPort()`：号码是建议性的，探测 socket 一关就可能被别的进程抢走。
+ * `withFreePort` 把窗口压到 factory 自己的 setup，并且窗口内真被抢走时换下一个号码重跑
+ * factory，而不是让用例随机 EADDRINUSE。
+ *
+ * factory 必须可重跑，且只放「构造 + 监听」：监听一旦成功端口就归我们，之后的断言不可能
+ * 再冲突，放进来反而会让重试重跑断言。（`_start` 失败时会把脏底座从共享池里删掉，
+ * 所以换号重跑不会留下残留。）
+ */
+export async function withReservedPort<T>(
+  from: number,
+  factory: (port: number) => Promise<T> | T,
+  host?: string
+): Promise<T> {
+  return withFreePort(factory, from, host ? { host } : undefined)
 }
 
 /** 绑定观测（`address:port`）里的端口。 */

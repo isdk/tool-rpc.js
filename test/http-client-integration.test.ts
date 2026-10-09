@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest'
-import { findPort } from '@isdk/util'
+import { withReservedPort } from './helpers/ports'
 import { ToolFunc } from '@isdk/tool-func'
 import { HttpClientToolTransport } from '../src/transports/http-client'
 import { HttpServerToolTransport } from '../src/transports/http-server'
@@ -174,13 +174,16 @@ describe('HttpClientToolTransport Integration', () => {
     })
 
     // ── Start Server ──
-    port = await findPort(3010)
-    apiRoot = `http://localhost:${port}/api`
+    // apiRoot 里要写端口，号码必须预先知道；用预留而非 findPort，被抢走就换号重跑
+    await withReservedPort(3010, async (p) => {
+      port = p
+      apiRoot = `http://localhost:${p}/api`
 
-    server = new HttpServerToolTransport({ port, apiUrl: apiRoot })
-    server.addRpcHandler(apiRoot)
-    server.addDiscoveryHandler(apiRoot, () => ServerTools.toJSON())
-    await server.start({ port, host: 'localhost' })
+      server = new HttpServerToolTransport({ port: p, apiUrl: apiRoot })
+      server.addRpcHandler(apiRoot)
+      server.addDiscoveryHandler(apiRoot, () => ServerTools.toJSON())
+      await server.start({ port: p, host: 'localhost' })
+    }, 'localhost')
   })
 
   afterAll(async () => {

@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { HttpServerToolTransport } from './http-server';
 import { RpcServerDispatcher } from './dispatcher';
-import { findPort } from '@isdk/util';
+import { withReservedPort } from '../../test/helpers/ports';
 
 describe('Transport V2: HTTP Server Lifecycle', () => {
    afterEach(() => {
@@ -11,16 +11,21 @@ describe('Transport V2: HTTP Server Lifecycle', () => {
 
    it('should share physical server and shutdown only when last instance stops', async () => {
       const dispatcher = new RpcServerDispatcher();
-      const port = await findPort(3001)
 
-      // 创建两个共享相同端口 (3001) 的 Transport
-      const t1 = new HttpServerToolTransport({ dispatcher, apiUrl: `http://localhost:${port}/api1` });
-      const t2 = new HttpServerToolTransport({ dispatcher, apiUrl: `http://localhost:${port}/api2` });
+      // 两个实例要把同一个端口写进 apiUrl 才能共享底座，所以号码必须预先知道。
+      // 用预留（withFreePort）而不是 findPort：号码被外部进程抢走时换号重跑，而不是随机 EADDRINUSE。
+      let t1!: HttpServerToolTransport;
+      let t2!: HttpServerToolTransport;
+      await withReservedPort(3001, async (p) => {
+         t1 = new HttpServerToolTransport({ dispatcher, apiUrl: `http://localhost:${p}/api1` });
+         t2 = new HttpServerToolTransport({ dispatcher, apiUrl: `http://localhost:${p}/api2` });
 
-      t1.addRpcHandler(`http://localhost:${port}/api1`);
-      t2.addRpcHandler(`http://localhost:${port}/api2`);
+         t1.addRpcHandler(`http://localhost:${p}/api1`);
+         t2.addRpcHandler(`http://localhost:${p}/api2`);
 
-      await t1.start();
+         await t1.start();
+      }, 'localhost');
+
       const addr = t1.getBaseUrl();
       const binding = (HttpServerToolTransport as any).sharedServers.get(addr);
 

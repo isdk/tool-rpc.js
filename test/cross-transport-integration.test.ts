@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest'
-import { findPort } from '@isdk/util'
+import { withReservedPort } from './helpers/ports'
 import { Mailbox, MemoryProvider } from '@mboxlabs/mailbox'
 import { ToolFunc } from '@isdk/tool-func'
 import { ServerTools } from '../src/server-tools'
@@ -119,13 +119,16 @@ describe('Cross-Transport Integration (HTTP + Mailbox)', () => {
     await mailboxClient.start()
 
     // ── HTTP Transport ──
-    port = await findPort(3020)
-    apiRoot = `http://localhost:${port}/api`
+    // apiRoot 里要写端口，号码必须预先知道；用预留而非 findPort，被抢走就换号重跑
+    await withReservedPort(3020, async (p) => {
+      port = p
+      apiRoot = `http://localhost:${p}/api`
 
-    httpServer = new HttpServerToolTransport({ port, apiUrl: apiRoot })
-    httpServer.addRpcHandler(apiRoot)
-    httpServer.addDiscoveryHandler(apiRoot, () => ServerTools.toJSON())
-    await httpServer.start({ port, host: 'localhost' })
+      httpServer = new HttpServerToolTransport({ port: p, apiUrl: apiRoot })
+      httpServer.addRpcHandler(apiRoot)
+      httpServer.addDiscoveryHandler(apiRoot, () => ServerTools.toJSON())
+      await httpServer.start({ port: p, host: 'localhost' })
+    }, 'localhost')
 
     httpClient = new HttpClientToolTransport(apiRoot)
   })
