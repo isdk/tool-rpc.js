@@ -70,6 +70,12 @@ npx tsup --dts --dts-resolve       # 构建 dist（下游包只看到 dist）
 - 入参没有 `unix:` 前缀时按**裸文件系统路径**理解（`start({ path })` 给的就是这个）；带前缀时按 URI 理解，其后已是 percent-encoded。
 - `port` 与 `path` 同时给出属矛盾输入，这里让 **socket 优先**（与 Node「有 port 就忽略 path」相反），目的是保证声明身份与真实监听不错开；各 transport 的 `_start` 必须用同一优先级。
 
+### 已知限制
+
+- 带 `unix:` 前缀的入参一律按「其后已 percent-encoded」理解：`unix:/tmp/a%20b.sock` 指的是文件 `a b.sock`；字面叫 `a%20b.sock` 的要写 `unix:/tmp/a%2520b.sock`。这是 URI 规范的必然结果，不是 bug。
+- opaque 身份（`fastify://instance-N`、进程内总线 `mem://…`）只做 canonical **全字符串相等**：没有 authority，就没有底座包含关系可判。transport 尚未监听且 apiUrl 没有 URL 形式时，身份是实例占位，跨 transport 不可比——此时确实没有底座可声明。
+- 库默认**不**删 socket 文件（见「测试与环境坑」）：重启到同一路径需要调用方先清掉旧文件，删除文件的风险不该由库默认承担。
+
 ## 测试与环境坑
 
 - `test/res-server-tools.test.ts` 偶发 `EADDRINUSE 127.0.0.1:3005`：既有 `findPort` 抢端口竞态，单独跑或重跑即绿，别误判成回归。
