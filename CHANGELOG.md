@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.1.0](https://github.com///compare/v1.0.0...v1.1.0) (2026-10-09)
+
+### Features
+
+* browser entry point + HTTP 102 polling and streaming tests ([3dd1a92](https://github.com///commit/3dd1a9285cbe9888299e7e17736a36137ab68daa))
+* claim route prefixes in ServerToolTransport ([79be6e6](https://github.com///commit/79be6e60036f2dab1c31526c369d55dd5790737e))
+* expand browser entry with full RPC server infrastructure and extensive integration tests ([a7832af](https://github.com///commit/a7832af11ec44c709dc1de4f82f921104b759c47))
+* key transport identity on a canonical physical URI ([dd39ffd](https://github.com///commit/dd39ffd6a759af3aedfed10b5fc640ce7e1771a9))
+
+### Bug Fixes
+
+* must use `export type` if export ts type from another lib ([c2f2f46](https://github.com///commit/c2f2f46cc0d06f9c79381255fcbea818a051fd5e))
+
 ## [1.0.0](https://github.com/isdk/tool-rpc.js/compare/v0.1.1...v1.0.0) (2026-07-05)
 
 
