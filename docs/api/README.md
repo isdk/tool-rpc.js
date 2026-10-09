@@ -18,8 +18,9 @@ This project is built on `@isdk/tool-func`. Before proceeding, please ensure you
 - **🌐 RESTful Interface:** Quickly create REST-style APIs using `ResServerTools`, which automatically handles standard operations like `get`, `list`, `post`, `put`, and `delete`.
 - **🔧 RPC Method Grouping:** Use `RpcMethodsServerTool` to bundle multiple related functions (methods) under a single tool, invoked via an `act` parameter.
 - **🔌 Automatic Client-Side Proxies:** The client (`ClientTools` and its subclasses) can automatically load tool definitions from the server and dynamically generate type-safe proxy functions, making remote calls as simple as local ones.
+- **🌐 Browser Compatible (`@isdk/tool-rpc/browser`):** A dedicated browser entry that includes client modules, abstract server-side classes (`ServerTools`, `RpcMethodsServerTool`, `ResServerTools`), and full transport infrastructure (`RpcServerDispatcher`, `RpcTransportManager`, `RpcActiveTaskTracker`, etc.). Only excludes Node.js-specific server transports (`HttpServerToolTransport`, `MailboxServerTransport`).
 - **🚀 Built-in HTTP & Mailbox Transport:** 
-  - **HTTP**: Comes with `HttpServerToolTransport` (Node.js `http`) and `HttpClientToolTransport` (`fetch`).
+  - **HTTP**: Comes with `HttpServerToolTransport` (Node.js `http`) and `HttpClientToolTransport` (`fetch`, browser-compatible).
   - **Mailbox**: Native support for internal distributed mailbox protocols, ideal for cross-process or cross-thread communication.
 - **🚀 Multi-Instance Isolation:** Support for multiple transport instances with different `apiUrl`s in a single process without global state collision.
 - **🛡️ Execution Guarding:** Integrated deadline management (Soft/Hard deadlines) and physical-to-logical abort linkage.
@@ -379,6 +380,73 @@ This is the highest-level abstraction, providing a resource-centric, RESTful-sty
     const allUsers = await userRes.list();       // Sends GET /api/users
     ```
 
+## 🌐 Browser Usage
+
+`@isdk/tool-rpc/browser` is a dedicated browser entry point that ships client modules, server-side abstractions, and full transport infrastructure — except Node.js-specific server transports (`http`, `stream`, etc.) are excluded.
+
+### Installation
+
+```bash
+npm install @isdk/tool-rpc
+```
+
+### Import from the browser entry
+
+```typescript
+import {
+  // Client modules
+  ClientTools,
+  HttpClientToolTransport,
+  RpcClientTransportManager,
+  // Server-side abstractions
+  ServerTools,
+  RpcMethodsServerTool,
+  ResServerTools,
+  // Transport infrastructure
+  RpcTransportManager,
+  RpcServerDispatcher,
+  RpcActiveTaskTracker,
+  RPC_HEADERS,
+} from '@isdk/tool-rpc/browser'
+
+// Build a complete in-memory RPC server & client in the browser
+RpcTransportManager.bindScheme('http', HttpClientToolTransport)
+
+// Register a tool
+ServerTools.register({
+  name: 'greet',
+  func: ({ name }) => `Hello, ${name}!`,
+})
+
+// Create a dispatcher
+const dispatcher = new RpcServerDispatcher({ registry: ServerTools.items })
+
+// Call remotely
+await ClientTools.loadFrom(undefined, { apiUrl: 'http://localhost:3000/api/' })
+const greet = ClientTools.get('greet')
+const result = await greet.run({ name: 'Browser' })
+```
+
+### Key differences from Node.js
+
+| Aspect | Node.js (`@isdk/tool-rpc`) | Browser (`@isdk/tool-rpc/browser`) |
+|--------|---------------------------|-------------------------------------|
+| Manager | `RpcTransportManager` (full version with server lifecycle) | `RpcTransportManager` + `RpcClientTransportManager` |
+| Server transports | `HttpServerToolTransport`, `MailboxServerTransport` | Not included ❌ |
+| Server-side abstractions | `ServerTools`, `RpcMethodsServerTool`, `ResServerTools` | All included ✅ |
+| Transport infrastructure | `RpcServerDispatcher`, `RpcActiveTaskTracker`, `RpcDeadlineGuard` | All included ✅ |
+| `uuid` generation | Via `@isdk/hash` (cross-platform) | Via `@isdk/hash` (cross-platform) |
+| Bundle size | Larger (includes Node.js server transports) | Smaller (omits Node-`http`/`mailbox` transports)
+
+### Bundler auto-resolution
+
+When using bundlers (webpack 5+, Rollup, Vite), the `browser` field in `package.json` automatically resolves `@isdk/tool-rpc` to the browser entry. This means you can also write:
+
+```typescript
+// Bundlers automatically resolve to the browser entry
+import { ClientTools } from '@isdk/tool-rpc'
+```
+
 ## 🔌 The Transport Layer
 
 The transport layer is a core pillar of `@isdk/tool-rpc`, acting as the communication bridge between server tools and client tools to enable true Remote Procedure Calls (RPC).
@@ -397,6 +465,7 @@ The architecture is built around a few key interfaces:
     2. **Handling RPC Calls**: Create a generic RPC route (e.g., `/api/:toolId`) that receives requests, finds the corresponding tool by `toolId`, executes it, and returns the result. This is handled by the `addRpcHandler` method.
     3. Managing the server lifecycle (`start`, `stop`).
     4. **Physical Awareness (V2)**: Methods like `getListenAddr()` and `getRoutes()` allow for physical port reuse and logical route auditing.
+    5. **Route Claims & Remount (V2)**: `addRpcHandler()` / `addDiscoveryHandler()` claim their path prefix in the `ServerToolTransport` base class, so one transport can serve several prefixes, each with its own registry and discovery handler. Logical routes are reported in canonical form (leading `/`, no trailing slash); the trailing-slash form used for prefix matching is derived by `toMatchPrefix()`. Re-declaring an already claimed prefix replaces its registry/handler and logs a warning; pass `options.remount = 'throw'` to raise an error instead — backends with their own router override `onDuplicateRoute()` to surface a native duplicate-route error.
 - **`IClientToolTransport`**: The interface that a client-side transport must implement. Its core responsibilities are:
     1. **Loading API Definitions**: Call the `loadApis()` method, which accesses the server's discovery endpoint to get the definitions of all tools.
     2. **Executing Remote Calls**: Implement the `fetch()` method, which is responsible for serializing the client's tool call (function name and parameters), sending it to the server's RPC endpoint, and processing the response.

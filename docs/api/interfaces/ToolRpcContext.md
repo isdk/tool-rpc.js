@@ -6,7 +6,7 @@
 
 # Interface: ToolRpcContext
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:135](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L135)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:135](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L135)
 
 [V2 核心] 标准执行上下文接口
 
@@ -26,7 +26,7 @@ Allows users to extend arbitrary properties.
 
 > `optional` **act?**: `string`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:143](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L143)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:143](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L143)
 
 操作名称
 
@@ -36,7 +36,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:143](http
 
 > `optional` **binding?**: `"early"` \| `"late"` \| `"auto"`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:125
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:133
 
 The binding strategy for internal dependencies (runAsSync).
 - 'early': Always use pre-bound instances from 'depends'.
@@ -53,7 +53,7 @@ The binding strategy for internal dependencies (runAsSync).
 
 > `optional` **dispatcher?**: `any`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:139](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L139)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:139](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L139)
 
 ***
 
@@ -61,7 +61,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:139](http
 
 > **headers**: `Record`\<`string`, `string` \| `number` \| `string`[] \| `undefined`\>
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:138](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L138)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:138](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L138)
 
 ***
 
@@ -69,7 +69,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:138](http
 
 > `optional` **inheritContext?**: `boolean`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:135
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:147
 
 Whether to allow context inheritance/propagation in nested calls.
 Defaults to true.
@@ -84,7 +84,7 @@ Defaults to true.
 
 > `optional` **isolated?**: `boolean`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:130
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:140
 
 Whether to enable independent execution scope.
 If true, a temporary instance will be created via Object.create(this) to isolate concurrency.
@@ -99,7 +99,7 @@ If true, a temporary instance will be created via Object.create(this) to isolate
 
 > `optional` **reply?**: `any`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:147](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L147)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:147](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L147)
 
 ***
 
@@ -107,7 +107,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:147](http
 
 > `optional` **req?**: `any`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:146](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L146)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:146](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L146)
 
 下方为协议底座元数据透传
 
@@ -117,7 +117,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:146](http
 
 > **requestId**: `string`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:136](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L136)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:136](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L136)
 
 ***
 
@@ -125,7 +125,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:136](http
 
 > `optional` **resId?**: `string`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:141](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L141)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:141](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L141)
 
 资源唯一标识
 
@@ -135,7 +135,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:141](http
 
 > `optional` **rootRegistry?**: *typeof* `ToolFunc`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:118
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:124
 
 The entry-point registry class that initiated the call chain.
 Used for late-binding dependency resolution in hierarchical registries.
@@ -150,7 +150,7 @@ Used for late-binding dependency resolution in hierarchical registries.
 
 > `optional` **signal?**: `AbortSignal`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:139
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:153
 
 Standard Web AbortSignal for propagating cancellation signals.
 
@@ -164,4 +164,4 @@ Standard Web AbortSignal for propagating cancellation signals.
 
 > `optional` **traceId?**: `string`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:137](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L137)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:137](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L137)

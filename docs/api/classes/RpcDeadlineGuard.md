@@ -6,7 +6,7 @@
 
 # Class: RpcDeadlineGuard
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/deadline-guard.ts:14](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/deadline-guard.ts#L14)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/deadline-guard.ts:14](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/deadline-guard.ts#L14)
 
 ## File
 
@@ -19,7 +19,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/deadline-guard.ts:1
 
 > **new RpcDeadlineGuard**(`timeoutMs`, `hooks?`, `hardTimeoutMs?`, `terminationGraceMs?`): `RpcDeadlineGuard`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/deadline-guard.ts:21](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/deadline-guard.ts#L21)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/deadline-guard.ts:21](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/deadline-guard.ts#L21)
 
 #### Parameters
 
@@ -53,7 +53,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/deadline-guard.ts:2
 
 > **cancel**(): `void`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/deadline-guard.ts:75](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/deadline-guard.ts#L75)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/deadline-guard.ts:75](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/deadline-guard.ts#L75)
 
 正常结束时清理所有定时器
 
@@ -67,7 +67,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/deadline-guard.ts:7
 
 > **getPromise**(): `Promise`\<`never`\>
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/deadline-guard.ts:68](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/deadline-guard.ts#L68)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/deadline-guard.ts:68](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/deadline-guard.ts#L68)
 
 提供给外部进行 race 的原始 Promise
 
@@ -81,7 +81,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/deadline-guard.ts:6
 
 > **start**(): `Promise`\<`never`\>
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/deadline-guard.ts:37](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/deadline-guard.ts#L37)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/deadline-guard.ts:37](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/deadline-guard.ts#L37)
 
 启动看门狗并返回可竞争的 Promise。
 

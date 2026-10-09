@@ -6,7 +6,7 @@
 
 # Class: RpcError
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:150](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L150)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:150](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L150)
 
 ## Extends
 
@@ -18,7 +18,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:150](http
 
 > **new RpcError**(`message`, `code?`, `status?`, `data?`): `RpcError`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:158](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L158)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:158](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L158)
 
 #### Parameters
 
@@ -64,7 +64,7 @@ Defined in: @isdk/ai-tools/node\_modules/.pnpm/typescript@5.7.3/node\_modules/ty
 
 > **code**: `number`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:152](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L152)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:152](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L152)
 
 业务错误码 (始终是数字)
 
@@ -74,7 +74,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:152](http
 
 > `optional` **data?**: `any`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:156](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L156)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:156](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L156)
 
 额外的业务负载数据
 
@@ -120,7 +120,7 @@ Defined in: @isdk/ai-tools/node\_modules/.pnpm/typescript@5.7.3/node\_modules/ty
 
 > `optional` **status?**: `string`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:154](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L154)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:154](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L154)
 
 可选的状态描述字符串 (如 'teapot', 'invalid_params')
 

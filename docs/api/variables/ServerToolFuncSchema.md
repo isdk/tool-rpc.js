@@ -8,7 +8,7 @@
 
 > `const` **ServerToolFuncSchema**: `object`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/server-tools.ts:82](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/server-tools.ts#L82)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/server-tools.ts:82](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/server-tools.ts#L82)
 
 ## Type Declaration
 

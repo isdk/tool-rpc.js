@@ -6,7 +6,7 @@
 
 # Class: ClientTools
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:9](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/client-tools.ts#L9)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:9](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/client-tools.ts#L9)
 
 Represents a client-side proxy for a remote tool function.
 
@@ -33,9 +33,9 @@ These tools are typically created dynamically by loading definitions from a serv
 
 ### Constructor
 
-> **new ClientTools**(`name`, `options?`): `ClientTools`
+> **new ClientTools**(`name`, `options?`, `config?`): `ClientTools`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:751
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:1100
 
 Initializes a new `ToolFunc` instance.
 
@@ -55,6 +55,15 @@ Can be a function name, a function implementation, or a configuration object.
 `any`
 
 Configuration options if not provided in the first argument.
+  Can also be a function-expression string (e.g. `'(a, b) => a + b'`) for the `(name, funcString)` form.
+  An internal `_stack` property (a `Set`, used for cycle detection during registration) is
+  consumed and removed here so it never becomes instance state.
+
+##### config?
+
+`any`
+
+Optional config object, only used with the `(name, funcString, config)` form.
 
 #### Returns
 
@@ -70,7 +79,7 @@ Configuration options if not provided in the first argument.
 
 > `optional` **\_registry?**: *typeof* `ToolFunc`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:496
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:733
 
 **`Internal`**
 
@@ -82,7 +91,7 @@ The registry class where this tool was originally registered.
 
 > **$attributes**: `Properties`
 
-Defined in: [property-manager.js/src/advance.d.ts:5](https://github.com/snowyu/property-manager.js/blob/4214417b21b4740d5e51a16e79d083126265f03e/src/advance.d.ts#L5)
+Defined in: property-manager.js/lib/index.d.ts:89
 
 ***
 
@@ -90,7 +99,7 @@ Defined in: [property-manager.js/src/advance.d.ts:5](https://github.com/snowyu/p
 
 > `optional` **action?**: `"get"` \| `"post"` \| `"put"` \| `"delete"` \| `"patch"` \| `"list"` \| `"res"`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/consts.ts:72](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/consts.ts#L72)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/consts.ts:72](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/consts.ts#L72)
 
 The action to be used for the remote call. This typically represents an RPC method name.
 Only for RESTful HTTP transports, it might be mapped to a standard HTTP method (e.g., GET, POST)
@@ -105,7 +114,7 @@ Only for RESTful HTTP transports, it might be mapped to a standard HTTP method (
 
 > `optional` **alias?**: `string` \| `string`[]
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:258
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:418
 
 Optional aliases for the function name.
 
@@ -119,14 +128,14 @@ Optional aliases for the function name.
 
 > `optional` **asyncFeatures?**: `number`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:272
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:435
 
 A bitmask representing asynchronous features supported by the function, built from `AsyncFeatureBits`.
 This allows the system to understand if a function supports capabilities like cancellation or multi-tasking.
 
 #### See
 
-AsyncFeatureBits from `@src/utils/cancelable-ability.ts`
+`AsyncFeatureBits` from `./utils/async-features`
 
 #### Example
 
@@ -159,7 +168,7 @@ The initial value of Object.prototype.constructor is the standard built-in Objec
 
 > `optional` **ctx?**: `ToolFuncContext`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:547
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:792
 
 The execution context for the current function call.
 Only available when isolated execution is enabled.
@@ -170,7 +179,7 @@ Only available when isolated execution is enabled.
 
 > **defaultOptions**: `object`
 
-Defined in: [property-manager.js/src/abstract.d.ts:74](https://github.com/snowyu/property-manager.js/blob/4214417b21b4740d5e51a16e79d083126265f03e/src/abstract.d.ts#L74)
+Defined in: property-manager.js/lib/abstract.d-BOda6\_iP.d.ts:74
 
 The default options for export and assign
 
@@ -188,7 +197,7 @@ The default options for export and assign
 
 > `optional` **depends?**: `object`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:295
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:461
 
 A map of dependencies this function has on other tool functions.
 Declaring dependencies ensures that they are automatically registered when this function is registered.
@@ -227,7 +236,7 @@ mainFunc.register();
 
 > `optional` **description?**: `string`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:302
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:469
 
 A detailed description of what the function does.
 
@@ -241,7 +250,7 @@ A detailed description of what the function does.
 
 > `optional` **expectedDuration?**: `number`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/consts.ts:92](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/consts.ts#L92)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/consts.ts:92](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/consts.ts#L92)
 
 The expected duration of the remote call in milliseconds.
 
@@ -255,7 +264,7 @@ The expected duration of the remote call in milliseconds.
 
 > `optional` **fetchOptions?**: `any`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/consts.ts:77](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/consts.ts#L77)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/consts.ts:77](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/consts.ts#L77)
 
 Addtional options to be passed to the underlying `fetch` call in a transport.
 
@@ -269,7 +278,7 @@ Addtional options to be passed to the underlying `fetch` call in a transport.
 
 > `optional` **isApi?**: `boolean`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:247
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:405
 
 If true, indicates that this function should be treated as a server-side API.
 
@@ -283,7 +292,7 @@ If true, indicates that this function should be treated as a server-side API.
 
 > `optional` **name?**: `string`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:204
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:249
 
 The unique name of the function.
 
@@ -297,7 +306,7 @@ The unique name of the function.
 
 > **nonExported1stChar**: `string`
 
-Defined in: [property-manager.js/src/abstract.d.ts:78](https://github.com/snowyu/property-manager.js/blob/4214417b21b4740d5e51a16e79d083126265f03e/src/abstract.d.ts#L78)
+Defined in: property-manager.js/lib/abstract.d-BOda6\_iP.d.ts:78
 
 the property with the default prefix '$' will not be exported.
 
@@ -307,7 +316,7 @@ the property with the default prefix '$' will not be exported.
 
 > `optional` **params?**: `FuncParams` \| `FuncParam`[]
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:209
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:255
 
 Parameter definitions, which can be an object mapping names to definitions or an array for positional parameters.
 
@@ -321,7 +330,7 @@ Parameter definitions, which can be an object mapping names to definitions or an
 
 > `optional` **result?**: `string` \| `Record`\<`string`, `any`\>
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:214
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:261
 
 The expected return type of the function, described as a string or a JSON schema object.
 
@@ -335,9 +344,21 @@ The expected return type of the function, described as a string or a JSON schema
 
 > `optional` **scope?**: `any`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:219
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:280
 
 The execution scope or context (`this`) for the function.
+
+Its keys become closure variables of the func, and a `this` key becomes the func's `this`.
+Because those bindings are captured while compiling, the scope is read at compile time:
+
+- a string FuncItem.func is always compiled against it;
+- a *function* value is compiled from its own source when a non-empty scope is declared — a
+  source that is not a function expression (method shorthand, a class method, native code) is
+  used as-is instead, since it has no standalone source to compile;
+- an empty or absent scope leaves a function value untouched, so its lexical closure survives.
+
+A [BaseFuncItem.setup](../interfaces/RemoteFuncItem.md#setup) hook may provide the scope too: it is applied *before* the func is
+compiled (see the lifecycle ability).
 
 #### Inherited from
 
@@ -345,57 +366,11 @@ The execution scope or context (`this`) for the function.
 
 ***
 
-### setup?
-
-> `optional` **setup?**: (`this`, `options?`) => `void`
-
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:242
-
-A lifecycle hook called once during the `ToolFunc` instance's initialization.
-It allows for initial setup, state configuration, or property modification on the instance
-before it is used or registered. The `this` context is the `ToolFunc` instance itself.
-
-#### Parameters
-
-##### this
-
-`ToolFunc`
-
-##### options?
-
-`FuncItem`
-
-The configuration options for the function.
-
-#### Returns
-
-`void`
-
-#### Example
-
-```ts
-const myFunc = new ToolFunc({
-  name: 'myFunc',
-  customState: 'initial',
-  setup() {
-    // `this` is the myFunc instance
-    this.customState = 'configured';
-  }
-});
-console.log(myFunc.customState); // Outputs: 'configured'
-```
-
-#### Inherited from
-
-[`ClientFuncItem`](../interfaces/ClientFuncItem.md).[`setup`](../interfaces/ClientFuncItem.md#setup)
-
-***
-
 ### stream?
 
 > `optional` **stream?**: `boolean`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:253
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:412
 
 If true, indicates that the function has the *capability* to stream its output.
 Whether a specific call is streamed is determined by a `stream` property in the runtime parameters.
@@ -410,7 +385,7 @@ Whether a specific call is streamed is determined by a `stream` property in the 
 
 > `optional` **tags?**: `string` \| `string`[]
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:224
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:286
 
 Tags for grouping or filtering functions.
 
@@ -424,7 +399,7 @@ Tags for grouping or filtering functions.
 
 > `optional` **timeout?**: `number` \| \{ `keepAliveOnTimeout?`: `boolean`; `streamIdleTimeout?`: `number`; `value`: `number`; \}
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/consts.ts:81](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/consts.ts#L81)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/consts.ts:81](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/consts.ts#L81)
 
 The timeout configuration for the remote call.
 
@@ -466,7 +441,7 @@ The hard timeout in milliseconds.
 
 > `optional` **title?**: `string`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:307
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:475
 
 A concise, human-readable title for the function, often used in UI or by AI.
 
@@ -480,7 +455,9 @@ A concise, human-readable title for the function, often used in UI or by AI.
 
 > `protected` `static` **\_refCounts**: `object`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:489
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:726
+
+**`Internal`**
 
 Tracks the number of active registration holds on each function name.
 A function is truly removed only when its reference count drops to zero.
@@ -495,7 +472,7 @@ A function is truly removed only when its reference count drops to zero.
 
 > `static` `optional` **action?**: `string`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:41](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/client-tools.ts#L41)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:41](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/client-tools.ts#L41)
 
 #### Inherited from
 
@@ -507,7 +484,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:41](https://gi
 
 > `static` **aliases**: `object`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:480
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:718
 
 A static map of aliases to their corresponding primary function names.
 
@@ -521,7 +498,7 @@ A static map of aliases to their corresponding primary function names.
 
 > `static` `optional` **apiUrl?**: `string`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:47](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/client-tools.ts#L47)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:47](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/client-tools.ts#L47)
 
 The default API URL for this tools class.
 If set, loadFrom and fetch will use this URL to find the transport.
@@ -532,7 +509,7 @@ If set, loadFrom and fetch will use this URL to find the transport.
 
 > `static` `optional` **ctx?**: `ToolFuncContext`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:508
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:747
 
 The static execution context for proxy classes created via ToolFunc.with().
 
@@ -542,7 +519,7 @@ The static execution context for proxy classes created via ToolFunc.with().
 
 > `static` **dataPath**: `string`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:503
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:741
 
 A conventional property to designate a file path for saving the registered `ToolFunc` data.
 Note: The `ToolFunc` class itself does not implement persistence logic. It is up to the
@@ -554,7 +531,7 @@ developer to use this path to save and load the `ToolFunc.items` registry if nee
 
 > `static` `optional` **fetchOptions?**: `any`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:52](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/client-tools.ts#L52)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:52](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/client-tools.ts#L52)
 
 The default fetch options for this tools class.
 
@@ -568,7 +545,7 @@ The default fetch options for this tools class.
 
 > `static` **items**: [`Funcs`](../interfaces/Funcs.md)
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:475
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:712
 
 A static registry of all `ToolFunc` implementations, indexed by their primary name.
 
@@ -580,7 +557,7 @@ A static registry of all `ToolFunc` implementations, indexed by their primary na
 
 > **get** **apiRoot**(): `string` \| `undefined`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:148](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/client-tools.ts#L148)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:146](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/client-tools.ts#L146)
 
 ##### Deprecated
 
@@ -608,7 +585,7 @@ Use `transport` instead.
 
 > **get** **apiUrl**(): `string` \| `undefined`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:152](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/client-tools.ts#L152)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:150](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/client-tools.ts#L150)
 
 ##### Returns
 
@@ -618,7 +595,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:152](https://g
 
 > **set** **apiUrl**(`v`): `void`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:156](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/client-tools.ts#L156)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:154](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/client-tools.ts#L154)
 
 ##### Parameters
 
@@ -638,7 +615,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:156](https://g
 
 > **get** **transport**(): [`IClientToolTransport`](../interfaces/IClientToolTransport.md) \| `undefined`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:163](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/client-tools.ts#L163)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:161](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/client-tools.ts#L161)
 
 Gets the transport instance for this tool.
 
@@ -654,11 +631,13 @@ Gets the transport instance for this tool.
 
 > **get** `static` **transport**(): `any`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:88](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/client-tools.ts#L88)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:86](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/client-tools.ts#L86)
+
+*
 
 ##### Deprecated
 
-Use RpcTransportManager.instance.getClient(apiUrl)
+Use RpcClientTransportManager.instance.getClient(apiUrl)
 
 ##### Returns
 
@@ -670,7 +649,9 @@ Use RpcTransportManager.instance.getClient(apiUrl)
 
 > `protected` **\_prepareContext**(`params?`, `ctx?`): `ToolFuncContext`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:806
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:1159
+
+**`Internal`**
 
 Creates the final execution context (`this.ctx`) for a Shadow Instance.
 
@@ -694,20 +675,75 @@ to hook into context preparation via method overloading ($_prepareContext).
 
 ***
 
+### \_resolveAs()
+
+> `protected` **\_resolveAs**(`name`, `params?`, `ctx?`): `object`
+
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:1234
+
+**`Internal`**
+
+Resolves a dependency by name into the concrete instance and execution context to call.
+
+This is the shared resolution half of `runAs`/`runAsSync`: both need the same hierarchical
+lookup and the same binding strategy, they only differ in which entry point of the resolved
+tool they hand the call to (`run` vs `runSync`).
+
+#### Parameters
+
+##### name
+
+`string`
+
+The name or alias of the target function.
+
+##### params?
+
+`any`
+
+Optional parameters to pass to the target function.
+
+##### ctx?
+
+`ToolFuncContext`
+
+The execution context.
+
+#### Returns
+
+`object`
+
+The resolved instance and context.
+
+##### context
+
+> **context**: `ToolFuncContext`
+
+##### func
+
+> **func**: `ToolFunc`
+
+#### Throws
+
+`NotFoundError` If the target function cannot be found in the current lineage.
+
+***
+
 ### \_shouldIsolate()
 
 > `protected` **\_shouldIsolate**(`params?`, `ctx?`): `boolean`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:798
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:1149
+
+**`Internal`**
 
 Determines if the function execution should be isolated into a "Shadow Instance".
+Isolation creates a lightweight clone of the current tool to provide a unique `this.ctx`
+for the duration of the call, preventing property collisions in concurrent environments.
 
-PRIORITY LOGIC:
-1. Explicit 'ctx.isolated' in the current call (Highest).
-2. Any explicit 'ctx' provided (Safe default: isolate to apply new overrides).
-3. Prevention of recursion (If already an own 'ctx' property exists).
-4. Inherited 'this.ctx.isolated' configuration.
-5. Presence of any inherited context (Default: isolate for concurrency safety).
+When the `makeToolFuncLifecycle` ability has been installed, this gate also keeps `runSync`/
+`runWithPosSync` out of a tool that is still *pending* across stacks (async `setup` in flight)
+and refuses a strictly-paired tool (one with a `dispose` hook) that has not been `register()`ed.
 
 #### Parameters
 
@@ -715,13 +751,19 @@ PRIORITY LOGIC:
 
 `any`
 
+The runtime parameters for the function call.
+
 ##### ctx?
 
 `ToolFuncContext`
 
+The optional execution context provided by the user for this specific call (e.g., via `runSync(params, ctx)`).
+
 #### Returns
 
 `boolean`
+
+`true` if a shadow instance should be created, otherwise `false`.
 
 ***
 
@@ -729,7 +771,7 @@ PRIORITY LOGIC:
 
 > **arr2ObjParams**(`params`): `any`[]
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:770
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:1125
 
 Converts an array of positional arguments into a named parameters object.
 This is used internally to support functions defined with named parameters.
@@ -754,7 +796,7 @@ An array containing a single parameters object.
 
 > **assign**(`src`, `options?`): `this`
 
-Defined in: [property-manager.js/src/abstract.d.ts:106](https://github.com/snowyu/property-manager.js/blob/4214417b21b4740d5e51a16e79d083126265f03e/src/abstract.d.ts#L106)
+Defined in: property-manager.js/lib/abstract.d-BOda6\_iP.d.ts:106
 
 Assign the values from the src object.
 
@@ -782,7 +824,7 @@ this object
 
 > **assignProperty**(`src`, `name`, `value`, `attrs?`, `options?`): `void`
 
-Defined in: [property-manager.js/src/abstract.d.ts:117](https://github.com/snowyu/property-manager.js/blob/4214417b21b4740d5e51a16e79d083126265f03e/src/abstract.d.ts#L117)
+Defined in: property-manager.js/lib/abstract.d-BOda6\_iP.d.ts:117
 
 Assign a property of src to this object.
 
@@ -826,7 +868,7 @@ the attributes object
 
 > `abstract` **assignPropertyTo**(`dest`, `src`, `name`, `value`, `attrs?`, `options?`): `void`
 
-Defined in: [property-manager.js/src/abstract.d.ts:131](https://github.com/snowyu/property-manager.js/blob/4214417b21b4740d5e51a16e79d083126265f03e/src/abstract.d.ts#L131)
+Defined in: property-manager.js/lib/abstract.d-BOda6\_iP.d.ts:131
 
 Assign the property value from the src to destination object.
 
@@ -876,7 +918,7 @@ The attributes object of the property
 
 > **assignTo**(`dest?`, `options?`): `any`
 
-Defined in: [property-manager.js/src/abstract.d.ts:191](https://github.com/snowyu/property-manager.js/blob/4214417b21b4740d5e51a16e79d083126265f03e/src/abstract.d.ts#L191)
+Defined in: property-manager.js/lib/abstract.d-BOda6\_iP.d.ts:191
 
 Assign this attributes to the dest object
 
@@ -900,11 +942,69 @@ the dest object
 
 ***
 
+### cleanup()?
+
+> `optional` **cleanup**(`this`): `void` \| `Promise`\<`void`\>
+
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:399
+
+A lifecycle hook called once at the **end of every call**, releasing whatever *that call*
+acquired. It is the call-scoped twin of [BaseFuncItem.dispose](../interfaces/RemoteFuncItem.md#dispose): while `dispose` is tied to
+the instance's registration lifetime, `cleanup` is tied to a single `run()`.
+
+Because the tools are executed through an isolated shadow instance, the body may park per-call
+resources on `this` (`this.tx = begin()`) and `cleanup` releases exactly those — concurrent calls
+cannot collide. Declaring `cleanup` is what makes that isolation automatic; no flag is needed.
+
+It is invoked on every terminal path of the call, at most once: a synchronous result or throw, a
+settled promise (resolve *and* reject), a returned `ReadableStream` (once that stream finishes,
+fails or is cancelled), and an abort of the call's signal. Write it defensively (`this.tx?.rollback()`),
+since a body that threw before acquiring anything still ends the call.
+
+The hook may return a `Promise`. A synchronous entry point can only *initiate* that release (its
+rejection is logged rather than thrown), while `run()`/`runWithPos()` already return a promise and
+therefore resolve only after `cleanup` has settled. When both the body and `cleanup` fail, the two
+errors are reported as one `AggregateError`.
+
+NOTE: like [BaseFuncItem.setup](../interfaces/RemoteFuncItem.md#setup) and [BaseFuncItem.dispose](../interfaces/RemoteFuncItem.md#dispose), this hook is only invoked
+by the `makeToolFuncLifecycle` ability. Install it once, on the registry class you actually use:
+`const Tools = makeToolFuncLifecycle(ToolFunc)`.
+
+#### Parameters
+
+##### this
+
+`ToolFunc`
+
+#### Returns
+
+`void` \| `Promise`\<`void`\>
+
+#### Example
+
+```ts
+const Tools = makeToolFuncLifecycle(ToolFunc);
+const myFunc = new Tools({
+  name: 'tx',
+  func() {
+    this.tx = db.begin();   // acquired whenever the body needs it, conditionally if you like
+    return this.tx.query('select 1');
+  },
+  cleanup() { return this.tx?.commit() },  // <- runs when the call ends, however it ends
+});
+```
+
+#### Inherited from
+
+[`ClientFuncItem`](../interfaces/ClientFuncItem.md).[`cleanup`](../interfaces/ClientFuncItem.md#cleanup)
+
+***
+
 ### clone()
 
 > **clone**(`options?`): `any`
 
-Defined in: [property-manager.js/src/abstract.d.ts:155](https://github.com/snowyu/property-manager.js/blob/4214417b21b4740d5e51a16e79d083126265f03e/src/abstract.d.ts#L155)
+Defined in: property-manager.js/lib/abstract.d-BOda6\_iP.d.ts:155
 
 Create a new object with the same values of attributes.
 
@@ -926,7 +1026,7 @@ the new object
 
 > **cloneTo**(`dest`, `options?`): `any`
 
-Defined in: [property-manager.js/src/abstract.d.ts:148](https://github.com/snowyu/property-manager.js/blob/4214417b21b4740d5e51a16e79d083126265f03e/src/abstract.d.ts#L148)
+Defined in: property-manager.js/lib/abstract.d-BOda6\_iP.d.ts:148
 
 Create and assign the values to the destination object.
 
@@ -954,7 +1054,7 @@ the new dest object
 
 > `abstract` **defineProperties**(`aProperties`): `any`
 
-Defined in: [property-manager.js/src/abstract.d.ts:89](https://github.com/snowyu/property-manager.js/blob/4214417b21b4740d5e51a16e79d083126265f03e/src/abstract.d.ts#L89)
+Defined in: property-manager.js/lib/abstract.d-BOda6\_iP.d.ts:89
 
 Define the attributes of this object.
 
@@ -972,11 +1072,62 @@ the defined attributes of the object
 
 ***
 
+### dispose()?
+
+> `optional` **dispose**(`this`): `void` \| `Promise`\<`void`\>
+
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:360
+
+A lifecycle hook called once when the `ToolFunc` instance is **removed from the registry**,
+i.e. when the reference count drops to zero or when `unregister` is forced. It is the exact
+inverse of [BaseFuncItem.setup](../interfaces/RemoteFuncItem.md#setup): releasing whatever `setup` acquired (connections,
+logins, timers, subscriptions...).
+
+The hook may return a `Promise`. Because the synchronous `unregister()` cannot await it, the
+returned promise is tracked and its rejection is logged rather than thrown. Use
+`unregisterAsync()` to await the teardown and observe the real error.
+
+After a successful `dispose`, the instance is re-armed: registering it again re-runs `setup`.
+
+NOTE: like [BaseFuncItem.setup](../interfaces/RemoteFuncItem.md#setup), this hook is only invoked by the `makeToolFuncLifecycle`
+ability. Install it once, on the registry class you actually use:
+`const Tools = makeToolFuncLifecycle(ToolFunc)`.
+
+#### Parameters
+
+##### this
+
+`ToolFunc`
+
+#### Returns
+
+`void` \| `Promise`\<`void`\>
+
+#### Example
+
+```ts
+const Tools = makeToolFuncLifecycle(ToolFunc);
+const myFunc = new Tools({
+  name: 'myFunc',
+  setup() { this.conn = connect() },
+  dispose() { this.conn.close() },
+  func: () => 'ok',
+});
+myFunc.register();
+myFunc.unregister(); // <- dispose runs here
+```
+
+#### Inherited from
+
+[`ClientFuncItem`](../interfaces/ClientFuncItem.md).[`dispose`](../interfaces/ClientFuncItem.md#dispose)
+
+***
+
 ### exportTo()
 
 > **exportTo**(`dest`, `options?`): `any`
 
-Defined in: [property-manager.js/src/abstract.d.ts:173](https://github.com/snowyu/property-manager.js/blob/4214417b21b4740d5e51a16e79d083126265f03e/src/abstract.d.ts#L173)
+Defined in: property-manager.js/lib/abstract.d-BOda6\_iP.d.ts:173
 
 Export attributes to the dest json object.
 
@@ -1004,7 +1155,7 @@ the dest object.
 
 > **fetch**(`objParam?`, `act?`, `subName?`, `fetchOptions?`): `Promise`\<`any`\>
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:170](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/client-tools.ts#L170)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:168](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/client-tools.ts#L168)
 
 #### Parameters
 
@@ -1034,7 +1185,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:170](https://g
 
 > **func**(`objParam`): `Promise`\<`any`\>
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:191](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/client-tools.ts#L191)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:189](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/client-tools.ts#L189)
 
 The core implementation for a client-side tool. When a `ClientTools` instance
 is "run", this `func` method is executed. It delegates the call to the
@@ -1058,9 +1209,9 @@ The result from the remote tool.
 
 ### getFunc()
 
-> **getFunc**(`name?`): `any`
+> **getFunc**(`name?`): `Function` \| `undefined`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:866
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:1247
 
 Gets a bound function reference for execution with named parameters.
 If a name is provided, it retrieves a different function from the registry.
@@ -1076,7 +1227,7 @@ Optional name of the function to retrieve.
 
 #### Returns
 
-`any`
+`Function` \| `undefined`
 
 A function reference or `undefined` if not found.
 
@@ -1086,7 +1237,7 @@ A function reference or `undefined` if not found.
 
 > **getFuncWithPos**(`name?`): `any`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:910
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:1301
 
 Gets a bound function reference suitable for positional argument execution.
 If a name is provided, it retrieves a different function from the registry.
@@ -1112,7 +1263,7 @@ A function reference or `undefined` if not found.
 
 > `abstract` **getProperties**(): `PropDescriptors`
 
-Defined in: [property-manager.js/src/abstract.d.ts:98](https://github.com/snowyu/property-manager.js/blob/4214417b21b4740d5e51a16e79d083126265f03e/src/abstract.d.ts#L98)
+Defined in: property-manager.js/lib/abstract.d-BOda6\_iP.d.ts:98
 
 Get the defined attributes.
 
@@ -1128,7 +1279,7 @@ the descriptors of properties object
 
 > **hasAsyncFeature**(`feature`): `boolean`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:916
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:1309
 
 Checks if the current function instance supports a specific async feature.
 
@@ -1174,7 +1325,7 @@ A property name.
 
 > **initialize**(`src?`): `this`
 
-Defined in: [property-manager.js/src/abstract.d.ts:139](https://github.com/snowyu/property-manager.js/blob/4214417b21b4740d5e51a16e79d083126265f03e/src/abstract.d.ts#L139)
+Defined in: property-manager.js/lib/abstract.d-BOda6\_iP.d.ts:139
 
 Initialize object and assign attribute values from src if src exists.
 
@@ -1218,7 +1369,7 @@ Another object whose prototype chain is to be checked.
 
 > **isSame**(`src`, `options?`): `boolean`
 
-Defined in: [property-manager.js/src/abstract.d.ts:200](https://github.com/snowyu/property-manager.js/blob/4214417b21b4740d5e51a16e79d083126265f03e/src/abstract.d.ts#L200)
+Defined in: property-manager.js/lib/abstract.d-BOda6\_iP.d.ts:200
 
 Check the src object whether “equals” this object.
 
@@ -1244,7 +1395,7 @@ The source object
 
 > **isStream**(`params`): `boolean` \| `undefined`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:929
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:1324
 
 Determines if a function call should produce a stream.
 
@@ -1274,7 +1425,7 @@ The runtime parameters passed to the function call.
 
 > **mergeTo**(`dest`, `options?`): `any`
 
-Defined in: [property-manager.js/src/abstract.d.ts:164](https://github.com/snowyu/property-manager.js/blob/4214417b21b4740d5e51a16e79d083126265f03e/src/abstract.d.ts#L164)
+Defined in: property-manager.js/lib/abstract.d-BOda6\_iP.d.ts:164
 
 Merge this attributes to dest object.
 
@@ -1302,7 +1453,7 @@ the dest object.
 
 > **obj2ArrParams**(`params?`): `any`[]
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:777
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:1134
 
 Converts a named parameters object into an array of positional arguments.
 This is used for functions defined with positional parameters.
@@ -1349,7 +1500,7 @@ A property name.
 
 > **register**(): `boolean` \| `ToolFunc`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:757
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:1108
 
 Registers the current `ToolFunc` instance into the static registry.
 Also registers any declared dependencies.
@@ -1366,7 +1517,7 @@ The instance itself upon successful registration, or `false` if it already exist
 
 > **run**(`params?`, `ctx?`): `any`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:825
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:1182
 
 Executes the function asynchronously with a named parameters object.
 
@@ -1399,7 +1550,7 @@ A promise or the direct result of the function's execution.
 
 > **runAs**(`name`, `params?`, `ctx?`): `any`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:837
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:1196
 
 Asynchronously executes another registered function by name.
 
@@ -1438,7 +1589,7 @@ A promise or the direct result of the function's execution.
 
 > **runAsSync**(`name`, `params?`, `ctx?`): `any`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:858
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:1219
 
 Executes another registered function by name, using hierarchical dependency resolution.
 
@@ -1481,7 +1632,7 @@ The result of the target function execution.
 
 #### Throws
 
-If the target function cannot be found in the current lineage.
+`NotFoundError` If the target function cannot be found in the current lineage.
 
 ***
 
@@ -1489,7 +1640,7 @@ If the target function cannot be found in the current lineage.
 
 > **runSync**(`params?`, `ctx?`): `any`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:814
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:1169
 
 Executes the function synchronously with a named parameters object.
 
@@ -1523,7 +1674,7 @@ Will throw an error if an array of parameters is passed to a function that expec
 
 > **runWithPos**(...`params`): `any`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:891
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:1278
 
 Executes the function asynchronously using positional arguments.
 
@@ -1550,7 +1701,7 @@ A promise or the direct result of the function's execution.
 
 > **runWithPosAs**(`name`, ...`params`): `any`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:902
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:1291
 
 Asynchronously executes another function by name using positional arguments.
 
@@ -1583,7 +1734,7 @@ A promise or the direct result of the function's execution.
 
 > **runWithPosAsSync**(`name`, ...`params`): `any`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:881
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:1266
 
 Synchronously executes another function by name using positional arguments.
 This is a convenience wrapper around the static `runWithPosSync()` method.
@@ -1614,7 +1765,7 @@ The result of the function execution.
 
 > **runWithPosSync**(...`params`): `any`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:873
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:1256
 
 Executes the function synchronously using positional arguments.
 If the function expects named parameters, it converts the arguments automatically.
@@ -1635,11 +1786,78 @@ The result of the function execution.
 
 ***
 
+### setup()?
+
+> `optional` **setup**(`this`, `options?`): `void` \| `Promise`\<`void`\>
+
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:328
+
+A lifecycle hook called once when the `ToolFunc` instance is **registered**, and again after
+it has been `dispose`d and re-registered. It is the exact inverse of [BaseFuncItem.dispose](../interfaces/RemoteFuncItem.md#dispose).
+
+It allows for initial setup, state configuration, or property modification on the instance.
+The `this` context is the `ToolFunc` instance itself.
+
+The hook may return a `Promise`. When it does, the instance is *pending* until that promise
+settles: `run()` awaits it automatically, while `runSync()` refuses to execute and asks you to
+use `run()` / `await tool.ready` instead. Use `registerAsync()` when you want registration
+itself to wait for setup to finish.
+
+NOTE: this hook is only *invoked* by the `makeToolFuncLifecycle` ability — a plain `ToolFunc`
+stores it but never calls it. Install it once, on the registry class you actually use:
+`const Tools = makeToolFuncLifecycle(ToolFunc)`.
+
+Mutating `options` inside the hook still works (including after an `await`): the touched keys
+are re-applied through the very same `initialize`/`assign` pipeline that built the instance.
+A `scope` the hook provides — through `this.scope` or through the options object — is applied
+before a string `func` is compiled, and a scope *change* rebuilds it (see
+[BaseFuncItem.scope](../interfaces/RemoteFuncItem.md#scope)).
+
+#### Parameters
+
+##### this
+
+`ToolFunc`
+
+The `ToolFunc` instance the hook is bound to.
+
+##### options?
+
+`FuncItem`
+
+The configuration options for the function.
+
+#### Returns
+
+`void` \| `Promise`\<`void`\>
+
+#### Example
+
+```ts
+const Tools = makeToolFuncLifecycle(ToolFunc);
+const myFunc = new Tools({
+  name: 'myFunc',
+  customState: 'initial',
+  setup() {
+    // `this` is the myFunc instance
+    this.customState = 'configured';
+  }
+});
+myFunc.register(); // <- setup runs here, not in the constructor
+console.log(myFunc.customState); // Outputs: 'configured'
+```
+
+#### Inherited from
+
+[`ClientFuncItem`](../interfaces/ClientFuncItem.md).[`setup`](../interfaces/ClientFuncItem.md#setup)
+
+***
+
 ### toJSON()
 
 > **toJSON**(): `any`
 
-Defined in: [property-manager.js/src/abstract.d.ts:182](https://github.com/snowyu/property-manager.js/blob/4214417b21b4740d5e51a16e79d083126265f03e/src/abstract.d.ts#L182)
+Defined in: property-manager.js/lib/abstract.d-BOda6\_iP.d.ts:182
 
 #### Returns
 
@@ -1665,7 +1883,7 @@ Returns a date converted to a string using the current locale.
 
 > **toObject**(`options?`): `any`
 
-Defined in: [property-manager.js/src/abstract.d.ts:181](https://github.com/snowyu/property-manager.js/blob/4214417b21b4740d5e51a16e79d083126265f03e/src/abstract.d.ts#L181)
+Defined in: property-manager.js/lib/abstract.d-BOda6\_iP.d.ts:181
 
 Convert the attributes to the json object
 
@@ -1701,7 +1919,7 @@ Returns a string representation of an object.
 
 > **unregister**(`options?`): `any`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:763
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:1116
 
 Removes the current `ToolFunc` instance from the static registry.
 
@@ -1739,7 +1957,7 @@ Returns the primitive value of the specified object.
 
 > **with**(`ctx`): `this`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:542
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:785
 
 Returns an isolated instance with the provided context.
 
@@ -1763,7 +1981,7 @@ An isolated ToolFunc instance.
 
 > `protected` `static` **\_acquireDependencies**(`inst`, `stack?`): `void`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:740
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:1051
 
 #### Parameters
 
@@ -1785,7 +2003,7 @@ Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:740
 
 > `protected` `static` **\_decRefCount**(`name`): `number`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:739
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:1050
 
 #### Parameters
 
@@ -1799,11 +2017,71 @@ Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:739
 
 ***
 
+### \_dependencyReleaseOrder()
+
+> `protected` `static` **\_dependencyReleaseOrder**(`inst`): `ToolFunc`[]
+
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:1072
+
+**`Internal`**
+
+The dependencies of `inst`, in the order they must be released: **reverse declaration order**.
+
+A dependency is acquired — and therefore declared — before the tools that use it, and it must
+be released after them. Reversing the acquisition order is the one convention that keeps both
+directions correct: declare a dependency before the tool that uses it, and every dependency
+outlives everything that depends on it. Declaration order is also the acquisition order, so a
+single convention covers both ends of the lifetime.
+
+#### Parameters
+
+##### inst
+
+`ToolFunc`
+
+#### Returns
+
+`ToolFunc`[]
+
+***
+
+### \_extractStack()
+
+> `protected` `static` **\_extractStack**(`options`): `Set`\<`string`\> \| `undefined`
+
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:963
+
+**`Internal`**
+
+Consumes the internal cycle-detection stack from a normalized options object.
+
+The stack (a `Set`) is a registration-call-scoped value carried internally via the
+'_stack' property (used by recursive dependency registration). It is extracted and
+removed so it never reaches instance state or serialization.
+
+#### Parameters
+
+##### options
+
+`any`
+
+The normalized options object (may be a ToolFunc instance).
+
+#### Returns
+
+`Set`\<`string`\> \| `undefined`
+
+The extracted stack, if any.
+
+***
+
 ### \_getRegistrationAction()
 
 > `protected` `static` **\_getRegistrationAction**(`name`, `override`): `"replace"` \| `"create"` \| `"shadow"` \| `"increment"`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:670
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:949
+
+**`Internal`**
 
 Analyzes the registration context and determines the appropriate action.
 
@@ -1835,7 +2113,7 @@ The determined registration action.
 
 > `protected` `static` **\_incRefCount**(`name`): `void`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:738
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:1049
 
 #### Parameters
 
@@ -1849,16 +2127,41 @@ Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:738
 
 ***
 
+### \_isStillHeld()
+
+> `protected` `static` **\_isStillHeld**(`name`): `boolean`
+
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:1060
+
+**`Internal`**
+
+Whether any tool currently registered in this layer names `name` in its `depends`.
+
+Only *live* tools are considered, so a dependency owned by a parent layer never keeps a
+locally-owned tool waiting — that tool's removal releases its own hold and stops there.
+
+#### Parameters
+
+##### name
+
+`string`
+
+#### Returns
+
+`boolean`
+
+***
+
 ### \_normalizeArguments()
 
 > `protected` `static` **\_normalizeArguments**(`name`, `options?`): `any`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:643
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:909
 
 **`Internal`**
 
 Internal helper to normalize arguments from various input patterns.
-Priority: name (arg1) > options (arg2).
+Priority: name (arg1) \> options (arg2).
 
 #### Parameters
 
@@ -1886,7 +2189,7 @@ Normalized options object.
 
 > `protected` `static` **\_normalizeRegisterArguments**(`name`, `options?`): `RegisterOptions`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:682
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:972
 
 **`Internal`**
 
@@ -1918,7 +2221,7 @@ A normalized options object ready for registration.
 
 > `static` **\_prepareContext**(`parentCtx?`, `ctx?`): `ToolFuncContext`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:535
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:776
 
 **`Internal`**
 
@@ -1961,7 +2264,34 @@ DANGER - DO NOT "OPTIMIZE" UNLESS YOU UNDERSTAND:
 
 > `protected` `static` **\_releaseDependencies**(`inst`): `void`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:741
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:1073
+
+#### Parameters
+
+##### inst
+
+`ToolFunc`
+
+#### Returns
+
+`void`
+
+***
+
+### \_releaseInstance()
+
+> `protected` `static` **\_releaseInstance**(`inst`): `void`
+
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:1084
+
+**`Internal`**
+
+Finalizes an instance that has just been physically removed from this layer.
+
+The instance's own teardown comes **before** its dependencies are released: a dependency must
+outlive everything that uses it, so a dependent's `dispose` still finds a live dependency to
+give back what its `setup` took. The lifecycle ability overrides this to drive the `dispose`
+hook — and to wait for an asynchronous teardown — between the two steps.
 
 #### Parameters
 
@@ -2151,12 +2481,21 @@ One or more source objects from which to copy properties
 
 > `static` **clear**(): `void`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:661
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:940
 
 Resets the local registry by clearing all registered items, aliases, and reference counts.
 
 In a hierarchical registry, this only clears properties "owned" by the current
 layer. Inherited items from parent registries remain visible through the prototype chain.
+
+Every tool this layer owns is released first, so its lifecycle actually runs: the tool — and
+the dependencies it solely holds — gives back whatever `setup` acquired. Swapping the tables
+alone would silently leak every one of them.
+
+Like `unregister()`, teardown is only *initiated*, never awaited: an asynchronous `dispose`
+cannot be waited for here, and since a dependency's release is chained behind its holder's, an
+asynchronous teardown is still in flight while the next tool goes down. Use `clearAsync()`
+(installed by the lifecycle ability) when the layer may hold asynchronous teardown.
 
 #### Returns
 
@@ -2168,7 +2507,7 @@ layer. Inherited items from parent registries remain visible through the prototy
 
 > `static` **connect**\<`T`\>(`this`, `apiUrl`, `options?`): `T`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:63](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/client-tools.ts#L63)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:63](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/client-tools.ts#L63)
 
 Creates a scoped version of this Service class bound to a specific API URL.
 This allows the same service definition to be used with multiple backends or protocols
@@ -2260,7 +2599,7 @@ JavaScript object that contains one or more property descriptors.
 
 > `static` **defineProperties**(`aTarget`, `aProperties`, `recreate?`): `any`
 
-Defined in: [property-manager.js/src/advance.d.ts:11](https://github.com/snowyu/property-manager.js/blob/4214417b21b4740d5e51a16e79d083126265f03e/src/advance.d.ts#L11)
+Defined in: property-manager.js/lib/index.d.ts:95
 
 Adds one or more properties to an object, and/or modifies attributes of existing properties.
 
@@ -2376,7 +2715,7 @@ Object that contains the properties and methods. This can be an object that you 
 
 > `static` **fetch**(`name`, `objParam?`, ...`args`): `Promise`\<`any`\>
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:138](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/client-tools.ts#L138)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:136](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/client-tools.ts#L136)
 
 #### Parameters
 
@@ -2538,7 +2877,7 @@ An iterable object that contains key-value entries for properties and methods.
 
 > `static` **getAllByTag**(`tagName`): `ToolFunc`[]
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:570
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:823
 
 Retrieves all registered functions that have a specific tag.
 
@@ -2562,7 +2901,7 @@ An array of matching `ToolFunc` instances.
 
 > `static` **getByTag**(`tagName`): `ToolFunc` \| `undefined`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:564
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:815
 
 Finds the first registered function that has a specific tag.
 
@@ -2584,9 +2923,9 @@ The first matching `ToolFunc` instance, or `undefined` if none is found.
 
 ### getFunc()
 
-> `static` **getFunc**(`name`): `any`
+> `static` **getFunc**(`name`): `Function` \| `undefined`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:605
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:866
 
 Retrieves a bound, runnable function reference for a registered function.
 This reference is suitable for execution with an object of named parameters.
@@ -2601,7 +2940,7 @@ The name of the function.
 
 #### Returns
 
-`any`
+`Function` \| `undefined`
 
 A bound function reference, or `undefined` if not found.
 
@@ -2611,7 +2950,7 @@ A bound function reference, or `undefined` if not found.
 
 > `static` **getFuncWithPos**(`name`): `any`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:632
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:899
 
 Retrieves a bound, runnable function reference for a registered function.
 This reference is suitable for execution with positional arguments.
@@ -2738,7 +3077,7 @@ Object to retrieve the symbols from.
 
 > `static` **getProperties**(): `PropDescriptors`
 
-Defined in: [property-manager.js/src/advance.d.ts:10](https://github.com/snowyu/property-manager.js/blob/4214417b21b4740d5e51a16e79d083126265f03e/src/advance.d.ts#L10)
+Defined in: property-manager.js/lib/index.d.ts:94
 
 get all properties descriptor include inherited.
 
@@ -2774,7 +3113,7 @@ The object that references the prototype.
 
 > `static` **hasAsyncFeature**(`feature`): `boolean`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:576
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:831
 
 Checks if any registered function has a specific asynchronous feature.
 
@@ -2898,7 +3237,7 @@ Object to test.
 
 > `static` **isolateRegistry**(`options?`): `void`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:654
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:922
 
 Isolates the current registry layer by branching off its parent using prototype shadowing.
 
@@ -2989,7 +3328,7 @@ Object that contains the properties and methods. This can be an object that you 
 
 > `static` **list**(): [`Funcs`](../interfaces/Funcs.md)
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:558
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:807
 
 Returns the complete map of all registered functions.
 
@@ -3005,7 +3344,7 @@ The map of `ToolFunc` instances.
 
 > `static` **loadFrom**(`items?`, `options?`): `Promise`\<[`Funcs`](../interfaces/Funcs.md)\>
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:100](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/client-tools.ts#L100)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:98](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/client-tools.ts#L98)
 
 Loads tool definitions from the remote server via the configured transport.
 This method populates the local `ToolFunc` registry with `ClientTools` stubs.
@@ -3034,7 +3373,7 @@ Additional options for the discovery call (e.g., timeout, apiUrl).
 
 > `static` **loadFromSync**(`items`, `apiUrl?`): `void`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:120](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/client-tools.ts#L120)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:118](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/client-tools.ts#L118)
 
 Synchronously loads tool definitions from a provided object, registering
 each one as a `ClientTools` instance.
@@ -3093,9 +3432,7 @@ Object to make non-extensible.
 
 > `static` **register**(`name`, `options`): `boolean` \| `ToolFunc`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:718
-
-**`Internal`**
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:1024
 
 Registers a `ToolFunc` instance into the registry.
 
@@ -3125,6 +3462,11 @@ The tool instance, function, or name to register.
 `RegisterOptions`
 
 Configuration or implementation for the tool.
+  The internal cycle-detection stack (a `Set`) may also be carried as `_stack` — either in this
+  options argument or in the first-arg config object (used by recursive dependency registration);
+  it is consumed and removed during normalization, never reaching the instance.
+  With the `(name, funcString, config)` form, an optional third `config` argument is accepted
+  that provides params/metadata defaults for the function-expression string.
 
 ##### Returns
 
@@ -3140,24 +3482,31 @@ or `false` if registration was ignored (e.g., ref-count increment only).
 ToolFunc.register('add', { func: (a, b) => a + b });
 
 // 2. Registering with shadowing permission in an isolated registry
-MyPluginTools.register('calc', { func: () => 2 }, { allowOverride: true });
+MyPluginTools.register('calc', { func: () => 2, allowOverride: true });
 
 // 3. Registering an existing ToolFunc instance
 const tool = new ToolFunc({ name: 'my-tool', func: () => 'ok' });
 ToolFunc.register(tool);
+
+// 4. Registering from a function-expression string (compiled at registration time)
+ToolFunc.register('add', '(a, b) => a + b');
+
+// 5. Same, with an optional config object describing params and metadata
+ToolFunc.register('add', '(a, b) => a + b', { params: [{ name: 'a' }, { name: 'b' }], description: 'Adds two numbers' });
+
+// 6. Registering a named function expression without an explicit name
+ToolFunc.register({ func: 'function greet(name) { return `Hi ${name}`; }' });
 ```
 
 ##### Throws
 
-If name is missing, or if an alias collision occurs without permission.
+`Error` If name is missing, or if an alias collision occurs without permission.
 
 #### Call Signature
 
 > `static` **register**(`func`, `options`): `boolean` \| `ToolFunc`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:719
-
-**`Internal`**
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:1025
 
 Registers a `ToolFunc` instance into the registry.
 
@@ -3185,6 +3534,11 @@ and enable clean group unregistration.
 `RegisterOptions`
 
 Configuration or implementation for the tool.
+  The internal cycle-detection stack (a `Set`) may also be carried as `_stack` — either in this
+  options argument or in the first-arg config object (used by recursive dependency registration);
+  it is consumed and removed during normalization, never reaching the instance.
+  With the `(name, funcString, config)` form, an optional third `config` argument is accepted
+  that provides params/metadata defaults for the function-expression string.
 
 ##### Returns
 
@@ -3200,24 +3554,109 @@ or `false` if registration was ignored (e.g., ref-count increment only).
 ToolFunc.register('add', { func: (a, b) => a + b });
 
 // 2. Registering with shadowing permission in an isolated registry
-MyPluginTools.register('calc', { func: () => 2 }, { allowOverride: true });
+MyPluginTools.register('calc', { func: () => 2, allowOverride: true });
 
 // 3. Registering an existing ToolFunc instance
 const tool = new ToolFunc({ name: 'my-tool', func: () => 'ok' });
 ToolFunc.register(tool);
+
+// 4. Registering from a function-expression string (compiled at registration time)
+ToolFunc.register('add', '(a, b) => a + b');
+
+// 5. Same, with an optional config object describing params and metadata
+ToolFunc.register('add', '(a, b) => a + b', { params: [{ name: 'a' }, { name: 'b' }], description: 'Adds two numbers' });
+
+// 6. Registering a named function expression without an explicit name
+ToolFunc.register({ func: 'function greet(name) { return `Hi ${name}`; }' });
 ```
 
 ##### Throws
 
-If name is missing, or if an alias collision occurs without permission.
+`Error` If name is missing, or if an alias collision occurs without permission.
 
 #### Call Signature
 
-> `static` **register**(`name`, `options?`, `_stack?`): `boolean` \| `ToolFunc`
+> `static` **register**(`name`, `func`, `options?`): `boolean` \| `ToolFunc`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:720
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:1026
 
-**`Internal`**
+Registers a `ToolFunc` instance into the registry.
+
+This method supports multiple overloads and handles hierarchical registration,
+alias collision protection, and automatic dependency registration with cycle detection.
+
+### Hierarchical Behavior:
+- In an isolated registry, items are stored locally, shadowing parent items with the same name.
+- Alias consistency is enforced across the hierarchy: registering a colliding alias throws an error
+  unless `allowOverride.alias` is explicitly granted.
+
+### Circular Dependencies:
+Automatically detects and manages circular dependency chains using an internal stack.
+Reference counts are precisely managed (count=1 for back-edges) to prevent memory leaks
+and enable clean group unregistration.
+
+##### Parameters
+
+###### name
+
+`string`
+
+The tool instance, function, or name to register.
+
+###### func
+
+`string`
+
+###### options?
+
+`RegisterOptions`
+
+Configuration or implementation for the tool.
+  The internal cycle-detection stack (a `Set`) may also be carried as `_stack` — either in this
+  options argument or in the first-arg config object (used by recursive dependency registration);
+  it is consumed and removed during normalization, never reaching the instance.
+  With the `(name, funcString, config)` form, an optional third `config` argument is accepted
+  that provides params/metadata defaults for the function-expression string.
+
+##### Returns
+
+`boolean` \| `ToolFunc`
+
+The registered ToolFunc instance on success (creation, shadowing, or override),
+or `false` if registration was ignored (e.g., ref-count increment only).
+
+##### Example
+
+```ts
+// 1. Registering with explicit name and function
+ToolFunc.register('add', { func: (a, b) => a + b });
+
+// 2. Registering with shadowing permission in an isolated registry
+MyPluginTools.register('calc', { func: () => 2, allowOverride: true });
+
+// 3. Registering an existing ToolFunc instance
+const tool = new ToolFunc({ name: 'my-tool', func: () => 'ok' });
+ToolFunc.register(tool);
+
+// 4. Registering from a function-expression string (compiled at registration time)
+ToolFunc.register('add', '(a, b) => a + b');
+
+// 5. Same, with an optional config object describing params and metadata
+ToolFunc.register('add', '(a, b) => a + b', { params: [{ name: 'a' }, { name: 'b' }], description: 'Adds two numbers' });
+
+// 6. Registering a named function expression without an explicit name
+ToolFunc.register({ func: 'function greet(name) { return `Hi ${name}`; }' });
+```
+
+##### Throws
+
+`Error` If name is missing, or if an alias collision occurs without permission.
+
+#### Call Signature
+
+> `static` **register**(`name`, `options?`): `boolean` \| `ToolFunc`
+
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:1027
 
 Registers a `ToolFunc` instance into the registry.
 
@@ -3247,12 +3686,11 @@ The tool instance, function, or name to register.
 `RegisterOptions`
 
 Configuration or implementation for the tool.
-
-###### \_stack?
-
-`Set`\<`string`\>
-
-Used for cycle detection during recursive registration.
+  The internal cycle-detection stack (a `Set`) may also be carried as `_stack` — either in this
+  options argument or in the first-arg config object (used by recursive dependency registration);
+  it is consumed and removed during normalization, never reaching the instance.
+  With the `(name, funcString, config)` form, an optional third `config` argument is accepted
+  that provides params/metadata defaults for the function-expression string.
 
 ##### Returns
 
@@ -3268,16 +3706,25 @@ or `false` if registration was ignored (e.g., ref-count increment only).
 ToolFunc.register('add', { func: (a, b) => a + b });
 
 // 2. Registering with shadowing permission in an isolated registry
-MyPluginTools.register('calc', { func: () => 2 }, { allowOverride: true });
+MyPluginTools.register('calc', { func: () => 2, allowOverride: true });
 
 // 3. Registering an existing ToolFunc instance
 const tool = new ToolFunc({ name: 'my-tool', func: () => 'ok' });
 ToolFunc.register(tool);
+
+// 4. Registering from a function-expression string (compiled at registration time)
+ToolFunc.register('add', '(a, b) => a + b');
+
+// 5. Same, with an optional config object describing params and metadata
+ToolFunc.register('add', '(a, b) => a + b', { params: [{ name: 'a' }, { name: 'b' }], description: 'Adds two numbers' });
+
+// 6. Registering a named function expression without an explicit name
+ToolFunc.register({ func: 'function greet(name) { return `Hi ${name}`; }' });
 ```
 
 ##### Throws
 
-If name is missing, or if an alias collision occurs without permission.
+`Error` If name is missing, or if an alias collision occurs without permission.
 
 ***
 
@@ -3285,7 +3732,7 @@ If name is missing, or if an alias collision occurs without permission.
 
 > `static` **run**(`name`, `params?`, `ctx?`): `any`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:589
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:846
 
 Asynchronously executes a registered function by name with named parameters.
 
@@ -3320,7 +3767,7 @@ A promise or the direct result of the function's execution.
 
 #### Throws
 
-If the function with the given name is not found.
+`NotFoundError` If the function with the given name is not found.
 
 ***
 
@@ -3328,7 +3775,7 @@ If the function with the given name is not found.
 
 > `static` **runSync**(`name`, `params?`, `ctx?`): `any`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:598
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:857
 
 Synchronously executes a registered function by name with named parameters.
 
@@ -3360,7 +3807,7 @@ The result of the function's execution.
 
 #### Throws
 
-If the function with the given name is not found.
+`NotFoundError` If the function with the given name is not found.
 
 ***
 
@@ -3368,7 +3815,7 @@ If the function with the given name is not found.
 
 > `static` **runWithPos**(`name`, ...`params`): `any`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:617
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:880
 
 Asynchronously executes a function using positional arguments.
 
@@ -3397,7 +3844,7 @@ A promise or the direct result of the function's execution.
 
 #### Throws
 
-If the function with the given name is not found.
+`NotFoundError` If the function with the given name is not found.
 
 ***
 
@@ -3405,7 +3852,7 @@ If the function with the given name is not found.
 
 > `static` **runWithPosSync**(`name`, ...`params`): `any`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:625
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:890
 
 Synchronously executes a function using positional arguments.
 
@@ -3431,7 +3878,7 @@ The result of the function's execution.
 
 #### Throws
 
-If the function with the given name is not found.
+`NotFoundError` If the function with the given name is not found.
 
 ***
 
@@ -3495,9 +3942,9 @@ The value of the new prototype or null.
 
 > `static` **setTransport**(`transport`): `void`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:76](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/client-tools.ts#L76)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/client-tools.ts:75](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/client-tools.ts#L75)
 
-Injects the client-side transport implementation.
+Injects the client-side transport implementation.    *
 
 #### Parameters
 
@@ -3513,7 +3960,7 @@ The transport instance to use.
 
 #### Deprecated
 
-Use RpcTransportManager.instance.register(transport) or manager.getClient(apiUrl)
+Use RpcClientTransportManager.instance.register(transport) or manager.getClient(apiUrl)
 
 ***
 
@@ -3521,7 +3968,7 @@ Use RpcTransportManager.instance.register(transport) or manager.getClient(apiUrl
 
 > `static` **unregister**(`target`, `options?`): `ToolFunc` \| `undefined`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:737
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:1048
 
 Unregisters a tool function implementation from the registry by its name, alias, or instance.
 
@@ -3540,13 +3987,15 @@ The name, alias, or implementation instance.
 
 `boolean` \| `UnregisterOptions`
 
-Options or a simple 'force' boolean flag.
-
-`boolean`
-
-***
-
-`UnregisterOptions`
+Unregistration options, or a boolean shorthand for `{ force: true }`.
+  Recognized fields:
+  - `force`: If true, removes the tool immediately, ignoring the reference count
+    (default: `false`).
+  - `decrement`: How many registration holds to release — `'once'` (default) or `'all'`.
+  - `scope`: Hierarchical search scope —
+    `'local'` (default) only removes a tool owned by the current registry layer;
+    `'inherited'` searches up and removes the first match found in parents;
+    `'all'` removes every occurrence in the whole prototype chain.
 
 #### Returns
 
@@ -3608,7 +4057,7 @@ Object that contains the properties and methods. This can be an object that you 
 
 > `static` **with**(`ctx`): *typeof* `ToolFunc`
 
-Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:515
+Defined in: @isdk/ai-tools/packages/tool-func/dist/index.d.ts:756
 
 Returns a static proxy with the provided context.
 

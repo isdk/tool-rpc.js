@@ -6,7 +6,7 @@
 
 # Interface: HttpClientToolTransportOptions
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/http-client.ts:5](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/http-client.ts#L5)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/http-client.ts:5](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/http-client.ts#L5)
 
 ## Extends
 
@@ -22,7 +22,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/http-client.ts:5](h
 
 > `optional` **apiUrl?**: `string`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:11](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/base.ts#L11)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:11](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/base.ts#L11)
 
 #### Inherited from
 
@@ -32,9 +32,9 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:11](https:/
 
 ### manager?
 
-> `optional` **manager?**: [`RpcTransportManager`](../classes/RpcTransportManager.md)
+> `optional` **manager?**: `RpcClientTransportManager`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:10](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/base.ts#L10)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:10](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/base.ts#L10)
 
 #### Inherited from
 

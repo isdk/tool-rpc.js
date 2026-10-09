@@ -6,7 +6,7 @@
 
 # Interface: ToolRpcResponse
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:115](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L115)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:115](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L115)
 
 调度层向传输层的归一化结果对象
 
@@ -16,7 +16,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:115](http
 
 > `optional` **data?**: `any`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:118](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L118)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:118](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L118)
 
 ***
 
@@ -24,7 +24,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:118](http
 
 > `optional` **error?**: `object`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:120](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L120)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:120](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L120)
 
 #### code
 
@@ -56,7 +56,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:120](http
 
 > `optional` **headers?**: `Record`\<`string`, `string` \| `number` \| `string`[] \| `undefined`\>
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:119](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L119)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:119](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L119)
 
 ***
 
@@ -64,7 +64,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:119](http
 
 > `optional` **raw?**: `any`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:129](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L129)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:129](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L129)
 
 ***
 
@@ -72,6 +72,6 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:129](http
 
 > **status**: `number`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:117](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L117)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:117](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L117)
 
 响应状态码 (物理协议映射值，如 200, 404, 500)

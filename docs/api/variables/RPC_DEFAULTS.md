@@ -8,7 +8,7 @@
 
 > `const` **RPC\_DEFAULTS**: `object`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:32](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L32)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:32](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L32)
 
 RPC 协议默认配置值
 

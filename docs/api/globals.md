@@ -38,6 +38,7 @@
 
 ## Interfaces
 
+- [BindOptions](interfaces/BindOptions.md)
 - [ClientFuncItem](interfaces/ClientFuncItem.md)
 - [ClientToolTransportOptions](interfaces/ClientToolTransportOptions.md)
 - [Funcs](interfaces/Funcs.md)
@@ -48,9 +49,12 @@
 - [IToolTransport](interfaces/IToolTransport.md)
 - [MailboxClientTransportOptions](interfaces/MailboxClientTransportOptions.md)
 - [MailboxServerTransportOptions](interfaces/MailboxServerTransportOptions.md)
+- [PhysicalUri](interfaces/PhysicalUri.md)
 - [RemoteFuncItem](interfaces/RemoteFuncItem.md)
 - [ResClientFuncParams](interfaces/ResClientFuncParams.md)
 - [ResServerFuncParams](interfaces/ResServerFuncParams.md)
+- [RouteClaim](interfaces/RouteClaim.md)
+- [RouteClaimOptions](interfaces/RouteClaimOptions.md)
 - [RpcDeadlineHooks](interfaces/RpcDeadlineHooks.md)
 - [RpcMethodsClientFuncParams](interfaces/RpcMethodsClientFuncParams.md)
 - [RpcMethodsServerFuncParams](interfaces/RpcMethodsServerFuncParams.md)
@@ -66,6 +70,7 @@
 ## Type Aliases
 
 - [ActionName](type-aliases/ActionName.md)
+- [RouteRemountMode](type-aliases/RouteRemountMode.md)
 - [RpcMethodHandler](type-aliases/RpcMethodHandler.md)
 - [RpcTaskRetention](type-aliases/RpcTaskRetention.md)
 
@@ -79,3 +84,16 @@
 - [RpcMethodsClientToolSchema](variables/RpcMethodsClientToolSchema.md)
 - [RpcMethodsServerToolSchema](variables/RpcMethodsServerToolSchema.md)
 - [ServerToolFuncSchema](variables/ServerToolFuncSchema.md)
+- [WILDCARD\_HOST](variables/WILDCARD_HOST.md)
+
+## Functions
+
+- [canonicalPhysicalUri](functions/canonicalPhysicalUri.md)
+- [hasUriScheme](functions/hasUriScheme.md)
+- [parsePhysicalUri](functions/parsePhysicalUri.md)
+- [physicalUriFromBind](functions/physicalUriFromBind.md)
+- [samePhysicalBase](functions/samePhysicalBase.md)
+- [unixSocketPath](functions/unixSocketPath.md)
+- [unixSocketUri](functions/unixSocketUri.md)
+- [withBindOptions](functions/withBindOptions.md)
+- [withWildcardHost](functions/withWildcardHost.md)

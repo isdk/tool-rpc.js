@@ -6,7 +6,7 @@
 
 # Class: HttpClientToolTransport
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/http-client.ts:8](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/http-client.ts#L8)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/http-client.ts:8](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/http-client.ts#L8)
 
 所有传输协议 (Client/Server) 统一的基础能力接口。
 
@@ -20,7 +20,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/http-client.ts:8](h
 
 > **new HttpClientToolTransport**(`apiUrl`, `options?`): `HttpClientToolTransport`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/http-client.ts:10](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/http-client.ts#L10)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/http-client.ts:10](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/http-client.ts#L10)
 
 #### Parameters
 
@@ -46,7 +46,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/http-client.ts:10](
 
 > **apiUrl**: `string`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:17](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/client.ts#L17)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:17](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/client.ts#L17)
 
 调用的基准 API 地点（URI）
 必须能够支持处理如 scheme, hostname, port, 乃至 auth (user:pass)。
@@ -60,9 +60,9 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:17](https
 
 ### manager
 
-> **manager**: [`RpcTransportManager`](RpcTransportManager.md)
+> **manager**: `RpcClientTransportManager`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:57](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/base.ts#L57)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:57](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/base.ts#L57)
 
 所属管理器引用
 
@@ -76,7 +76,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:57](https:/
 
 > `optional` **options?**: [`ClientToolTransportOptions`](../interfaces/ClientToolTransportOptions.md)
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:18](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/client.ts#L18)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:18](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/client.ts#L18)
 
 具体协议额外的配置或选项扩展
 
@@ -92,7 +92,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:18](https
 
 > **get** **apiRoot**(): `string`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:27](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/client.ts#L27)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:27](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/client.ts#L27)
 
 ##### Deprecated
 
@@ -106,7 +106,7 @@ use apiUrl instead
 
 > **set** **apiRoot**(`val`): `void`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:29](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/client.ts#L29)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:29](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/client.ts#L29)
 
 ##### Deprecated
 
@@ -132,7 +132,7 @@ use apiUrl instead
 
 > **\_fetch**(`name`, `args?`, `act?`, `id?`, `fetchOptions?`): `Promise`\<`Response` \| \{ `headers`: \{\[`k`: `string`\]: `string`; \}; `status`: `number`; \}\>
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/http-client.ts:14](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/http-client.ts#L14)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/http-client.ts:14](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/http-client.ts#L14)
 
 #### Parameters
 
@@ -170,7 +170,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/http-client.ts:14](
 
 > **fetch**(`name`, `args?`, `act?`, `subName?`, `fetchOptions?`, `toolTimeout?`): `Promise`\<`any`\>
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:49](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/client.ts#L49)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:49](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/client.ts#L49)
 
 #### Parameters
 
@@ -212,7 +212,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:49](https
 
 > **loadApis**(`options?`): `Promise`\<[`Funcs`](../interfaces/Funcs.md)\>
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:41](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/client.ts#L41)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:41](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/client.ts#L41)
 
 #### Parameters
 
@@ -234,7 +234,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:41](https
 
 > **mount**(`toolsClass`): `void`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:35](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/client.ts#L35)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:35](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/client.ts#L35)
 
 Mounts the transport to a tools class, setting the default apiUrl for that class.
 
@@ -260,7 +260,7 @@ The tools class (e.g., ClientTools) to mount to.
 
 > **pollTaskStatus**(`taskId`, `parentFetchOptions?`): `Promise`\<`any`\>
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:196](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/client.ts#L196)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:196](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/client.ts#L196)
 
 模块化复用的轮询探查接口
 
@@ -288,7 +288,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:196](http
 
 > **setApiUrl**(`apiUrl`): `void`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:67](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/base.ts#L67)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:67](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/base.ts#L67)
 
 #### Parameters
 
@@ -310,7 +310,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:67](https:/
 
 > **toObject**(`res`, `args?`): `Promise`\<`any`\>
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/http-client.ts:174](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/http-client.ts#L174)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/http-client.ts:198](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/http-client.ts#L198)
 
 #### Parameters
 

@@ -6,7 +6,7 @@
 
 # Class: MailboxClientTransport
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:24](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/mailbox-client.ts#L24)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:25](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/mailbox-client.ts#L25)
 
 所有传输协议 (Client/Server) 统一的基础能力接口。
 
@@ -20,7 +20,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:2
 
 > **new MailboxClientTransport**(`options`): `MailboxClientTransport`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:33](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/mailbox-client.ts#L33)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:34](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/mailbox-client.ts#L34)
 
 #### Parameters
 
@@ -42,7 +42,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:3
 
 > **apiUrl**: `string`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:17](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/client.ts#L17)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:17](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/client.ts#L17)
 
 调用的基准 API 地点（URI）
 必须能够支持处理如 scheme, hostname, port, 乃至 auth (user:pass)。
@@ -58,7 +58,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:17](https
 
 > `protected` **clientAddress**: `string`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:27](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/mailbox-client.ts#L27)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:28](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/mailbox-client.ts#L28)
 
 ***
 
@@ -66,7 +66,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:2
 
 > `protected` **isInternalMailbox**: `boolean` = `false`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:31](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/mailbox-client.ts#L31)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:32](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/mailbox-client.ts#L32)
 
 ***
 
@@ -74,15 +74,15 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:3
 
 > `protected` **mailbox**: `Mailbox`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:25](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/mailbox-client.ts#L25)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:26](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/mailbox-client.ts#L26)
 
 ***
 
 ### manager
 
-> **manager**: [`RpcTransportManager`](RpcTransportManager.md)
+> **manager**: `RpcClientTransportManager`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:57](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/base.ts#L57)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:57](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/base.ts#L57)
 
 所属管理器引用
 
@@ -96,7 +96,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:57](https:/
 
 > `optional` **options?**: [`ClientToolTransportOptions`](../interfaces/ClientToolTransportOptions.md)
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:18](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/client.ts#L18)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:18](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/client.ts#L18)
 
 具体协议额外的配置或选项扩展
 
@@ -110,7 +110,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:18](https
 
 > `protected` **pendingRequests**: `Map`\<`string`, `PendingRequest`\>
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:28](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/mailbox-client.ts#L28)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:29](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/mailbox-client.ts#L29)
 
 ***
 
@@ -118,7 +118,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:2
 
 > `protected` **serverAddress**: `string`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:26](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/mailbox-client.ts#L26)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:27](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/mailbox-client.ts#L27)
 
 ***
 
@@ -126,7 +126,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:2
 
 > `protected` **subscription**: `any`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:29](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/mailbox-client.ts#L29)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:30](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/mailbox-client.ts#L30)
 
 ***
 
@@ -134,7 +134,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:2
 
 > `protected` **timeout**: `any`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:30](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/mailbox-client.ts#L30)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:31](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/mailbox-client.ts#L31)
 
 ## Accessors
 
@@ -144,7 +144,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:3
 
 > **get** **apiRoot**(): `string`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:27](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/client.ts#L27)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:27](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/client.ts#L27)
 
 ##### Deprecated
 
@@ -158,7 +158,7 @@ use apiUrl instead
 
 > **set** **apiRoot**(`val`): `void`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:29](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/client.ts#L29)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:29](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/client.ts#L29)
 
 ##### Deprecated
 
@@ -184,7 +184,7 @@ use apiUrl instead
 
 > **\_fetch**(`name`, `args?`, `act?`, `id?`, `fetchOptions?`): `Promise`\<`unknown`\>
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:91](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/mailbox-client.ts#L91)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:92](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/mailbox-client.ts#L92)
 
 #### Parameters
 
@@ -222,7 +222,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:9
 
 > **fetch**(`name`, `args?`, `act?`, `subName?`, `fetchOptions?`, `toolTimeout?`): `Promise`\<`any`\>
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:49](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/client.ts#L49)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:49](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/client.ts#L49)
 
 #### Parameters
 
@@ -264,7 +264,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:49](https
 
 > **loadApis**(`options?`): `Promise`\<[`Funcs`](../interfaces/Funcs.md)\>
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:41](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/client.ts#L41)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:41](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/client.ts#L41)
 
 #### Parameters
 
@@ -286,7 +286,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:41](https
 
 > **mount**(`toolsClass`): `void`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:35](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/client.ts#L35)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:35](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/client.ts#L35)
 
 Mounts the transport to a tools class, setting the default apiUrl for that class.
 
@@ -312,7 +312,7 @@ The tools class (e.g., ClientTools) to mount to.
 
 > `protected` **onResponse**(`message`): `void`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:60](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/mailbox-client.ts#L60)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:61](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/mailbox-client.ts#L61)
 
 #### Parameters
 
@@ -330,7 +330,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:6
 
 > **pollTaskStatus**(`taskId`, `parentFetchOptions?`): `Promise`\<`any`\>
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:196](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/client.ts#L196)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:196](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/client.ts#L196)
 
 模块化复用的轮询探查接口
 
@@ -358,7 +358,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:196](http
 
 > **setApiUrl**(`apiUrl`): `void`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:67](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/base.ts#L67)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:67](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/base.ts#L67)
 
 #### Parameters
 
@@ -380,7 +380,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:67](https:/
 
 > **start**(): `Promise`\<`void`\>
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:53](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/mailbox-client.ts#L53)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:54](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/mailbox-client.ts#L54)
 
 #### Returns
 
@@ -392,7 +392,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:5
 
 > **stop**(): `Promise`\<`void`\>
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:161](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/mailbox-client.ts#L161)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:162](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/mailbox-client.ts#L162)
 
 #### Returns
 
@@ -404,7 +404,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:1
 
 > **toObject**(`res`, `args?`): `Promise`\<`any`\>
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:156](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/mailbox-client.ts#L156)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:157](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/mailbox-client.ts#L157)
 
 #### Parameters
 

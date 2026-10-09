@@ -6,7 +6,7 @@
 
 # Interface: MailboxClientTransportOptions
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:6](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/mailbox-client.ts#L6)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:7](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/mailbox-client.ts#L7)
 
 ## Extends
 
@@ -22,7 +22,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:6
 
 > `optional` **apiUrl?**: `string`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:11](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/base.ts#L11)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:11](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/base.ts#L11)
 
 #### Inherited from
 
@@ -34,7 +34,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:11](https:/
 
 > `optional` **clientAddress?**: `string`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:10](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/mailbox-client.ts#L10)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:11](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/mailbox-client.ts#L11)
 
 ***
 
@@ -42,15 +42,15 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:1
 
 > `optional` **mailbox?**: `Mailbox`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:7](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/mailbox-client.ts#L7)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:8](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/mailbox-client.ts#L8)
 
 ***
 
 ### manager?
 
-> `optional` **manager?**: [`RpcTransportManager`](../classes/RpcTransportManager.md)
+> `optional` **manager?**: `RpcClientTransportManager`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:10](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/base.ts#L10)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:10](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/base.ts#L10)
 
 #### Inherited from
 
@@ -62,7 +62,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:10](https:/
 
 > `optional` **serverAddress?**: `string`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:9](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/mailbox-client.ts#L9)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:10](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/mailbox-client.ts#L10)
 
 #### Deprecated
 
@@ -74,4 +74,4 @@ use apiUrl instead
 
 > `optional` **timeout?**: `number` \| \{ `keepAliveOnTimeout?`: `boolean`; `streamIdleTimeout?`: `number`; `value`: `number`; \}
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:11](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/mailbox-client.ts#L11)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-client.ts:12](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/mailbox-client.ts#L12)

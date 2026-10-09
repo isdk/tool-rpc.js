@@ -6,7 +6,7 @@
 
 # Enumeration: RpcStatusCode
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:75](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L75)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:75](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L75)
 
 状态码语义对照表 (物理/逻辑响应状态码)
 
@@ -16,7 +16,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:75](https
 
 > **BAD\_REQUEST**: `400`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:78](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L78)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:78](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L78)
 
 ***
 
@@ -24,7 +24,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:78](https
 
 > **CONFLICT**: `409`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:80](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L80)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:80](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L80)
 
 ***
 
@@ -32,7 +32,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:80](https
 
 > **GATEWAY\_TIMEOUT**: `504`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:83](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L83)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:83](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L83)
 
 ***
 
@@ -40,7 +40,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:83](https
 
 > **INTERNAL\_ERROR**: `500`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:82](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L82)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:82](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L82)
 
 ***
 
@@ -48,7 +48,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:82](https
 
 > **NOT\_FOUND**: `404`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:79](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L79)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:79](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L79)
 
 ***
 
@@ -56,7 +56,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:79](https
 
 > **OK**: `200`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:76](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L76)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:76](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L76)
 
 ***
 
@@ -64,7 +64,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:76](https
 
 > **PROCESSING**: `102`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:77](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L77)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:77](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L77)
 
 ***
 
@@ -72,4 +72,4 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:77](https
 
 > **TERMINATED**: `408`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:81](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L81)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:81](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L81)

@@ -6,7 +6,7 @@
 
 # Class: RpcServerDispatcher
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/dispatcher.ts:23](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/dispatcher.ts#L23)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/dispatcher.ts:23](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/dispatcher.ts#L23)
 
 集中式 RPC 请求分发器。
 负责将标准化的 ToolRpcRequest 路由到注册表中的工具函数。
@@ -17,7 +17,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/dispatcher.ts:23](h
 
 > **new RpcServerDispatcher**(`options?`): `RpcServerDispatcher`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/dispatcher.ts:40](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/dispatcher.ts#L40)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/dispatcher.ts:40](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/dispatcher.ts#L40)
 
 #### Parameters
 
@@ -57,7 +57,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/dispatcher.ts:40](h
 
 > **compat**: `RpcCompatOptions` = `DEFAULT_COMPAT_OPTIONS`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/dispatcher.ts:34](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/dispatcher.ts#L34)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/dispatcher.ts:34](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/dispatcher.ts#L34)
 
 兼容性配置
 
@@ -67,7 +67,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/dispatcher.ts:34](h
 
 > **globalTimeout**: `number` = `30000`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/dispatcher.ts:32](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/dispatcher.ts#L32)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/dispatcher.ts:32](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/dispatcher.ts#L32)
 
 默认全局超时时间 (ms)
 
@@ -77,7 +77,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/dispatcher.ts:32](h
 
 > **maxTaskRuntimeMs**: `number` = `3600000`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/dispatcher.ts:38](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/dispatcher.ts#L38)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/dispatcher.ts:38](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/dispatcher.ts#L38)
 
 全局任务执行硬死线 (ms)，防止后台任务永久运行。默认 1 小时
 
@@ -87,7 +87,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/dispatcher.ts:38](h
 
 > **registry**: `any`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/dispatcher.ts:26](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/dispatcher.ts#L26)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/dispatcher.ts:26](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/dispatcher.ts#L26)
 
 工具/函数注册表，通常挂载 ServerTools
 
@@ -97,7 +97,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/dispatcher.ts:26](h
 
 > **terminationGraceMs**: `number` = `RPC_DEFAULTS.TERMINATION_GRACE_MS`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/dispatcher.ts:36](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/dispatcher.ts#L36)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/dispatcher.ts:36](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/dispatcher.ts#L36)
 
 硬超时后的清理宽限期 (ms)
 
@@ -107,7 +107,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/dispatcher.ts:36](h
 
 > **tracker**: [`RpcActiveTaskTracker`](RpcActiveTaskTracker.md)
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/dispatcher.ts:30](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/dispatcher.ts#L30)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/dispatcher.ts:30](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/dispatcher.ts#L30)
 
 活动任务跟踪器，用于长任务状态管理
 
@@ -119,7 +119,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/dispatcher.ts:30](h
 
 > **get** `static` **instance**(): `RpcServerDispatcher`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/dispatcher.ts:59](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/dispatcher.ts#L59)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/dispatcher.ts:59](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/dispatcher.ts#L59)
 
 ##### Returns
 
@@ -131,7 +131,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/dispatcher.ts:59](h
 
 > **dispatch**(`request`, `registry?`): `Promise`\<[`ToolRpcResponse`](../interfaces/ToolRpcResponse.md)\>
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/dispatcher.ts:69](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/dispatcher.ts#L69)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/dispatcher.ts:69](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/dispatcher.ts#L69)
 
 分发请求。
 
@@ -159,7 +159,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/dispatcher.ts:69](h
 
 > **handleError**(`request`, `err`): [`ToolRpcResponse`](../interfaces/ToolRpcResponse.md)
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/dispatcher.ts:308](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/dispatcher.ts#L308)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/dispatcher.ts:308](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/dispatcher.ts#L308)
 
 #### Parameters
 

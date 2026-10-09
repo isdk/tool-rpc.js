@@ -6,7 +6,7 @@
 
 # Interface: MailboxServerTransportOptions
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-server.ts:5](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/mailbox-server.ts#L5)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-server.ts:5](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/mailbox-server.ts#L5)
 
 ## Extends
 
@@ -22,7 +22,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-server.ts:5
 
 > `optional` **address?**: `string`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-server.ts:8](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/mailbox-server.ts#L8)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-server.ts:8](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/mailbox-server.ts#L8)
 
 #### Deprecated
 
@@ -34,7 +34,7 @@ use apiUrl instead
 
 > `optional` **apiUrl?**: `string`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:11](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/base.ts#L11)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:11](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/base.ts#L11)
 
 #### Inherited from
 
@@ -46,7 +46,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:11](https:/
 
 > `optional` **dispatcher?**: [`RpcServerDispatcher`](../classes/RpcServerDispatcher.md)
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:7](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/server.ts#L7)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:9](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/server.ts#L9)
 
 #### Inherited from
 
@@ -58,15 +58,15 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:7](https:
 
 > `optional` **mailbox?**: `Mailbox`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-server.ts:6](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/mailbox-server.ts#L6)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-server.ts:6](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/mailbox-server.ts#L6)
 
 ***
 
 ### manager?
 
-> `optional` **manager?**: [`RpcTransportManager`](../classes/RpcTransportManager.md)
+> `optional` **manager?**: `RpcClientTransportManager`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:10](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/base.ts#L10)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:10](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/base.ts#L10)
 
 #### Inherited from
 
@@ -78,7 +78,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:10](https:/
 
 > `optional` **mode?**: `"push"` \| `"pull"`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-server.ts:9](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/mailbox-server.ts#L9)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-server.ts:9](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/mailbox-server.ts#L9)
 
 ***
 
@@ -86,4 +86,4 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-server.ts:9
 
 > `optional` **pullInterval?**: `number`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-server.ts:10](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/mailbox-server.ts#L10)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/mailbox-server.ts:10](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/mailbox-server.ts#L10)

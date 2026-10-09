@@ -6,7 +6,7 @@
 
 # Interface: IClientToolTransport
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:10](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/client.ts#L10)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:10](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/client.ts#L10)
 
 所有传输协议 (Client/Server) 统一的基础能力接口。
 
@@ -24,7 +24,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:10](https
 
 > **apiUrl**: `string`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:29](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/base.ts#L29)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:29](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/base.ts#L29)
 
 调用的基准 API 地点（URI）
 必须能够支持处理如 scheme, hostname, port, 乃至 auth (user:pass)。
@@ -38,9 +38,9 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:29](https:/
 
 ### manager?
 
-> `optional` **manager?**: [`RpcTransportManager`](../classes/RpcTransportManager.md)
+> `optional` **manager?**: `RpcClientTransportManager`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:22](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/base.ts#L22)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:22](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/base.ts#L22)
 
 所属管理器引用
 
@@ -54,7 +54,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:22](https:/
 
 > `optional` **options?**: [`ToolTransportOptions`](ToolTransportOptions.md)
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:34](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/base.ts#L34)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:34](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/base.ts#L34)
 
 具体协议额外的配置或选项扩展
 
@@ -68,7 +68,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:34](https:/
 
 > `optional` **close**(): `void` \| `Promise`\<`void`\>
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:49](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/base.ts#L49)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:49](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/base.ts#L49)
 
 物理层关闭句柄 (可选)
 
@@ -86,7 +86,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:49](https:/
 
 > **fetch**(`name`, `args?`, `act?`, `subName?`, `options?`, `toolTimeout?`): `any`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:12](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/client.ts#L12)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:12](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/client.ts#L12)
 
 #### Parameters
 
@@ -124,7 +124,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:12](https
 
 > **loadApis**(`options?`): `Promise`\<[`Funcs`](Funcs.md)\>
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:11](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/client.ts#L11)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:11](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/client.ts#L11)
 
 #### Parameters
 
@@ -142,7 +142,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/client.ts:11](https
 
 > `optional` **start**(`options?`): `Promise`\<`any`\>
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:39](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/base.ts#L39)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:39](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/base.ts#L39)
 
 启动服务 (仅服务端有效)
 
@@ -166,7 +166,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:39](https:/
 
 > `optional` **stop**(`force?`): `Promise`\<`void`\>
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:44](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/base.ts#L44)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:44](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/base.ts#L44)
 
 停止服务或回收资源
 

@@ -6,7 +6,7 @@
 
 # Interface: ToolRpcRequest
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:89](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L89)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:89](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L89)
 
 传输层到调度层的归一化 RPC 请求封包
 
@@ -16,7 +16,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:89](https
 
 > `optional` **act?**: `string`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:95](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L95)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:95](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L95)
 
 (可选) 动作
 
@@ -26,7 +26,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:95](https
 
 > **apiUrl**: `string`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:91](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L91)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:91](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L91)
 
 完整的寻址路径
 
@@ -36,7 +36,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:91](https
 
 > `optional` **clientId?**: `string`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:101](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L101)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:101](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L101)
 
 客户端标识 (可选，用于 session 识别)
 
@@ -46,7 +46,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:101](http
 
 > **headers**: `Record`\<`string`, `string` \| `number` \| `string`[] \| `undefined`\>
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:107](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L107)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:107](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L107)
 
 全量归一化 Header
 
@@ -56,7 +56,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:107](http
 
 > **params**: `any`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:105](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L105)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:105](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L105)
 
 已解构的业务参数负载
 
@@ -66,7 +66,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:105](http
 
 > `optional` **raw?**: `any`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:109](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L109)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:109](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L109)
 
 逃生口
 
@@ -76,7 +76,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:109](http
 
 > **requestId**: `string`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:103](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L103)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:103](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L103)
 
 本次请求唯一标识
 
@@ -86,7 +86,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:103](http
 
 > `optional` **resId?**: `string`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:97](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L97)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:97](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L97)
 
 (可选) 资源 ID
 
@@ -96,7 +96,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:97](https
 
 > **toolId**: `string`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:93](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L93)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:93](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L93)
 
 工具/函数标识名
 
@@ -106,6 +106,6 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:93](https
 
 > `optional` **traceId?**: `string`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:99](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/models.ts#L99)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/models.ts:99](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/models.ts#L99)
 
 追踪 ID

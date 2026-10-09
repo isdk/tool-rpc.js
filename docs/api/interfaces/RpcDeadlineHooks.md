@@ -6,7 +6,7 @@
 
 # Interface: RpcDeadlineHooks
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/deadline-guard.ts:3](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/deadline-guard.ts#L3)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/deadline-guard.ts:3](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/deadline-guard.ts#L3)
 
 ## Properties
 
@@ -14,7 +14,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/deadline-guard.ts:3
 
 > `optional` **onHardDeadline?**: (`reason`) => `void`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/deadline-guard.ts:7](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/deadline-guard.ts#L7)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/deadline-guard.ts:7](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/deadline-guard.ts#L7)
 
 当 Hard Deadline (408) 触及时触发
 
@@ -34,7 +34,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/deadline-guard.ts:7
 
 > `optional` **onResponseTimeout?**: () => `void`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/deadline-guard.ts:5](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/deadline-guard.ts#L5)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/deadline-guard.ts:5](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/deadline-guard.ts#L5)
 
 当 Soft Deadline (102) 触及时触发
 

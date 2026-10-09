@@ -6,7 +6,7 @@
 
 # Interface: HttpServerToolTransportOptions
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/http-server.ts:8](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/http-server.ts#L8)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/http-server.ts:18](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/http-server.ts#L18)
 
 ## Extends
 
@@ -22,7 +22,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/http-server.ts:8](h
 
 > `optional` **apiUrl?**: `string`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:11](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/base.ts#L11)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:11](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/base.ts#L11)
 
 #### Inherited from
 
@@ -54,7 +54,7 @@ Sets the interval value in milliseconds to check for request and headers timeout
 
 > `optional` **dispatcher?**: [`RpcServerDispatcher`](../classes/RpcServerDispatcher.md)
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:7](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/server.ts#L7)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:9](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/server.ts#L9)
 
 #### Inherited from
 
@@ -276,9 +276,9 @@ An additional buffer time added to the
 
 ### manager?
 
-> `optional` **manager?**: [`RpcTransportManager`](../classes/RpcTransportManager.md)
+> `optional` **manager?**: `RpcClientTransportManager`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:10](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/base.ts#L10)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:10](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/base.ts#L10)
 
 #### Inherited from
 
@@ -290,7 +290,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:10](https:/
 
 > `optional` **maxBodySize?**: `number`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/http-server.ts:10](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/http-server.ts#L10)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/http-server.ts:20](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/http-server.ts#L20)
 
 最大请求体大小 (字节)，默认 1MB
 

@@ -6,7 +6,7 @@
 
 # Interface: IServerToolTransport
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:10](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/server.ts#L10)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:43](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/server.ts#L43)
 
 所有传输协议 (Client/Server) 统一的基础能力接口。
 
@@ -24,7 +24,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:10](https
 
 > **apiUrl**: `string`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:29](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/base.ts#L29)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:29](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/base.ts#L29)
 
 调用的基准 API 地点（URI）
 必须能够支持处理如 scheme, hostname, port, 乃至 auth (user:pass)。
@@ -40,7 +40,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:29](https:/
 
 > `optional` **canStream?**: `boolean`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:14](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/server.ts#L14)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:47](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/server.ts#L47)
 
 是否支持原生的流式传输 (如 HTTP 支持, Mailbox 通常不支持)
 
@@ -50,15 +50,15 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:14](https
 
 > **dispatcher**: [`RpcServerDispatcher`](../classes/RpcServerDispatcher.md)
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:11](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/server.ts#L11)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:44](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/server.ts#L44)
 
 ***
 
 ### manager?
 
-> `optional` **manager?**: [`RpcTransportManager`](../classes/RpcTransportManager.md)
+> `optional` **manager?**: `RpcClientTransportManager`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:22](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/base.ts#L22)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:22](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/base.ts#L22)
 
 所属管理器引用
 
@@ -72,7 +72,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:22](https:/
 
 > `optional` **options?**: [`ToolTransportOptions`](ToolTransportOptions.md)
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:34](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/base.ts#L34)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:34](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/base.ts#L34)
 
 具体协议额外的配置或选项扩展
 
@@ -86,7 +86,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:34](https:/
 
 > `optional` **close**(): `void` \| `Promise`\<`void`\>
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:49](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/base.ts#L49)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:49](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/base.ts#L49)
 
 物理层关闭句柄 (可选)
 
@@ -100,14 +100,17 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/base.ts:49](https:/
 
 ***
 
-### getListenAddr()
+### getBaseUrl()?
 
-> **getListenAddr**(): `string` \| `string`[]
+> `optional` **getBaseUrl**(): `string` \| `string`[]
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:30](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/server.ts#L30)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:66](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/server.ts#L66)
 
-获取物理层面的监听地址标识。
-默认返回 apiUrl。用于识别物理底座复用。
+声明身份：该实例所在物理底座的 canonical URI（scheme + authority，不含 path）。
+构造期即可得；`start()` 里的显式 bind 参数会改写它，内核观测（port 0）不会。
+Manager 的路由审计、物理底座复用池、请求分发都以它为 key。默认返回 apiUrl；
+无 URL 表示的 transport 应自行构造一个 URI 代替（如 unix:/run/ai.sock、mem://bus-a）。
+声明为可选，以免第三方直接 implements 该接口的类编译失败。
 
 #### Returns
 
@@ -115,11 +118,43 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:30](https
 
 ***
 
+### getBoundAddress()?
+
+> `optional` **getBoundAddress**(): `string` \| `undefined`
+
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:72](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/server.ts#L72)
+
+实际绑定观测：仅在 start 之后可得，未监听时返回 undefined。
+只用于日志与 port 0 场景下补全声明身份，不得作为审计 / 池 key。
+
+#### Returns
+
+`string` \| `undefined`
+
+***
+
+### ~~getListenAddr()~~
+
+> **getListenAddr**(): `string` \| `string`[]
+
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:78](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/server.ts#L78)
+
+#### Returns
+
+`string` \| `string`[]
+
+#### Deprecated
+
+改用 getBaseUrl()（声明身份）或 getBoundAddress()（绑定观测）。
+本名保留为别名，首次调用会警告一次。
+
+***
+
 ### getRaw()?
 
 > `optional` **getRaw**(): `any`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:38](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/server.ts#L38)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:86](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/server.ts#L86)
 
 #### Returns
 
@@ -131,7 +166,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:38](https
 
 > **getRoutes**(): `string`[]
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:36](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/server.ts#L36)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:84](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/server.ts#L84)
 
 获取该实例声明负责的逻辑路由列表。
 默认返回 ["/"] 表示接管该物理地址下的全量路径。
@@ -146,7 +181,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:36](https
 
 > **start**(`options?`): `Promise`\<`any`\>
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:19](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/server.ts#L19)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:52](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/server.ts#L52)
 
 启动物理监听
 
@@ -170,7 +205,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:19](https
 
 > **stop**(`force?`): `Promise`\<`void`\>
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:24](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/transports/server.ts#L24)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/transports/server.ts:57](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/transports/server.ts#L57)
 
 停止物理监听
 

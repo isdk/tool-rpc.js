@@ -6,7 +6,7 @@
 
 # Interface: ServerFuncParams
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/server-tools.ts:9](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/server-tools.ts#L9)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/server-tools.ts:9](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/server-tools.ts#L9)
 
 ServerFuncParams 定义。
 
@@ -24,7 +24,7 @@ ServerFuncParams 定义。
 
 > `optional` **\_req?**: `any`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/server-tools.ts:10](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/server-tools.ts#L10)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/server-tools.ts:10](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/server-tools.ts#L10)
 
 ***
 
@@ -32,7 +32,7 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/server-tools.ts:10](https://gi
 
 > `optional` **\_res?**: `any`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/server-tools.ts:11](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/server-tools.ts#L11)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/server-tools.ts:11](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/server-tools.ts#L11)
 
 ***
 
@@ -40,4 +40,4 @@ Defined in: [@isdk/ai-tools/packages/tool-rpc/src/server-tools.ts:11](https://gi
 
 > `optional` **\_signal?**: `AbortSignal`
 
-Defined in: [@isdk/ai-tools/packages/tool-rpc/src/server-tools.ts:12](https://github.com/isdk/tool-rpc.js/blob/9b268deb8ad1534541533c6bb5bf809f02d7a635/src/server-tools.ts#L12)
+Defined in: [@isdk/ai-tools/packages/tool-rpc/src/server-tools.ts:12](https://github.com/isdk/tool-rpc.js/blob/73510d58319d578baa251da748c8368a47fa2526/src/server-tools.ts#L12)
