@@ -45,10 +45,13 @@ describe('Transport V2: Routing Audit & Prefix Matching', () => {
 
    it('should correctly dispatch using Longest Prefix Match (LPM)', async () => {
       // 模拟两个具有嵌套关系的 Transport
-      // T1 负责 /
-      const t1 = new HttpServerToolTransport({ dispatcher, apiUrl: 'http://localhost:3005/' });
+      // 先拿到可用端口再构造 apiUrl：否则 apiUrl 里写死的 3005 会强制绑定该端口，
+      // 与并行运行的其他套件（同样 findPort(3005)）撞车，随机 EADDRINUSE。
       await sleep(100)
       const port = await findPort(3005)
+
+      // T1 负责 /
+      const t1 = new HttpServerToolTransport({ dispatcher, apiUrl: `http://localhost:${port}/` });
       t1.addRpcHandler(`http://localhost:${port}/`);
 
       // T2 负责更精确的 /api/v2/
