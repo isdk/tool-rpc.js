@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { existsSync, readFileSync } from 'fs'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
+import type { ServerFuncParams } from '../src/server-tools'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -107,7 +108,7 @@ describe('Browser Entry (@isdk/tool-rpc/browser)', () => {
 
     // Constants
     expect(browser.ActionNames).toBeDefined()
-    expect(browser.ActionName).toBeUndefined() // type-only, not a value
+    expect((browser as any).ActionName).toBeUndefined() // type-only, not a value
     expect(browser.RemoteToolFuncSchema).toBeDefined()
 
     // Client tools
@@ -145,7 +146,7 @@ describe('Browser Entry (@isdk/tool-rpc/browser)', () => {
 
     // Server transport base
     expect(browser.ServerToolTransport).toBeDefined()
-    expect(browser.IServerToolTransport).toBeUndefined() // interface, not a value
+    expect((browser as any).IServerToolTransport).toBeUndefined() // interface, not a value
 
     // Dispatcher
     expect(browser.RpcServerDispatcher).toBeDefined()
@@ -177,7 +178,7 @@ describe('Browser Entry (@isdk/tool-rpc/browser)', () => {
   // ==========================================================
 
   it('ServerTools should be usable', async () => {
-    const { ServerTools, ServerFuncParams } = await import('../src/browser')
+    const { ServerTools } = await import('../src/browser')
 
     ServerTools.register({
       name: 'greet',
@@ -641,7 +642,6 @@ describe('Browser Entry (@isdk/tool-rpc/browser)', () => {
 
     // Check that forbidden server-only type names do NOT appear
     for (const typeName of FORBIDDEN_SERVER_TYPES) {
-      const forbiddenPattern = new RegExp(`\\b${typeName}\\b`)
       const declarationPattern = new RegExp(`(declare\\s+(class|namespace|interface|type)|export\\s+.*)\\b${typeName}\\b`)
       const hasDeclaration = declarationPattern.test(content)
       expect(hasDeclaration, `dist/browser.d.ts should not contain server-only type '${typeName}'`).toBe(false)

@@ -313,7 +313,7 @@ describe('HttpClientToolTransport Integration', () => {
     })
 
     it('should receive correct echo response', async () => {
-      const res = await client._fetch('echo', { msg: 'hello' }, 'run')
+      const res = (await client._fetch('echo', { msg: 'hello' }, 'run')) as Response
       expect(res.ok).toBe(true)
       const body = await res.json()
       expect(body).toBe('hello')
@@ -326,14 +326,14 @@ describe('HttpClientToolTransport Integration', () => {
     })
 
     it('should handle GET request and receive result', async () => {
-      const res = await client._fetch('echo', { msg: 'get-test' }, 'get')
+      const res = (await client._fetch('echo', { msg: 'get-test' }, 'get')) as Response
       expect(res.ok).toBe(true)
       const body = await res.json()
       expect(body).toBe('get-test')
     })
 
     it('should handle null params gracefully', async () => {
-      const res = await client._fetch('echo', null, 'run')
+      const res = (await client._fetch('echo', null, 'run')) as Response
       expect(res.ok).toBe(true)
     })
   })
@@ -396,8 +396,8 @@ describe('HttpClientToolTransport Integration', () => {
       const apis = await client.loadApis()
       const echoMeta = apis.echo
       expect(echoMeta.params).toBeDefined()
-      expect(echoMeta.params.msg).toBeDefined()
-      expect(echoMeta.params.msg.type).toBe('string')
+      expect((echoMeta.params as any).msg).toBeDefined()
+      expect((echoMeta.params as any).msg.type).toBe('string')
 
       const calcMeta = apis.calc
       expect(calcMeta.timeout).toBe(5000)
@@ -473,11 +473,11 @@ describe('HttpClientToolTransport Integration', () => {
     })
 
     it('should stream data via _fetch and read chunks', async () => {
-      const res = await client._fetch('stream-tool', { stream: true }, 'run')
+      const res = (await client._fetch('stream-tool', { stream: true }, 'run')) as Response
       expect(res.ok).toBe(true)
       expect(res.body).toBeDefined()
 
-      const reader = res.body.getReader()
+      const reader = res.body!.getReader()
       const decoder = new TextDecoder()
       let allData = ''
 
@@ -499,10 +499,10 @@ describe('HttpClientToolTransport Integration', () => {
 
     it('should stream with time gaps between chunks', async () => {
       const start = Date.now()
-      const res = await client._fetch('stream-gap-tool', { gap: 100, stream: true }, 'run')
+      const res = (await client._fetch('stream-gap-tool', { gap: 100, stream: true }, 'run')) as Response
       expect(res.ok).toBe(true)
 
-      const reader = res.body.getReader()
+      const reader = res.body!.getReader()
       const decoder = new TextDecoder()
       const chunks: string[] = []
 
@@ -520,10 +520,10 @@ describe('HttpClientToolTransport Integration', () => {
     })
 
     it('should allow cancelling stream mid-transfer', async () => {
-      const res = await client._fetch('stream-gap-tool', { gap: 500, stream: true }, 'run')
+      const res = (await client._fetch('stream-gap-tool', { gap: 500, stream: true }, 'run')) as Response
       expect(res.ok).toBe(true)
 
-      const reader = res.body.getReader()
+      const reader = res.body!.getReader()
       const decoder = new TextDecoder()
 
       // Read first chunk
@@ -541,12 +541,12 @@ describe('HttpClientToolTransport Integration', () => {
     it('should enforce stream idle timeout', async () => {
       // stream-gap-tool has 200ms gap between chunks
       // Set streamIdleTimeout to 50ms — should fire before second chunk
-      const res = await client._fetch('stream-gap-tool', { gap: 200, stream: true }, 'run', undefined, {
+      const res = (await client._fetch('stream-gap-tool', { gap: 200, stream: true }, 'run', undefined, {
         timeout: { value: 5000, streamIdleTimeout: 50 }
-      })
+      })) as Response
       expect(res.ok).toBe(true)
 
-      const reader = res.body.getReader()
+      const reader = res.body!.getReader()
       const decoder = new TextDecoder()
 
       // First chunk should arrive
@@ -572,7 +572,7 @@ describe('HttpClientToolTransport Integration', () => {
       expect(res.body).toBeDefined()
       expect(typeof res.body.getReader).toBe('function')
 
-      const reader = res.body.getReader()
+      const reader = res.body!.getReader()
       const decoder = new TextDecoder()
       let allData = ''
 
@@ -769,7 +769,7 @@ describe('HttpClientToolTransport Integration', () => {
       expect(res.body).toBeDefined()
       expect(typeof res.body.getReader).toBe('function')
 
-      const reader = res.body.getReader()
+      const reader = res.body!.getReader()
       const decoder = new TextDecoder()
       let allData = ''
       let done = false

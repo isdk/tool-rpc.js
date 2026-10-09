@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ClientToolTransport } from './client';
-import { ActionName } from '../consts';
 import { RPC_HEADERS, RpcStatusCode } from './models';
 
 // Mock concrete implementation

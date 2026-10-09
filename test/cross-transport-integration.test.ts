@@ -144,7 +144,7 @@ describe('Cross-Transport Integration (HTTP + Mailbox)', () => {
 
   describe('Cross-Transport Tool Invocation', () => {
     it('should call echo from HTTP and return result', async () => {
-      const res = await httpClient._fetch('echo', { msg: 'http-echo' }, 'run')
+      const res = (await httpClient._fetch('echo', { msg: 'http-echo' }, 'run')) as Response
       expect(res.ok).toBe(true)
       const body = await res.json()
       expect(body).toBe('http-echo')
@@ -157,7 +157,7 @@ describe('Cross-Transport Integration (HTTP + Mailbox)', () => {
 
     it('should call same echo tool from both transports with different params', async () => {
       const [httpRes, mboxRes] = await Promise.all([
-        httpClient._fetch('echo', { msg: 'http-side' }, 'run').then(r => r.json()),
+        httpClient._fetch('echo', { msg: 'http-side' }, 'run').then(r => (r as Response).json()),
         mailboxClient.fetch('echo', { msg: 'mbox-side' }),
       ])
       expect(httpRes).toBe('http-side')
@@ -166,7 +166,7 @@ describe('Cross-Transport Integration (HTTP + Mailbox)', () => {
 
     it('should call different tools concurrently across transports', async () => {
       const [httpCalc, mboxEcho] = await Promise.all([
-        httpClient._fetch('calc', { a: 20, b: 22 }, 'run').then(r => r.json()),
+        httpClient._fetch('calc', { a: 20, b: 22 }, 'run').then(r => (r as Response).json()),
         mailboxClient.fetch('echo', { msg: 'parallel-mbox' }),
       ])
       expect(httpCalc).toBe(42)
@@ -175,8 +175,8 @@ describe('Cross-Transport Integration (HTTP + Mailbox)', () => {
 
     it('should handle three-way concurrent calls (HTTP calc + HTTP echo + Mailbox echo)', async () => {
       const [c1, e1, e2] = await Promise.all([
-        httpClient._fetch('calc', { a: 100, b: 200 }, 'run').then(r => r.json()),
-        httpClient._fetch('echo', { msg: 'http-three' }, 'run').then(r => r.json()),
+        httpClient._fetch('calc', { a: 100, b: 200 }, 'run').then(r => (r as Response).json()),
+        httpClient._fetch('echo', { msg: 'http-three' }, 'run').then(r => (r as Response).json()),
         mailboxClient.fetch('echo', { msg: 'mbox-three' }),
       ])
       expect(c1).toBe(300)
@@ -191,7 +191,7 @@ describe('Cross-Transport Integration (HTTP + Mailbox)', () => {
     })
 
     it('should increment state via HTTP and read via Mailbox', async () => {
-      const incRes = await httpClient._fetch('counter', { op: 'increment' }, 'run')
+      const incRes = (await httpClient._fetch('counter', { op: 'increment' }, 'run')) as Response
       expect((await incRes.json())).toBe(1)
 
       const getRes = await mailboxClient.fetch('counter', { op: 'get' })
@@ -219,7 +219,7 @@ describe('Cross-Transport Integration (HTTP + Mailbox)', () => {
       expect(resetRes).toBe(0)
 
       // Confirm via HTTP
-      const httpGet = await httpClient._fetch('counter', { op: 'get' }, 'run')
+      const httpGet = (await httpClient._fetch('counter', { op: 'get' }, 'run')) as Response
       expect((await httpGet.json())).toBe(0)
     })
   })
@@ -295,8 +295,8 @@ describe('Cross-Transport Integration (HTTP + Mailbox)', () => {
       expect(mboxApis.calc.timeout).toBe(5000)
 
       // Both transports return the same params schema
-      expect(httpApis.echo.params.msg.type).toBe('string')
-      expect(mboxApis.echo.params.msg.type).toBe('string')
+      expect((httpApis.echo.params as any).msg.type).toBe('string')
+      expect((mboxApis.echo.params as any).msg.type).toBe('string')
     })
 
     it('should discover newly registered tools through both transports', async () => {
@@ -320,7 +320,7 @@ describe('Cross-Transport Integration (HTTP + Mailbox)', () => {
 
       // Actually call the newly registered tool from both transports
       const [httpRes, mboxRes] = await Promise.all([
-        httpClient._fetch('late-registration', { val: 7 }, 'run').then(r => r.json()),
+        httpClient._fetch('late-registration', { val: 7 }, 'run').then(r => (r as Response).json()),
         mailboxClient.fetch('late-registration', { val: 10 }),
       ])
       expect(httpRes).toBe(14)
@@ -360,7 +360,7 @@ describe('Cross-Transport Integration (HTTP + Mailbox)', () => {
     it('should handle concurrent HTTP 102 polling + HTTP fast call', async () => {
       const [slow, fast] = await Promise.all([
         httpClient.fetch('slow-tool', { delay: 300 }),
-        httpClient._fetch('echo', { msg: 'fast-http' }, 'run').then(r => r.json()),
+        httpClient._fetch('echo', { msg: 'fast-http' }, 'run').then(r => (r as Response).json()),
       ])
       expect(slow).toBe('done-after-300')
       expect(fast).toBe('fast-http')
@@ -469,7 +469,7 @@ describe('Cross-Transport Integration (HTTP + Mailbox)', () => {
       await mailboxServer.stop()
 
       // HTTP should still work
-      const res = await httpClient._fetch('echo', { msg: 'http-alone' }, 'run')
+      const res = (await httpClient._fetch('echo', { msg: 'http-alone' }, 'run')) as Response
       expect(res.ok).toBe(true)
       const body = await res.json()
       expect(body).toBe('http-alone')
@@ -506,7 +506,7 @@ describe('Cross-Transport Integration (HTTP + Mailbox)', () => {
 
     it('should serve both transports simultaneously after full restart', async () => {
       const [httpRes, mboxRes] = await Promise.all([
-        httpClient._fetch('echo', { msg: 'restart-http' }, 'run').then(r => r.json()),
+        httpClient._fetch('echo', { msg: 'restart-http' }, 'run').then(r => (r as Response).json()),
         mailboxClient.fetch('echo', { msg: 'restart-mbox' }),
       ])
       expect(httpRes).toBe('restart-http')

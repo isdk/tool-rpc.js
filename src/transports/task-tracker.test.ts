@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { RpcActiveTaskTracker, RpcActiveTaskHandle } from './task-tracker';
-import { RpcTaskRetentionMode, RpcStatusCode } from './models';
+import { RpcTaskRetentionMode } from './models';
 
 describe('RpcActiveTaskTracker & Handle', () => {
   let tracker: RpcActiveTaskTracker;

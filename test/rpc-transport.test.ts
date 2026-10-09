@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { sleep } from '@isdk/util';
 import { withReservedPort } from './helpers/ports';
 import { NotFoundError } from '@isdk/common-error';
 

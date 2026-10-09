@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { HttpServerToolTransport } from './http-server';
 import { RpcServerDispatcher } from './dispatcher';
-import { ToolRpcRequest, RpcStatusCode, RPC_HEADERS } from './models';
+import { ToolRpcRequest, RPC_HEADERS } from './models';
 import http from 'http';
 
 describe('HttpServerToolTransport', () => {

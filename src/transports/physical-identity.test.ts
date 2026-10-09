@@ -33,6 +33,8 @@ describe('Physical identity: declared vs observed', () => {
 
   it('base class declares apiUrl as its identity and reports no bound address', () => {
     class Bare extends ServerToolTransport {
+      public addRpcHandler(_apiUrl: string, _options?: any): void {}
+      public addDiscoveryHandler(_apiUrl: string, _handler: () => any, _options?: any): void {}
       public async _start(): Promise<void> {}
       public async stop(): Promise<void> {}
       protected async toRpcRequest(): Promise<any> {return {};}
@@ -108,6 +110,8 @@ describe('Physical identity: declared vs observed', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       class LegacyTransport extends ServerToolTransport {
+        public addRpcHandler(_apiUrl: string, _options?: any): void {}
+        public addDiscoveryHandler(_apiUrl: string, _handler: () => any, _options?: any): void {}
         public getListenAddr(): string {return 'legacy://shared-1';}
         public async _start(): Promise<void> {}
         public async stop(): Promise<void> {}
@@ -133,6 +137,8 @@ describe('Physical identity: declared vs observed', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       class LegacySuper extends ServerToolTransport {
+        public addRpcHandler(_apiUrl: string, _options?: any): void {}
+        public addDiscoveryHandler(_apiUrl: string, _handler: () => any, _options?: any): void {}
         public getListenAddr(): string {return `legacy-super:${super.getListenAddr()}`;}
         public async _start(): Promise<void> {}
         public async stop(): Promise<void> {}

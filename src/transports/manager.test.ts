@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { RpcTransportManager } from './server-manager';
-import { ToolTransport, IToolTransport } from './base';
+import { ToolTransport } from './base';
 import { IClientToolTransport } from './client';
 import { IServerToolTransport } from './server';
 
@@ -27,6 +27,7 @@ class MockServerTransport extends ToolTransport implements IServerToolTransport 
   addRpcHandler = vi.fn();
   getRaw = vi.fn();
   getBaseUrl() { return this.apiUrl || 'mock://server'; }
+  getListenAddr() { return this.apiUrl || 'mock://server'; }
   getRoutes = vi.fn().mockReturnValue(['/']);
 }
 

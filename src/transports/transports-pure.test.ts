@@ -1,5 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import http from 'http';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Mailbox, MemoryProvider } from '@mboxlabs/mailbox';
 import { Readable } from 'stream';
 
@@ -8,11 +7,8 @@ import { RpcServerDispatcher } from './dispatcher';
 import { HttpServerToolTransport } from './http-server';
 import { MailboxServerTransport } from './mailbox-server';
 import { MailboxClientTransport } from './mailbox-client';
-import { ToolRpcContext, RpcStatusCode, RPC_HEADERS } from './models';
+import { ToolRpcContext, RPC_HEADERS } from './models';
 import { RpcActiveTaskTracker } from './task-tracker';
-import { RpcMethodsServerTool } from '../rpc-methods-server-tool';
-
-import { RpcTaskResource } from './rpc-task';
 
 describe('Comprehensive Pure V2 Integration (Streaming, Polling, Errors)', () => {
   let mailbox: Mailbox;

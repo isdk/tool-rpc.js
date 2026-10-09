@@ -8,11 +8,6 @@ import { MailboxServerTransport } from '../src/transports/mailbox-server';
 import { MailboxClientTransport } from '../src/transports/mailbox-client';
 import { RpcServerDispatcher } from '../src/transports/dispatcher';
 
-// Use a global object to track status to avoid closure issues
-const MailboxTestStatus = {
-  jobFinished: false,
-  jobStarted: false,
-};
 
 describe('Mailbox Timeout and ExpectedDuration', () => {
   // ...
@@ -244,7 +239,6 @@ describe('Mailbox Timeout and ExpectedDuration', () => {
       func: async function () {
         const status = (globalThis as any).MailboxTestStatus;
         status.jobStarted = true;
-        const ctx = (this as any).ctx;
 
         await new Promise(resolve => setTimeout(resolve, 300));
 

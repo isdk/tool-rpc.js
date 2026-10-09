@@ -445,7 +445,7 @@ describe('RpcTaskResource Integration', () => {
     const { RpcServerDispatcher } = await import('../src/browser')
 
     // The dispatcher auto-registers RpcTaskResource in systemRegistry
-    const dispatcher = new RpcServerDispatcher()
+    new RpcServerDispatcher()
 
     // Access the built-in rpcTask system tool
     const { RpcTaskResource } = await import('../src/browser')

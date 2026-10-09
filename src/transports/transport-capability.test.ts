@@ -1,7 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { MailboxServerTransport } from './mailbox-server';
 import { RpcServerDispatcher } from './dispatcher';
-import { RpcStatusCode } from './models';
 
 describe('Transport V2: Protocol Capability & Streaming', () => {
 

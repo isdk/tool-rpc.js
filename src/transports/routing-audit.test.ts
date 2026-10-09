@@ -13,6 +13,9 @@ class OtherKindTransport extends ServerToolTransport {
       if (!this.apiUrl) {this.apiUrl = apiUrl;}
       this.claimRoute(apiUrl, 'rpc', {});
    }
+   public addDiscoveryHandler(apiUrl: string, _handler: () => any, _options?: any): void {
+      this.claimRoute(apiUrl, 'discovery', {});
+   }
    public async _start(): Promise<void> {}
    public async stop(): Promise<void> {}
    protected async toRpcRequest(): Promise<any> {return {};}
@@ -145,7 +148,7 @@ describe('Transport V2: Routing Audit & Prefix Matching', () => {
       await sleep(100)
       let t1!: HttpServerToolTransport
       let t2!: HttpServerToolTransport
-      const port = await withReservedPort(3316, async (p) => {
+      await withReservedPort(3316, async (p) => {
          // T1 负责 /
          t1 = new HttpServerToolTransport({ dispatcher, apiUrl: `http://localhost:${p}/` });
          t1.addRpcHandler(`http://localhost:${p}/`);

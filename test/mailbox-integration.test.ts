@@ -192,8 +192,8 @@ describe('Mailbox Transport Integration', () => {
       const apis = await client.loadApis()
       const echoMeta = apis.echo
       expect(echoMeta.params).toBeDefined()
-      expect(echoMeta.params.msg).toBeDefined()
-      expect(echoMeta.params.msg.type).toBe('string')
+      expect((echoMeta.params as any).msg).toBeDefined()
+      expect((echoMeta.params as any).msg.type).toBe('string')
 
       const calcMeta = apis.calc
       expect(calcMeta.timeout).toBe(5000)
@@ -355,7 +355,7 @@ describe('Mailbox Transport Integration', () => {
           const failMsg = params?.failMsg || 'Background failure'
           return new Promise<string>((_resolve, reject) => {
             const timer = setTimeout(() => {
-              const err = new Error(failMsg)
+              const err: any = new Error(failMsg)
               err.code = 500
               reject(err)
             }, delay)

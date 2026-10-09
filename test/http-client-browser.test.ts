@@ -22,7 +22,7 @@ function make102Response(headers: Record<string, string> = {}) {
 }
 
 describe('HttpClientToolTransport (browser-like environment)', () => {
-  let mockFetch: ReturnType<typeof vi.spyOn>
+  let mockFetch: any
   let transport: HttpClientToolTransport
 
   beforeEach(() => {
@@ -364,7 +364,7 @@ describe('HttpClientToolTransport (browser-like environment)', () => {
       })
       mockFetch.mockResolvedValue(response)
 
-      const result = await transport._fetch('myTool', null, 'run')
+      const result = (await transport._fetch('myTool', null, 'run')) as Response
 
       // Should not be processed as 102
       expect(result.status).not.toBe(102)
@@ -619,14 +619,14 @@ describe('HttpClientToolTransport (browser-like environment)', () => {
         headers: { 'content-type': 'application/octet-stream' }
       }))
 
-      const res = await transport._fetch('myTool', { stream: true }, 'run', undefined, {
+      const res = (await transport._fetch('myTool', { stream: true }, 'run', undefined, {
         timeout: { value: 5000, streamIdleTimeout: 20 }
-      })
+      })) as Response
 
       expect(res.ok).toBe(true)
       expect(res.body).toBeDefined()
 
-      const reader = res.body.getReader()
+      const reader = res.body!.getReader()
       const decoder = new TextDecoder()
 
       // First chunk should arrive

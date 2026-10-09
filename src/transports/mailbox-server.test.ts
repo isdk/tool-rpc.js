@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MailboxServerTransport } from './mailbox-server';
 import { Mailbox } from '@mboxlabs/mailbox';
-import { RPC_HEADERS, RpcStatusCode } from './models';
+import { RPC_HEADERS } from './models';
 
 describe('MailboxServerTransport Unit', () => {
     let mailbox: Mailbox;

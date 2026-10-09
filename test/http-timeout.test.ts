@@ -39,13 +39,11 @@ describe('Timeout and ExpectedDuration', () => {
     })
 
     // 2. Register a tool for keepAliveOnTimeout test
-    let keepAliveRan = false;
     ServerTools.register({
       name: 'keep-alive-tool',
       timeout: { value: 100, keepAliveOnTimeout: true },
       func: async () => {
         await new Promise(resolve => setTimeout(resolve, 300));
-        keepAliveRan = true;
         return 'done';
       },
       isApi: true,

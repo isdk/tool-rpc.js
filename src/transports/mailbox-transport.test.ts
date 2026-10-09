@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import { Mailbox, MemoryProvider, MailMessage } from '@mboxlabs/mailbox';
+import { Mailbox, MemoryProvider } from '@mboxlabs/mailbox';
 
 import { ToolFunc, Funcs } from '@isdk/tool-func';
 import { ServerFuncItem, ServerTools } from '../server-tools';
 import { ResServerTools } from '../res-server-tools';
 import { ClientTools } from '../client-tools';
 import { ResClientTools } from '../res-client-tools';
-import { ToolRpcRequest, ToolRpcResponse, ToolRpcContext, RPC_HEADERS, RpcStatusCode } from './models';
+import { ToolRpcContext, RpcStatusCode } from './models';
 import { MailboxServerTransport as V2MailboxServerTransport } from './mailbox-server';
 import { MailboxClientTransport as V2MailboxClientTransport } from './mailbox-client';
 

@@ -5,7 +5,6 @@ import { RpcServerDispatcher } from './dispatcher';
 import { RpcActiveTaskTracker, RpcActiveTaskHandle } from './task-tracker';
 import { ServerTools } from '../server-tools';
 import { ToolRpcRequest } from './models';
-import http from 'http';
 
 describe('Transport V2: Extreme Stress & Edge Cases', () => {
    let manager: RpcTransportManager;
@@ -75,7 +74,7 @@ describe('Transport V2: Extreme Stress & Edge Cases', () => {
        */
       const addr = 'http://localhost:3006/api';
       const iterations = 100;
-      const tasks = [];
+      const tasks: Promise<any>[] = [];
 
       for (let i = 0; i < iterations; i++) {
          const t = new HttpServerToolTransport({ dispatcher, apiUrl: addr });

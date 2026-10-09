@@ -31,15 +31,13 @@ describe('RpcDeadlineGuard', () => {
    it('should trigger hard deadline with grace period', async () => {
       vi.useFakeTimers();
       let hardDeadlineFired = false;
-      let hookReason: any = null;
-      
+
       const graceMs = 500;
       const guard = new RpcDeadlineGuard(
          100, // soft
          {
-            onHardDeadline: (reason) => { 
-               hardDeadlineFired = true; 
-               hookReason = reason;
+            onHardDeadline: () => {
+               hardDeadlineFired = true;
             }
          },
          200, // hard

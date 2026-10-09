@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { Readable } from 'stream';
 import { EventEmitter } from 'events';
 import { RpcServerDispatcher } from './dispatcher';
 import { HttpServerToolTransport } from './http-server';
@@ -55,7 +54,7 @@ describe('Stream Lifecycle & Backpressure', () => {
     mockRes.writable = true;
     mockRes.destroy = vi.fn();
 
-    const processingPromise = (transport as any).processIncomingCall(mockReq, mockRes);
+    (transport as any).processIncomingCall(mockReq, mockRes);
     mockReq.emit('end');
 
     await new Promise(resolve => setTimeout(resolve, 10));
@@ -68,11 +67,10 @@ describe('Stream Lifecycle & Backpressure', () => {
   });
 
   it('should actively cancel stream when task is aborted via Tracker', async () => {
-    let controller: ReadableStreamDefaultController;
     const streamCancelSpy = vi.fn();
 
     const mockWebStream = new ReadableStream({
-      start(c) { controller = c; },
+      start() {},
       cancel: streamCancelSpy
     });
 

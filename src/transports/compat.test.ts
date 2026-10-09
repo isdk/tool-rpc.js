@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { bridgeContextToV1Params, bridgeV2RequestToV1Params, elevateV1ParamsToV2Request, injectV1ContextToParams } from './compat';
-import { ToolRpcRequest, ToolRpcContext, RpcStatusCode } from './models';
+import { ToolRpcRequest, ToolRpcContext } from './models';
 import { RpcServerDispatcher } from './dispatcher';
 import { ServerTools } from '../server-tools';
 

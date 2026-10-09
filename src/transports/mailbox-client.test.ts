@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { MailboxClientTransport } from './mailbox-client';
 import { Mailbox } from '@mboxlabs/mailbox';
-import { RPC_HEADERS, RpcStatusCode } from './models';
+import { RPC_HEADERS } from './models';
 
 describe('MailboxClientTransport', () => {
     let mailbox: Mailbox;
@@ -88,7 +88,7 @@ describe('MailboxClientTransport', () => {
             body: { status: 102, message: 'Processing' }
         });
 
-        const result = await fetchPromise;
+        const result: any = await fetchPromise;
         expect(result.status).toBe(102);
     });
 

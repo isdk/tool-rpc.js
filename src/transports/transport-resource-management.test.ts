@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { HttpServerToolTransport } from './http-server';
 import { RpcTransportManager } from './server-manager';
 import { ServerToolTransport } from './server';
-import http from 'http';
 
 describe('Transport V2 Resource Management & Multiplexing', () => {
   const PORT = 3004;
