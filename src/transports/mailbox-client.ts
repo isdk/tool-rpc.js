@@ -60,7 +60,9 @@ export class MailboxClientTransport extends ClientToolTransport {
 
   protected onResponse(message: MailMessage) {
     const { body, headers } = message;
-    const reqId = headers?.['req-id'];
+    // 关联 id 的字段名只从 RPC_HEADERS 取：写字面量时它与 REQUEST_ID 恰好同值，
+    // 但协议一旦改名就会错开（服务端回显的是 RPC_HEADERS.REQUEST_ID）
+    const reqId = headers?.[RPC_HEADERS.REQUEST_ID];
 
     if (reqId && this.pendingRequests.has(reqId)) {
       const { resolve, reject, timer } = this.pendingRequests.get(reqId)!;
@@ -89,12 +91,20 @@ export class MailboxClientTransport extends ClientToolTransport {
     }
   }
 
+  /** 构造时声明的默认超时（可以是数字，也可以是 `{ value }` 对象）。 */
+  protected timeoutValue(): number {
+    const declared: any = this.timeout;
+    const value = (declared && typeof declared === 'object') ? declared.value : declared;
+    const n = Number(value);
+    return Number.isFinite(n) && n > 0 ? n : 30000;
+  }
+
   public async _fetch(name: string, args?: any, act?: ActionName | string, id?: any, fetchOptions?: any) {
-    const reqId = fetchOptions?.headers?.['req-id'] || uuidv4();
+    const reqId = fetchOptions?.headers?.[RPC_HEADERS.REQUEST_ID] || uuidv4();
     const targetAddressStr = this.serverAddress;
 
     const messageHeaders: any = {
-      'req-id': reqId,
+      [RPC_HEADERS.REQUEST_ID]: reqId,
       'mbx-reply-to': this.clientAddress,
       ...fetchOptions?.headers,
     };
@@ -103,10 +113,13 @@ export class MailboxClientTransport extends ClientToolTransport {
     if (act) messageHeaders[RPC_HEADERS.ACT] = act;
     if (id) messageHeaders[RPC_HEADERS.RES_ID] = id;
 
-    let timeoutVal: number = 30000;
+    // 超时优先级：本次请求的 fetchOptions.timeout > 构造时的 options.timeout。
+    // 以前 `this.timeout` 存下来却从不读，`new MailboxClientTransport({ timeout: 500 })`
+    // 完全无效（实测本地定时器仍是 30200ms）
+    let timeoutVal: number = this.timeoutValue();
     if (fetchOptions?.timeout) {
       timeoutVal = typeof fetchOptions.timeout === 'number' ? fetchOptions.timeout : fetchOptions.timeout.value;
-      messageHeaders[RPC_HEADERS.TIMEOUT] = timeoutVal.toString();
+      messageHeaders[RPC_HEADERS.TIMEOUT] = String(timeoutVal);
     }
 
     const clientLocalTimeout = timeoutVal + 200;

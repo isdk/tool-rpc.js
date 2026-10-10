@@ -26,7 +26,6 @@ class MockServerTransport extends ToolTransport implements IServerToolTransport 
   addDiscoveryHandler = vi.fn();
   addRpcHandler = vi.fn();
   getRaw = vi.fn();
-  getBaseUrl() { return this.apiUrl || 'mock://server'; }
   getListenAddr() { return this.apiUrl || 'mock://server'; }
   getRoutes = vi.fn().mockReturnValue(['/']);
 }
@@ -172,7 +171,7 @@ describe('RpcTransportManager', () => {
   describe('Server Management', () => {
     it('should track and start server transports', async () => {
       const server = new MockServerTransport({ apiUrl: 'mock-srv://0.0.0.0' });
-      manager.addServer(server);
+      manager.registerServer(server);
 
       await manager.startAll({ some: 'config' });
       expect(server.start).toHaveBeenCalledWith({ some: 'config' });
@@ -183,7 +182,7 @@ describe('RpcTransportManager', () => {
 
       const client = manager.getClient('mock://client/api');
       const server = new MockServerTransport({ apiUrl: 'mock://server/api' });
-      manager.addServer(server);
+      manager.registerServer(server);
 
       await manager.stopAll(true);
 
@@ -207,8 +206,8 @@ describe('RpcTransportManager', () => {
       const server2 = new MockServerTransport({ apiUrl: 'mock://s2' });
       server2.start.mockRejectedValue(new Error('Start failed'));
 
-      manager.addServer(server1);
-      manager.addServer(server2);
+      manager.registerServer(server1);
+      manager.registerServer(server2);
 
       await expect(manager.startAll()).rejects.toThrow('Start failed');
       expect(server1.start).toHaveBeenCalled();

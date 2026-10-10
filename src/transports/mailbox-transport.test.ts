@@ -267,6 +267,43 @@ describe('MailboxServerTransport / MailboxClientTransport V2 Test', () => {
     await pullServer.stop();
   });
 
+  it('should report a pull loop failure once instead of swallowing it forever', async () => {
+    // 旧实现 catch 里只 sleep：mailbox 挂掉与「没有消息」在外部完全一样。
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { });
+
+    const brokenAddress = 'mem://broken-pull/api';
+    const brokenMailbox = {
+      start: vi.fn(),
+      stop: vi.fn(),
+      subscribe: vi.fn(),
+      // 每次都抛：轮询循环会转很多轮，但只应该报一次
+      fetch: vi.fn(async () => { throw new Error('mailbox backend down'); }),
+    } as any;
+
+    const server = new V2MailboxServerTransport({
+      mailbox: brokenMailbox,
+      apiUrl: brokenAddress,
+      mode: 'pull',
+      pullInterval: 5
+    });
+    server.addRpcHandler(brokenAddress);
+    await server.start();
+
+    // 5ms 一轮，等 60ms 足够转多轮
+    await new Promise(resolve => setTimeout(resolve, 60));
+    await server.stop();
+
+    const loopWarnings = warnSpy.mock.calls
+      .map(call => String(call[0]))
+      .filter(msg => msg.includes('pull loop error'));
+    expect(loopWarnings).toHaveLength(1);
+    expect(loopWarnings[0]).toContain('mailbox backend down');
+    // 循环本身不能死：stop 前它还在跑（fetch 被调了多轮）
+    expect(brokenMailbox.fetch.mock.calls.length).toBeGreaterThan(1);
+
+    warnSpy.mockRestore();
+  });
+
   it('should work with empty body', async () => {
     new ServerTools({
       name: 'ping',
@@ -454,26 +491,30 @@ describe('MailboxServerTransport / MailboxClientTransport V2 Test', () => {
     await expect(promise).rejects.toThrow('Transport stopped');
   });
 
-  describe('MailboxServerTransport Internal Path Logic', () => {
-    it('should extract apiPrefix correctly from complex URLs', () => {
+  describe('MailboxServerTransport route prefix (shared route-path rule)', () => {
+    // 以前这里自带一套 extractPath（解析失败退 '/'），断的是内部死状态 apiPrefix
+    // （只写不读）。现在前缀归基类的 toPathname（route-path.ts）管，与声明侧 /
+    // 请求侧同一份规则。
+    it('should take the path part of a full URL, query included', () => {
       const transport = new V2MailboxServerTransport({ mailbox, apiUrl: 'mem://my-bot/api/v1?debug=true' });
-      expect((transport as any).apiPrefix).toBe('/api/v1/');
+      expect((transport as any).toPathname('mem://my-bot/api/v1?debug=true')).toBe('/api/v1');
     });
 
-    it('should handle URLs with redundant slashes', () => {
+    it('should collapse redundant slashes', () => {
       const transport = new V2MailboxServerTransport({ mailbox, apiUrl: 'mem://my-bot///api//v2//' });
-      expect((transport as any).apiPrefix).toBe('/api/v2/');
+      expect((transport as any).toPathname('mem://my-bot///api//v2//')).toBe('/api/v2');
     });
 
-    it('should normalize paths in addRpcHandler', () => {
+    it('should register the normalized prefix as a route claim', () => {
       const transport = new V2MailboxServerTransport({ mailbox, apiUrl: 'mem://my-bot/' });
       transport.addRpcHandler('mem://my-bot/custom-path');
-      expect((transport as any).apiPrefix).toBe('/custom-path/');
+      expect([...(transport as any).routeClaims.keys()]).toEqual(['/custom-path']);
     });
 
-    it('should handle malformed URLs gracefully by falling back to root', () => {
+    it('should treat a non-URL apiUrl as a bare path prefix, not silently as root', () => {
+      // 旧行为：new URL 失败就退 '/'，于是所有裸前缀声明塌成同一条路由
       const transport = new V2MailboxServerTransport({ mailbox, apiUrl: 'not-a-valid-url' });
-      expect((transport as any).apiPrefix).toBe('/');
+      expect((transport as any).toPathname('not-a-valid-url')).toBe('/not-a-valid-url');
     });
 
     it('should prioritize V2 headers over V1 mbx- headers', async () => {
@@ -606,5 +647,59 @@ describe('MailboxServerTransport / MailboxClientTransport V2 Test', () => {
       expect(res.error.code).toBe(RpcStatusCode.BAD_REQUEST);
       expect(res.error.message).toMatch(/missing tool identifier/);
     });
+  });
+});
+
+describe('Mailbox push 模式不重复记账（memory provider 契约回归）', () => {
+  beforeAll(() => {
+    (ServerTools as any).items = Object.create(ToolFunc.items);
+    (ClientTools as any).items = {};
+  });
+
+  afterAll(() => {
+    delete (ServerTools as any).items;
+    delete (ClientTools as any).items;
+  });
+
+  it('一次 push 调用不在队列里留副本，服务端重启也不重放', async () => {
+    const mailbox = new Mailbox();
+    mailbox.registerProvider(new MemoryProvider());
+
+    let calls = 0;
+    new ServerTools({
+      name: 'noReplayProbe', isApi: true,
+      func: () => { calls++; return 'ok'; },
+    }).register();
+
+    const addr = 'mem://noreplay@server/api';
+    const inbox = 'mem://noreplay@client/inbox';
+
+    const server = new V2MailboxServerTransport({ mailbox, apiUrl: addr });
+    server.dispatcher.registry = ServerTools;
+    server.addRpcHandler(addr);
+    await server.start();
+
+    const client = new V2MailboxClientTransport({
+      mailbox, serverAddress: addr, clientAddress: inbox,
+    });
+    await client.start();
+
+    expect(await client.fetch('noReplayProbe')).toBe('ok');
+    expect(calls).toBe(1);
+
+    // 已经交给 push 订阅者的消息不该同时躺在队列里：push 消费者从不 dequeue，
+    // 副本会按调用次数永久堆积（status().unreadCount 只增不减）
+    expect((await mailbox.status(addr)).unreadCount).toBe(0);
+    expect((await mailbox.status(inbox)).unreadCount).toBe(0);
+
+    // push 模式下 start() 是 subscribe 之后再 drainBacklog：
+    // 队列里有副本的话，这条请求会被执行第二遍（副作用重复）
+    await server.stop();
+    await server.start();
+    await new Promise(resolve => setTimeout(resolve, 120));
+    expect(calls).toBe(1);
+
+    await server.stop();
+    await client.stop();
   });
 });

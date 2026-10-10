@@ -89,6 +89,29 @@ const EXPECTED_SERVER_TYPES = [
   'DEFAULT_COMPAT_OPTIONS',
 ]
 
+// 地址工具对外只导出两类：实测有下游消费者的（grep 得到），以及第三方 transport
+// 写插件时要用的契约（grep 不到，但文档承诺了）。判据见 CONTRIBUTING.md 的
+// 「公开面判据」；名单在 transports/index.ts 与 transports/browser.ts 里是显式的。
+// 下游消费者只有 tool-rpc-fastify：它用 socketAddressFromBind / socketAddressFromListen /
+// normalizeListenBind / BindOptions。
+const EXPORTED_ADDRESS_HELPERS = [
+  'unixSocketUri',
+  'unixSocketPath',
+  'normalizeListenBind',
+  'normalizeSocketAddress',
+  'normalizeHostAndPort',
+  'socketAddressFromBind',
+  'socketAddressFromListen',
+]
+const INTERNAL_ADDRESS_HELPERS = [
+  'normalizeNativeAddress',
+  // 这三个只是 normalizeSocketAddress / socketAddressFromBind 的内部通道，
+  // 插件覆写 getListenAddr() 返回一个字符串就够了，用不到它们。
+  'hasUriScheme',
+  'nativeAddressFromBind',
+  'withBindOptions',
+]
+
 // Types that should NOT appear in dist/browser.d.ts (Node.js-only modules)
 const FORBIDDEN_SERVER_TYPES = [
   'HttpServerToolTransport',
@@ -171,6 +194,28 @@ describe('Browser Entry (@isdk/tool-rpc/browser)', () => {
     expect((browser as any).HttpServerToolTransport).toBeUndefined()
     expect((browser as any).MailboxServerTransport).toBeUndefined()
     expect((browser as any).MailboxClientTransport).toBeUndefined()
+  })
+
+  it('should export only the address helpers a transport needs', async () => {
+    const browser = await import('../src/browser')
+    const node = await import('../src/index')
+
+    for (const name of EXPORTED_ADDRESS_HELPERS) {
+      expect(typeof (browser as any)[name], `browser entry should export '${name}'`).toBe('function')
+      expect(typeof (node as any)[name], `node entry should export '${name}'`).toBe('function')
+    }
+
+    // 地址语义归各 transport 自己：normalizeNativeAddress（scheme 无关的拼写归一）
+    // 只是 normalizeSocketAddress 对非 http scheme 的兜底；bind 改写与 scheme 判断则是
+    // socketAddressFromBind 的内部步骤。（Host 头加固已经公开为 normalizeHostAndPort。）
+    for (const name of INTERNAL_ADDRESS_HELPERS) {
+      expect((browser as any)[name], `browser entry should not export '${name}'`).toBeUndefined()
+      expect((node as any)[name], `node entry should not export '${name}'`).toBeUndefined()
+    }
+
+    // 两个入口的地址工具得是同一份：自定义 transport 在浏览器侧也要能算出同一个审计 key
+    expect(browser.normalizeSocketAddress, 'entries should share normalizeSocketAddress')
+      .toBe(node.normalizeSocketAddress)
   })
 
   // ==========================================================
@@ -645,6 +690,24 @@ describe('Browser Entry (@isdk/tool-rpc/browser)', () => {
       const declarationPattern = new RegExp(`(declare\\s+(class|namespace|interface|type)|export\\s+.*)\\b${typeName}\\b`)
       const hasDeclaration = declarationPattern.test(content)
       expect(hasDeclaration, `dist/browser.d.ts should not contain server-only type '${typeName}'`).toBe(false)
+    }
+  })
+
+  it('should pin the address helpers in dist/browser.d.ts (if built)', () => {
+    const dtsPath = resolve(__dirname, '../dist/browser.d.ts')
+    if (!existsSync(dtsPath)) {
+      console.warn("Skipping: dist/browser.d.ts not found. Run 'pnpm build' first.")
+      return
+    }
+
+    const content = readFileSync(dtsPath, 'utf-8')
+    const exportBlocks = content.match(/export\s*\{[^}]*\}/g)?.join('\n') ?? ''
+
+    for (const name of EXPORTED_ADDRESS_HELPERS) {
+      expect(new RegExp(`\\b${name}\\b`).test(exportBlocks), `dist/browser.d.ts should export '${name}'`).toBe(true)
+    }
+    for (const name of INTERNAL_ADDRESS_HELPERS) {
+      expect(new RegExp(`\\b${name}\\b`).test(exportBlocks), `dist/browser.d.ts should not export '${name}'`).toBe(false)
     }
   })
 })

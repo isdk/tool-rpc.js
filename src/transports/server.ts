@@ -1,6 +1,6 @@
 import { defaultsDeep } from 'lodash-es';
 import { ToolTransport, type IToolTransport, type ToolTransportOptions } from './base';
-import { BindOptions, canonicalPhysicalUri, hasUriScheme, physicalUriFromBind, withBindOptions } from './physical-uri';
+import { normalizeRoutePath, routeMatchKey } from './route-path';
 import { RpcServerDispatcher } from './dispatcher';
 import { RpcTransportManager } from './server-manager';
 import { ToolRpcRequest, ToolRpcResponse } from './models';
@@ -18,21 +18,57 @@ export type RouteRemountMode = 'replace' | 'throw';
 
 /** 声明路由时可携带的逻辑信息。 */
 export interface RouteClaimOptions {
-  /** 该前缀使用的工具注册表；请求期解析，避免后一次挂载覆盖前一次。 */
+  /**
+   * 该前缀的**工具注册表**（`ServerTools` 那种：`registry.get(toolId)`，没有 `get`
+   * 就退化成 `registry[toolId]`，取到的 tool 有 `run` / `params` / `stream`）。
+   * 类型是 `any` 因为框架不关心工具形态，只要求这两个取法。
+   *
+   * 它不是「路由注册表」（物理路由表在 transport 自己那里，如 HTTP 的
+   * `binding.routes`），而且**按前缀绑定**而不是挂在 transport 上：一个 transport
+   * 可以服务多个前缀，各自的工具集不同；若共用 `this.registry`，第二次
+   * `mount(RegB, '/v2')` 就会把 `/api` 也改指向 RegB。请求期由 `routeRegistry(prefix)`
+   * 解析，没有 claim 时才退回 transport 自己的 registry，最后才是 dispatcher 的。
+   */
   registry?: any;
-  /** 该前缀的发现处理器。 */
+  /** 该前缀的发现处理器（`mount` 里就是 `() => serverTools.toJSON()`）。同样按前缀绑定。 */
   discoveryHandler?: () => any;
   /** 重复声明时的行为，默认 'replace'。 */
   remount?: RouteRemountMode;
 }
 
-/** 一条已声明的逻辑路由（prefix 粒度，rpc / discovery 各自计数）。 */
+/**
+ * 一条已声明的逻辑路由（prefix 粒度，rpc / discovery 各自计数）。
+ *
+ * **`prefix` 与 `apiUrl` 的分工：一个是路由身份，一个是原始声明。**
+ *
+ * - `apiUrl`：调用方原样传进来的声明（`addRpcHandler` / `addDiscoveryHandler` /
+ *   `mount` 的参数）。可以是任何 scheme 的完整 URL，也可以是裸 path 前缀，还可能
+ *   带着 `//`、`.` / `..`、尾斜杠、percent-encoding。
+ * - `prefix`：`toPathname(apiUrl)` 的产物，即 `normalizeRoutePath(apiUrl,
+ *   { mode: 'request' })` 的 canonical path——绝对路径、无尾斜杠（根为 `/`）、
+ *   段已解码、dot 段已解析。声明侧与请求侧走同一套规则，所以 claim 的 key 与请求
+ *   命中的 key 必然一致。
+ *
+ * 谁用哪个：
+ * - `prefix` 是 `routeClaims` 的 map key、`getRoutes()` 的内容、归属表的路由部分；
+ *   物理分发表用 `toMatchPrefix(prefix)`（补尾斜杠，所以 `/api` 不会误配 `/apix`）。
+ * - `apiUrl` 的**地址部分不参与任何 key**：底座归 `getListenAddr()` 管，所以
+ *   `http://h:3000/api` 与 `/api` 得到同一个 prefix。保留原值是为了请求期重建
+ *   `ToolRpcRequest.apiUrl`（Manager 的 SSRF 校验按它匹配）：Fastify 优先用命中
+ *   claim 的 `apiUrl`，HTTP 用 transport 的 apiUrl + Host 头，Mailbox 固定用自己的。
+ *
+ * `rpc` / `discovery` 各自计数：同一前缀上先声明发现路由再声明 RPC 不算重复；
+ * 同类第二次声明才走 `remount`（默认 replace：只换 registry / discoveryHandler 并告警，
+ * 不重复注册物理路由；`throw` 经 `onDuplicateRoute` 抛错）。`prefix` 一旦建立就不变。
+ */
 export interface RouteClaim {
-  /** 归一化前缀，无尾斜杠；根为 '/'。 */
+  /** 归一化前缀（canonical path），无尾斜杠；根为 '/'。路由身份，也是 map key。 */
   prefix: string;
-  /** 声明该前缀时传入的 apiUrl，用于重建 ToolRpcRequest.apiUrl。 */
+  /** 声明该前缀时传入的原始 apiUrl（不参与 key；请求期用于重建 ToolRpcRequest.apiUrl）。 */
   apiUrl: string;
+  /** 该前缀的工具注册表（为何按前缀绑定见 `RouteClaimOptions.registry`）。 */
   registry?: any;
+  /** 该前缀的发现处理器。 */
   discoveryHandler?: () => any;
   /** 是否已声明 RPC 路由。 */
   rpc: boolean;
@@ -57,23 +93,15 @@ export interface IServerToolTransport extends IToolTransport {
   stop(force?: boolean): Promise<void>;
 
   /**
-   * 声明身份：该实例所在物理底座的 canonical URI（scheme + authority，不含 path）。
-   * 构造期即可得；`start()` 里的显式 bind 参数会改写它，内核观测（port 0）不会。
-   * Manager 的路由审计、物理底座复用池、请求分发都以它为 key。默认返回 apiUrl；
-   * 无 URL 表示的 transport 应自行构造一个 URI 代替（如 unix:/run/ai.sock、mem://bus-a）。
-   * 声明为可选，以免第三方直接 implements 该接口的类编译失败。
-   */
-  getBaseUrl?(): string | string[];
-
-  /**
-   * 实际绑定观测：仅在 start 之后可得，未监听时返回 undefined。
-   * 只用于日志与 port 0 场景下补全声明身份，不得作为审计 / 池 key。
-   */
-  getBoundAddress?(): string | undefined;
-
-  /**
-   * @deprecated 改用 getBaseUrl()（声明身份）或 getBoundAddress()（绑定观测）。
-   * 本名保留为别名，首次调用会警告一次。
+   * 本服务可被访问的地址（native address）。
+   *
+   * 对框架而言它是**不透明字符串**：只用作路由归属登记与底座复用的 map key，以及日志。
+   * 框架不解析、不校验、不预测 bind 冲突——地址语义归按 scheme 分派到的那个 transport
+   * 自己管（监听、port 0 后补全真实端口、要不要把回环写法规范化，都是它的事）。
+   * 真撞了，内核报 EADDRINUSE，fail fast。
+   *
+   * 默认就是 apiUrl。没有 URL 表示的 transport（unix socket、进程内总线）覆写它，
+   * **返回一个字符串**即可（`unix:/run/ai.sock`、`mem://bus-a`），不需要任何 URI 工具。
    */
   getListenAddr(): string | string[];
 
@@ -101,95 +129,12 @@ export abstract class ServerToolTransport extends ToolTransport implements IServ
     this.dispatcher = options?.dispatcher || RpcServerDispatcher.instance;
   }
 
-  /** 已对 getListenAddr() 警告过的标记（每实例只警告一次，避免刷屏）。 */
-  private listenAddrWarned: boolean = false;
-  /** 再入保护：防止「覆写 getListenAddr 又调用 super」时无限递归。 */
-  private baseUrlResolving: boolean = false;
-
   /**
-   * 声明身份：物理底座的 canonical URI（见 physical-uri.ts）。
-   * = apiUrl 派生的身份，被 `start()` 传入的显式 bind 参数改写后的结果。
-   * 只有调用方声明的 bind 会改写它，内核观测（port 0）不会，所以 key 跨 start
-   * 边界仍然稳定。无 URL 表示的 transport（unix socket、进程内总线）请覆写 apiUrlIdentity()。
-   */
-  public getBaseUrl(): string | string[] {
-    // 向后兼容：第三方子类可能仍覆写已废弃的 getListenAddr()。
-    // 检测到覆写时沿用其结果，避免升级后物理底座 key 漂移。
-    if (!this.baseUrlResolving && this.getListenAddr !== ServerToolTransport.prototype.getListenAddr) {
-      this.baseUrlResolving = true;
-      try {
-        return this.getListenAddr();
-      } finally {
-        this.baseUrlResolving = false;
-      }
-    }
-    return this.resolvedBaseUrl();
-  }
-
-  /**
-   * 声明身份的实际计算：apiUrl 派生值 + 显式 bind 改写。
-   * 覆写 getBaseUrl() 的子类（如 HTTP，需要收窄成 string）请复用它，
-   * 免得漏掉 bind 改写。
-   */
-  protected resolvedBaseUrl(): string {
-    return this.bindBaseUrl ?? this.apiUrlIdentity();
-  }
-
-  /**
-   * 仅由 apiUrl 派生的声明身份（默认归一化 apiUrl：去 path、回环/通配 host 归一）。
-   * 无 URL 表示的 transport 覆写本方法自行构造 URI（`unix:/run/ai.sock`、`mem://bus-a`）。
-   */
-  protected apiUrlIdentity(): string {
-    return canonicalPhysicalUri(this.apiUrl);
-  }
-
-  /**
-   * 显式 bind 参数改写后的声明身份；未显式指定时 undefined（沿用 apiUrl 派生值）。
-   * 每次 start() 都重新计算，不累加：上一轮的 bind 参数不应泄漏到下一轮。
-   */
-  protected bindBaseUrl?: string;
-
-  /**
-   * 把 `start({ host, port, path })` 这类**声明式**的 bind 参数并入声明身份。
-   * 必须在 _start 之前调用：审计与底座复用池的 key 都得在 bind 之前定下来。
-   * 只认调用方给的参数（start 入参 + options 预置）与 defaultBindOptions() 里
-   * 声明的确定默认值；其余实现细节不算声明。
-   */
-  protected applyBindOptions(options?: BindOptions): void {
-    this.bindBaseUrl = withBindOptions(this.apiUrlIdentity(), options);
-    if (this.bindBaseUrl || hasUriScheme(this.apiUrl)) {return;}
-    // apiUrl 连 scheme 都没有（裸 path 前缀）：它只说了路由，没说底座。
-    // 这时 bind 参数（含传输层自己的确定默认值）就是关于底座的唯一声明，
-    // 不补就会把“同一端口”的 transport 当成不同底座。
-    this.bindBaseUrl = physicalUriFromBind(defaultsDeep({}, options, this.defaultBindOptions()));
-  }
-
-  /**
-   * 本 transport 确定的默认监听参数（写进声明身份用）。默认无：基类没有物理
-   * 监听概念，也不得猜。有真实监听的 transport 请只在这里放**与 _start 一致**的值。
-   */
-  protected defaultBindOptions(): BindOptions | undefined {
-    return undefined;
-  }
-
-  /**
-   * 实际绑定观测。基类无物理监听概念，默认 undefined；
-   * 有真实 socket 的协议覆写（参见 HttpServerToolTransport）。
-   */
-  public getBoundAddress(): string | undefined {
-    return undefined;
-  }
-
-  /**
-   * @deprecated 改用 getBaseUrl()。本名语义含糊（容易被读成“监听之后拿到的地址”），
-   * 它实际返回的是声明身份；绑定观测请用 getBoundAddress()。
+   * 本服务可被访问的地址。对框架不透明：只当 map key 与日志用，不解析、不校验。
+   * 默认就是 apiUrl；有真实监听的 transport 自行覆写（见 HttpServerToolTransport）。
    */
   public getListenAddr(): string | string[] {
-    if (!this.listenAddrWarned) {
-      this.listenAddrWarned = true;
-      console.warn(`[tool-rpc] ${this.constructor.name}.getListenAddr() is deprecated: use getBaseUrl() for the declared identity, or getBoundAddress() for the observed bind.`);
-    }
-    return this.getBaseUrl();
+    return this.apiUrl;
   }
 
   /**
@@ -203,9 +148,37 @@ export abstract class ServerToolTransport extends ToolTransport implements IServ
 
   public start(options?: any): Promise<any> {
     if (this.options) { options = defaultsDeep(options, this.options); }
-    this.applyBindOptions(options);
+    // 归属登记是 registerServer() 时按当时的地址建的；地址可能到 start 才定下来
+    // （`start({ port })` 改写、port 0 由内核挑）。所以这里按当前地址重登一次。
+    this.registerRoutes();
     return this._start(options);
   };
+
+  /**
+   * 把本实例当前的「地址 → 它负责的逻辑路由」登记到 Manager 的路由归属表上。
+   * 地址变了（`start({ port })` 改写、`port: 0` 观测到真实端口）就重登一次，
+   * 否则登记停在旧地址上：对真实地址漏报、对让出去的地址过报冲突。
+   * 每次重算声明地址，不累加。Manager 没有归属表（客户端 manager）时静默跳过。
+   *
+   * 地址的内容框架不看：同一个 key 就是同一个底座，key 报得对不对归 transport 自己。
+   */
+  protected registerRoutes(): void {
+    const manager: any = this.manager;
+    if (manager && typeof manager.refreshServerRegistration === 'function') {
+      manager.refreshServerRegistration(this);
+    }
+  }
+
+  /**
+   * 注销本实例在 Manager 路由归属表上占的路由（stop 时必调）。
+   * 不调就会把路由永久锁在归属表上：stop 后同一前缀再上服务必报 Routing Conflict。
+   */
+  protected unregisterRoutes(): void {
+    const manager: any = this.manager;
+    if (manager && typeof manager.unregisterServer === 'function') {
+      manager.unregisterServer(this);
+    }
+  }
 
   /**
    * Template Method：处理物理请求流水线。
@@ -215,7 +188,7 @@ export abstract class ServerToolTransport extends ToolTransport implements IServ
     try {
       const rpcReq = await this.toRpcRequest(rawReq, rawRes);
 
-      // 架构层校验：调用所属 Manager 实例进行策略审计 (SSRF 防御、白名单等)
+      // 架构层校验：调用所属 Manager 实例做策略校验 (SSRF 防御、白名单等)
       this.manager.validateRpcRequest(rpcReq);
 
       const rpcRes = await this.dispatcher.dispatch(rpcReq, registry);
@@ -260,32 +233,28 @@ export abstract class ServerToolTransport extends ToolTransport implements IServ
   protected routeClaims = new Map<string, RouteClaim>();
 
   /**
-   * apiUrl（完整 URL）或路径前缀 -> 归一化前缀（无尾斜杠，根为 '/'）。
+   * apiUrl（完整 URL，任何 scheme）或路径前缀 -> 归一化前缀（根为 '/'）。
+   * 规则由 route-path.ts 的 normalizeRoutePath 提供，与请求侧完全同一套：
+   * 折叠 `//`、解析 dot 段、按段解码、`%2F` 不当分隔符、尾斜杠默认等价。
    * 空路径归一为 '/'，因为多数路由表拒绝空 path。
    */
   protected toPathname(apiUrl: string): string {
-    let pathname = apiUrl;
-    if (/^https?:\/\//i.test(apiUrl)) {
-      try {
-        pathname = new URL(apiUrl).pathname;
-      } catch (e) {
-        // 非法 URL：按普通路径前缀处理
-      }
-    }
-    if (!pathname.startsWith('/')) {pathname = `/${pathname}`;}
-    // 压缩内部重复斜杠，避免 '/a//b' 与 '/a/b' 成为两条逻辑路由
-    // （与 MailboxServerTransport.extractPath 的既有行为一致）
-    pathname = pathname.replace(/\/{2,}/g, '/').replace(/\/+$/, '');
-    return pathname || '/';
+    return normalizeRoutePath(apiUrl, { mode: 'request', strictTrailingSlash: this.strictTrailingSlash }).path;
   }
 
   /**
    * 前缀匹配用的 key：补尾斜杠，避免 '/api' 误匹配 '/apix'。
-   * 仅用于匹配与物理路由表，逻辑路由（getRoutes / 审计）用归一化前缀。
+   * 仅用于匹配与物理路由表，逻辑路由（getRoutes / 归属登记）用归一化前缀。
    */
   protected toMatchPrefix(prefix: string): string {
-    return prefix === '/' ? '/' : `${prefix}/`;
+    return routeMatchKey(prefix);
   }
+
+  /**
+   * `/foo` 与 `/foo/` 是否算两条路由。默认 false（等价）；置 true 后声明与匹配
+   * 都保留尾斜杠。每个实例声明时必须一致，否则 claim key 与匹配 key 会错位。
+   */
+  protected strictTrailingSlash: boolean = false;
 
   /**
    * 声明一条逻辑路由，并合并 registry / discoveryHandler。

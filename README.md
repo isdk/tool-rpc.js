@@ -96,7 +96,7 @@ async function startServer() {
   serverTransport.addRpcHandler(apiUrl);
 
   // 4. Register the transport to the Manager and start all services
-  RpcTransportManager.instance.addServer(serverTransport);
+  RpcTransportManager.instance.registerServer(serverTransport);
   await RpcTransportManager.instance.startAll();
 
   console.log(`✅ Tool server started at ${apiUrl}`);
@@ -292,6 +292,48 @@ To prevent accidental shadowing, use `allowOverride: false` during registration.
     * **Consequence**: Attempting to modify `ServerTools.items` within business logic, leading to global pollution.
     * **Best Practice**: Static members are for management; business logic should be strictly confined to `this` or `this.ctx` on the instance.
 
+## ⏱️ Timeout Strategy
+
+`@isdk/tool-rpc` tunes timeout control for distributed AI-agent scenarios and follows the *smallest timeout wins* principle.
+
+### 1. Configuration Format
+
+The `timeout` property accepts a shorthand and a longhand form:
+
+- **Shorthand (number)**: milliseconds, treated as a hard deadline.
+- **Longhand (object)**:
+    - `value`: the hard deadline.
+    - `streamIdleTimeout`: idle timeout for streaming (time to first byte, or the gap between chunks).
+    - `keepAliveOnTimeout`: defaults to `false`. When set to `true`, the server returns the timeout error but lets the task keep running in the background.
+
+### 2. Estimated Duration (expectedDuration)
+
+This is a UX-friendly hint (an advisory signal, not an enforced constraint). Clients can use it to improve the loading experience:
+
+- **Simulated progress**: move a progress bar smoothly across the `expectedDuration` window.
+- **Smart retries**: if the call exceeds the estimate and the task is idempotent, the client may fire a concurrent redundant request.
+
+## 🧠 Execution Context and Shadow Instances
+
+To keep concurrent calls safe while decoupling business logic from environment details, the library uses a *prototype-chain shadow instance* mechanism.
+
+### 1. Accessing `this.ctx`
+
+Inside a tool, read environment details from `this.ctx` instead of mixing them into business `params`:
+
+- `this.ctx.signal`: the automatically injected `AbortSignal`.
+- `this.ctx._req` / `this.ctx._res`: the raw transport request/response objects.
+- Custom fields: such as `traceId` or `userId`.
+
+### 2. Chaining with `.with(ctx)`
+
+On the client, `.with()` presets the environment for a single call or a series of calls:
+
+```typescript
+const runner = tool.with({ timeout: 2000, traceId: 'T123' });
+await runner.run(params);
+```
+
 ### Layer 1: `ServerTools` / `ClientTools` - The Basic Remote Function
 
 This is the most fundamental layer, representing a single, remotely callable function.
@@ -460,8 +502,9 @@ The architecture is built around a few key interfaces:
     1. **Exposing a Discovery Endpoint**: Create a route, typically `GET` (e.g., `/api`), which, when accessed by a client, returns the JSON definitions of all registered and available tools. This is achieved via the `addDiscoveryHandler` method.
     2. **Handling RPC Calls**: Create a generic RPC route (e.g., `/api/:toolId`) that receives requests, finds the corresponding tool by `toolId`, executes it, and returns the result. This is handled by the `addRpcHandler` method.
     3. Managing the server lifecycle (`start`, `stop`).
-    4. **Physical Awareness (V2)**: Methods like `getListenAddr()` and `getRoutes()` allow for physical port reuse and logical route auditing.
+    4. **Physical Awareness (V2)**: Methods like `getListenAddr()` and `getRoutes()` allow for physical port reuse and logical route ownership registration.
     5. **Route Claims & Remount (V2)**: `addRpcHandler()` / `addDiscoveryHandler()` claim their path prefix in the `ServerToolTransport` base class, so one transport can serve several prefixes, each with its own registry and discovery handler. Logical routes are reported in canonical form (leading `/`, no trailing slash); the trailing-slash form used for prefix matching is derived by `toMatchPrefix()`. Re-declaring an already claimed prefix replaces its registry/handler and logs a warning; pass `options.remount = 'throw'` to raise an error instead — backends with their own router override `onDuplicateRoute()` to surface a native duplicate-route error.
+    6. **Route Registration Pair (V2)**: `registerRoutes()` / `unregisterRoutes()` — `protected` members of the `ServerToolTransport` base class, called from inside your own transport subclass — keep the physical route table and the Manager's ownership table in sync, and are re-entrant (they unregister first, then register). Framework adapters (Fastify, Electron, Express) should call this pair rather than `claimRoute()` alone — claiming routes without touching the ownership table leaves stale entries that make the next `listen()` fail with `Routing Conflict`. On the Manager side the matching pair is `registerServer()` / `unregisterServer()` (the old name `addServer()` is deprecated and only forwards); `unregisterServer()` clears ownership and the transport mapping but does **not** stop the underlying server.
 - **`IClientToolTransport`**: The interface that a client-side transport must implement. Its core responsibilities are:
     1. **Loading API Definitions**: Call the `loadApis()` method, which accesses the server's discovery endpoint to get the definitions of all tools.
     2. **Executing Remote Calls**: Implement the `fetch()` method, which is responsible for serializing the client's tool call (function name and parameters), sending it to the server's RPC endpoint, and processing the response.
@@ -471,9 +514,13 @@ The architecture is built around a few key interfaces:
 
 The library provides plug-and-play transport implementations:
 
-- **`HttpServerToolTransport`**: A server-side transport that uses Node.js's built-in `http` module. In V2, it supports **Longest Prefix Match** routing, allowing multiple logical instances to share the same physical port.
-- **`HttpClientToolTransport`**: A client-side transport that uses the cross-platform `fetch` API. It supports automatic polling for background tasks.
-- **`Mailbox Transports`**: Native support for internal distributed mailbox protocols, ideal for cross-process or cross-thread communication with native physical isolation.
+- **`HttpServerToolTransport` (HTTP server)**: Built on Node.js's built-in `http` module. In V2 it supports **Longest Prefix Match** routing, letting several logical instances share one physical port (physical base reuse). It automatically:
+    - Creates a `GET /prefix` route for service discovery.
+    - Creates an RPC route that carries the tool name, resolving arguments from the request body or URL parameters.
+- **`HttpClientToolTransport` (HTTP client)**: Built on the cross-platform `fetch` API. The V2 version polls background-task status automatically.
+- **`Mailbox Transports`**: Native support for the internal distributed mailbox protocol.
+    - **Characteristics**: suited to cross-process or cross-thread communication, with physical isolation built in.
+    - **Advantage**: high-performance tool calls in scenarios that need no HTTP stack.
 
 ### Extending the Functionality: Creating Your Own Transport
 
@@ -544,6 +591,22 @@ The `params` schema you define on a tool is used for more than just documentatio
 ### Client-Side Method Aliasing
 
 For convenience, when you define a method with a `$` prefix on the server (e.g., `$promoteUser`), the client-side proxy automatically creates a cleaner alias without the prefix. This allows you to call `myTool.promoteUser(...)` on the client, making the code more readable and idiomatic.
+
+### 🛡️ Cross-Process Cleanup
+
+When a timeout fires, or the client disconnects while `keepAliveOnTimeout` is `false`:
+
+1. The server automatically fires the `abort` event on `this.ctx.signal`.
+2. Tool functions should listen for that signal to stop expensive work (AI model inference, long queries).
+3. The transport layer makes sure every associated connection is closed.
+
+```typescript
+async func(params) {
+  this.ctx.signal.addEventListener('abort', () => {
+    // Stop the local long-running task
+  });
+}
+```
 
 ## 🤝 Contributing
 

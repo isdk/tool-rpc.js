@@ -72,11 +72,13 @@ describe('Transport V2: Extreme Stress & Edge Cases', () => {
        * 验证：物理端口的引用计数管理是否坚不可摧。
        * 如果计数逻辑有 Bug，高频波动会导致物理 Server 被提前关闭或无法关闭。
        */
-      const addr = 'http://localhost:3006/api';
       const iterations = 100;
       const tasks: Promise<any>[] = [];
 
       for (let i = 0; i < iterations; i++) {
+         // 同一个底座上各占一条前缀：同一个前缀上两个实例同时占位是真冲突，
+         // 会被直接拒掉（以前是静默覆盖），那不是本用例要测的东西
+         const addr = `http://localhost:3006/api/${i}`;
          const t = new HttpServerToolTransport({ dispatcher, apiUrl: addr });
          t.addRpcHandler(addr);
          // 使用 force: true 强制关闭，防止在高频请求下连接挂起导致超时
@@ -112,7 +114,7 @@ describe('Transport V2: Extreme Stress & Edge Cases', () => {
       const shuffled = [...instances].sort(() => Math.random() - 0.5);
       await Promise.all(shuffled.map(inst => inst.start()));
 
-      const listenAddr = instances[0].getBaseUrl() as string;
+      const listenAddr = instances[0].getListenAddr() as string;
 
       for (let i = 0; i < levels; i++) {
          const targetPath = instances[i].getRoutes()[0] + '/action';

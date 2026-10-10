@@ -26,7 +26,7 @@ describe('Transport V2: HTTP Server Lifecycle', () => {
          await t1.start();
       }, 'localhost');
 
-      const addr = t1.getBaseUrl();
+      const addr = t1.getListenAddr();
       const binding = (HttpServerToolTransport as any).sharedServers.get(addr);
 
       expect(binding).toBeDefined();
@@ -59,7 +59,7 @@ describe('Transport V2: HTTP Server Lifecycle', () => {
       await t1.start();
       await t2.start();
 
-      const addr = t1.getBaseUrl();
+      const addr = t1.getListenAddr();
       const binding = (HttpServerToolTransport as any).sharedServers.get(addr);
 
       expect(binding.defaultInstance).toBe(t1); // 第一个实例启动时成为默认实例

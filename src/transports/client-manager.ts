@@ -4,7 +4,7 @@ import type { IClientToolTransport } from "./client";
 /**
  * RPC 客户端传输管理器 - 浏览器友好版本
  * 负责传输实例的注册、地址映射和方案解析。
- * 不包含任何服务端相关的逻辑（servers, routeAudit, validateRpcRequest 等）。
+ * 不包含任何服务端相关的逻辑（servers, routeOwnership, validateRpcRequest 等）。
  */
 export class RpcClientTransportManager {
   private static _instance: RpcClientTransportManager;

@@ -2,13 +2,19 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { RpcTransportManager } from './server-manager';
 import { HttpServerToolTransport } from './http-server';
 import { ServerToolTransport } from './server';
+import { normalizeSocketAddress } from './socket-address';
 import { RpcServerDispatcher } from './dispatcher';
 import http from 'http';
 import { sleep } from '@isdk/util';
 import { withReservedPort } from '../../test/helpers/ports';
 
-/** 另一种 transport 类：只用基类的声明身份，不自己碰 host 归一。 */
+/**
+ * 另一种 transport 类。地址对框架不透明，所以插件要自己报——这里拿 HTTP 那套
+ * 归一当例子，证明跳 transport 类的审计能对上 key；插件也可以报任何字符串，
+ * 但报得与真实底座不一致就是插件自己的 bug，框架不会去解析修正。
+ */
 class OtherKindTransport extends ServerToolTransport {
+   public getListenAddr(): string {return normalizeSocketAddress(this.apiUrl);}
    public addRpcHandler(apiUrl: string): void {
       if (!this.apiUrl) {this.apiUrl = apiUrl;}
       this.claimRoute(apiUrl, 'rpc', {});
@@ -39,84 +45,90 @@ describe('Transport V2: Routing Audit & Prefix Matching', () => {
    it('should detect routing conflicts on the same physical address', async () => {
       const t1 = new HttpServerToolTransport({ dispatcher, apiUrl: 'http://localhost:3003/api' });
       t1.addRpcHandler('http://localhost:3003/api');
-      manager.addServer(t1);
+      manager.registerServer(t1);
 
       const t2 = new HttpServerToolTransport({ dispatcher, apiUrl: 'http://localhost:3003/api' });
       t2.addRpcHandler('http://localhost:3003/api');
 
       // 预期：同一物理地址下重复注册相同路径应抛出冲突异常
-      expect(() => manager.addServer(t2)).toThrow(/Routing Conflict/);
+      expect(() => manager.registerServer(t2)).toThrow(/Routing Conflict/);
    });
 
    it('should allow different paths on the same physical address', async () => {
       const t1 = new HttpServerToolTransport({ dispatcher, apiUrl: 'http://localhost:3004/api1' });
       t1.addRpcHandler('http://localhost:3004/api1');
-      manager.addServer(t1);
+      manager.registerServer(t1);
 
       const t2 = new HttpServerToolTransport({ dispatcher, apiUrl: 'http://localhost:3004/api2' });
       t2.addRpcHandler('http://localhost:3004/api2');
 
       // 预期成功：不同逻辑路径可以共用同一物理端口
-      expect(() => manager.addServer(t2)).not.toThrow();
+      expect(() => manager.registerServer(t2)).not.toThrow();
    });
 
    it('detects a conflict across transport classes on one base', async () => {
-      // 审计以前只在同类 transport 内生效：两边声明身份的形式不同（HTTP 是 host:port，
-      // 基类是含 path 的 apiUrl），跳 transport 永远对不上 key。现在两边都是 canonical URI。
+      // 跳 transport 类的审计能不能对上，取决于两边报的地址字符串是否相等：
+      // 回环写法由 transport 自己规范化（HTTP 与上面的插件覆写都规范化）。
       const http1 = new HttpServerToolTransport({ dispatcher, apiUrl: 'http://localhost:3310/api' });
       http1.addRpcHandler('http://localhost:3310/api');
-      manager.addServer(http1);
+      manager.registerServer(http1);
 
       const other = new OtherKindTransport({ apiUrl: 'http://127.0.0.1:3310/api' });
       other.addRpcHandler('http://127.0.0.1:3310/api');
 
-      expect(() => manager.addServer(other)).toThrow(/Routing Conflict/);
+      expect(() => manager.registerServer(other)).toThrow(/Routing Conflict/);
    });
 
-   it('treats a wildcard listen as the same base as a specific host', async () => {
-      // 实测：0.0.0.0:3000 与 localhost:3000 在两个方向上都 EADDRINUSE
+   it('does not pre-judge a wildcard listen against a specific host', async () => {
+      // 以前这里会把 `0.0.0.0:3311` 当作“包含” `localhost:3311` 而报路由冲突。
+      // 那是预测 bind 冲突：关系非传递（会漏报），又把 vhost 判死。
+      // 现在 key 不相等就各自 listen，真撞了由内核报 EADDRINUSE。
       const wildcard = new HttpServerToolTransport({ dispatcher, apiUrl: 'http://0.0.0.0:3311/api' });
       wildcard.addRpcHandler('http://0.0.0.0:3311/api');
-      manager.addServer(wildcard);
+      manager.registerServer(wildcard);
 
       const specific = new HttpServerToolTransport({ dispatcher, apiUrl: 'http://localhost:3311/api' });
       specific.addRpcHandler('http://localhost:3311/api');
 
-      expect(() => manager.addServer(specific)).toThrow(/Routing Conflict/);
-      expect(() => manager.addServer(specific)).toThrow(/covers "http:\/\/localhost:3311"/);
+      expect(() => manager.registerServer(specific)).not.toThrow();
+
+      await wildcard.start();
+      await expect(specific.start()).rejects.toMatchObject({ code: 'EADDRINUSE' });
    });
 
-   it('treats two distinct non-loopback hosts as one base for HTTP (it binds 0.0.0.0)', async () => {
-      // HTTP transport 对非回环 host 一律监听 0.0.0.0（实测：监听不属于本机的主机名会
-      // EADDRNOTAVAIL），所以它占的底座就是 *:port，两个不同 host 同端口必撞。
+   it('does not collapse two distinct non-loopback hosts onto one base', async () => {
+      // 以前 HTTP 把非回环 host 塌成 `*:port`，两个不同 host 同端口直接报冲突，
+      // vhost 就没法用。现在 key 就是声明的那个 authority，互不相干。
       const a = new HttpServerToolTransport({ dispatcher, apiUrl: 'http://10.0.0.1:3312/api' });
       a.addRpcHandler('http://10.0.0.1:3312/api');
-      manager.addServer(a);
+      manager.registerServer(a);
 
       const b = new HttpServerToolTransport({ dispatcher, apiUrl: 'http://10.0.0.2:3312/api' });
       b.addRpcHandler('http://10.0.0.2:3312/api');
 
-      expect(() => manager.addServer(b)).toThrow(/Routing Conflict/);
+      expect(() => manager.registerServer(b)).not.toThrow();
+      expect(a.getListenAddr()).not.toBe(b.getListenAddr());
    });
 
    it('keeps two distinct specific hosts as distinct bases when the transport binds them', async () => {
       // 反向不能塌缩：Linux 上两个不同具体 host 同端口可共存
       const a = new OtherKindTransport({ apiUrl: 'http://10.0.0.1:3314/api' });
       a.addRpcHandler('http://10.0.0.1:3314/api');
-      manager.addServer(a);
+      manager.registerServer(a);
 
       const b = new OtherKindTransport({ apiUrl: 'http://10.0.0.2:3314/api' });
       b.addRpcHandler('http://10.0.0.2:3314/api');
 
       // 只注册一次：重复注册同一个实例本身就该报冲突
-      expect(() => manager.addServer(b)).not.toThrow();
+      expect(() => manager.registerServer(b)).not.toThrow();
    });
 
-   it('reuses a wildcard binding for a transport that declares a specific host', async () => {
+   it('does not reuse a wildcard binding for a transport that declares a specific host', async () => {
       await sleep(100);
 
-      // 两个实例要在 apiUrl 里写同一个端口，号码必须预先知道；用预留而非 findPort，
-      // 被抢走时换号重跑。只有 wildcard 真的 listen，所以 factory 里只起它。
+      // 底座复用只按地址字符串相等：`http://*:p` 与 `http://localhost:p` 不相等，
+      // 所以不会复用——不会静默地“搭便车”，也不会静默地错过复用。
+      // 两个写法在同一个端口上监听会怎样？内核回答。
       let wildcard!: HttpServerToolTransport;
       let specific!: HttpServerToolTransport;
       const port = await withReservedPort(3313, async (p) => {
@@ -128,15 +140,12 @@ describe('Transport V2: Routing Audit & Prefix Matching', () => {
          return p;
       });
 
-      // 具体 host 的实例挂到已有的通配底座上，不会再 listen 一次（否则必 EADDRINUSE）
-      await specific.start();
+      await expect(specific.start()).rejects.toMatchObject({ code: 'EADDRINUSE' });
 
-      expect(specific.getRaw()).toBe(wildcard.getRaw());
       const pool = (HttpServerToolTransport as any).sharedServers;
       expect(pool.size).toBe(1);
-      expect(pool.get(`http://*:${port}`).refCount).toBe(2);
+      expect(pool.get(`http://*:${port}`).refCount).toBe(1);
 
-      await specific.stop();
       await wildcard.stop();
    });
 
@@ -163,7 +172,7 @@ describe('Transport V2: Routing Audit & Prefix Matching', () => {
          return p
       }, 'localhost')
 
-      const addr = t1.getBaseUrl() as string;
+      const addr = t1.getListenAddr() as string;
       const mockRes = {
          statusCode: 200,
          setHeader: vi.fn(),

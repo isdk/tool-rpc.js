@@ -88,10 +88,10 @@ throw new RpcError('Access Denied', 403, 'forbidden', { ip: '1.2.3.4' });
 
 ### 3.1 核心职责与 API 详述
 
-* **物理与逻辑解耦审计 (Server Auditing)**：
-  * `addServer(transport)`：在注册服务端实例时，Manager 会提取其物理底座声明身份 (`getBaseUrl`) 与逻辑管辖路由 (`getRoutes`)。
-  * **路由冲突检测**：通过内部审计表校验，禁止在同一物理底座上重复注册完全相同的逻辑路由，从架构层面杜绝路由劫持风险。审计 key 是 canonical 前缀（见 8.1），因此同一前缀在不同 transport 间可比；声明身份已统一为 canonical 物理 URI（`physical-uri.ts` 的 `canonicalPhysicalUri`），所以 HTTP transport 与 Fastify transport 共用一个端口时能真正报出 `Routing Conflict`（以前两边 key 形式不同，跨 transport 的审计只在同类 transport 内生效）。比较规则见 `samePhysicalBase`：通配 authority（`http://*:3000`）包含具体 host（`http://localhost:3000`）——实测两者在两个方向上都 EADDRINUSE；而两个不同具体 host 同端口可共存，不能塌缩。无 authority 的 opaque 身份（`unix:`、`fastify://instance-N`、`mem://…`）只按 canonical 字符串相等，不做包含判断；transport 尚未监听且 apiUrl 没有 URL 形式时身份是实例占位，跨 transport 不可比。
-  * **关于 `mount` (已废弃)**：`mount(tools, prefix)` 虽作为兼容 API 存在（@deprecated），但在 V2 中推荐直接使用 `addServer`。V2 的路由是由 Transport 实例通过 `apiUrl` 内部派生并经 `getRoutes()` 声明的，而非外部强制指定。
+* **物理与逻辑解耦的路由归属登记 (Server Registration)**：
+  * `registerServer(transport)`：在注册服务端实例时，Manager 会提取其物理底座声明身份 (`getListenAddr`) 与逻辑管辖路由 (`getRoutes`)，登记进路由归属表。反面是 `unregisterServer(transport)`（transport 侧对应 `registerRoutes()` / `unregisterRoutes()`）。旧名 `addServer` 已废弃（`add` 的反义词不是 `release`，那对动词不成对），保留一个版本的转发。
+  * **路由冲突检测**：通过内部归属表校验，禁止在同一底座上重复注册完全相同的逻辑路由，从架构层面杜绝路由劫持风险。归属表的 key 是归一化后的前缀（见 8.1），地址 key 则是 transport 自报的 `getListenAddr()`——**不透明字符串，直接相等**。所以跨 transport 类能否对上 key，取决于两边报的地址形式是否一致：HTTP 报归一化后的 authority（`http://localhost:3000`），插件覆写 `getListenAddr()` 就要报同一形式（报得不一致是插件的 bug，框架不会去解析修正）。**不做包含关系预测**（不把 `0.0.0.0:3000` 视为覆盖 `localhost:3000`）：那种关系非传递（会漏报），又会把不同 host 同端口塌成一个底座（误报、vhost 判死）。真撞了由内核报 `EADDRINUSE`。
+  * **路由从哪里来**：路由由 Transport 实例通过 `apiUrl` 内部派生并经 `getRoutes()` 声明，不是外部强制指定的。（客户端侧的 `transport.mount(ClientTools)` 是另一回事，属于 `ClientToolTransport`。）
 * **bindScheme (协议绑定)**：
   * **静态绑定**：`bindScheme(['http', 'https'], HttpClient)`。将 Scheme 直接映射到具体的 Transport 类。
   * **动态解析器 (Resolvers)**：`bindScheme((scheme) => ...)`。支持注册函数，当静态注册表未命中时，动态判断并返回对应的 Transport 类。这在插件化系统中非常有用。
@@ -99,7 +99,7 @@ throw new RpcError('Access Denied', 403, 'forbidden', { ip: '1.2.3.4' });
 * **实例缓存与复用**：Manager 会根据 `apiUrl` 的 **Origin (协议+域名+端口)** 路径自动缓存 Transport 实例。这意味着对同一个服务端不同路径的调用将共享同一个物理连接池，实现资源复用。
 * **架构级策略校验 (validateRpcRequest)**：
   * **SSRF 防御**：通过 `addRestrictedPattern` 注入正则或字符串模式（如 `localhost`, `127.0.0.1`），Manager 会在分发前拦截非法地址请求。
-  * **钩子重写**：允许通过继承 Manager 并重写此方法来实现自定义的全局审计逻辑。
+  * **钩子重写**：允许通过继承 Manager 并重写此方法来实现自定义的全局策略校验。
 * **生命周期管理**：
   * `startAll()`：批量启动所有已注册的服务端 Transport。
   * `stopAll()`：优雅关闭所有实例。由于 HTTP 层引入了引用计数，此操作会根据使用情况自动关闭物理 Server。
@@ -107,8 +107,7 @@ throw new RpcError('Access Denied', 403, 'forbidden', { ip: '1.2.3.4' });
 ### 3.2 实例化与管理范例
 
 ```typescript
-import { RpcTransportManager } from './transportsV2/manager';
-import { HttpServerToolTransport } from './transportsV2/http-server';
+import { RpcTransportManager, HttpServerToolTransport } from '@isdk/tool-rpc';
 
 const manager = RpcTransportManager.instance;
 
@@ -116,7 +115,7 @@ const manager = RpcTransportManager.instance;
 const server = new HttpServerToolTransport({
   apiUrl: 'http://0.0.0.0:3000/api'
 });
-manager.addServer(server);
+manager.registerServer(server);
 
 // 2. 批量启动与统一清理
 await manager.startAll();
@@ -146,7 +145,7 @@ await manager.stopAll();
 这是 V2 的重要性能优化：在 `dispatch` 响应返回后，系统立即根据任务的 `retention` 策略评估其是否符合回收条件。
 
 *   **常规任务**：若符合条件（如策略为 `None`），响应返回后立即移除。
-*   **流式响应**：清理评估将**自动延迟**。Dispatcher 会通过 `TransformStream` 监听流的 `flush` (结束) 或 `cancel` (取消)。只有在流传输彻底完成后，才会执行最后的清理逻辑。
+*   **流式响应**：清理评估将**自动延迟**。Dispatcher 挂在流上的 transformer 只接得到 `flush`（正常结束）——`TransformStream` 本身**没有** cancel 钩子：第三个参数 `readableStrategy` 按规范走 `ConvertAndNormalizeQueuingStrategy`，只读 `highWaterMark`/`size`，传 `cancel` 会被默默忽略（Node 22 实测不触发），`flush` 在 cancel 时也不跑。所以「下游取消」这条路由别处兜：HTTP 侧靠物理连接的 `close`（`stream-lifecycle.test.ts`），客户端侧靠自建 `ReadableStream` 的 `underlyingSource.cancel`（`http-client.ts` 的 `cancelAware`，规范保证会调）。要在新 transport 里接 cancel，只有后者这一条路。
 
 ---
 
@@ -169,7 +168,7 @@ await manager.stopAll();
 2.  Handle 的 `streamPending` 标记变为 `true`。
 3.  此时，即使调用 `aborter.abort()` 也会联动调用 `stream.cancel()`，确保物理资源被正确释放。
 
-### 5.2 系统工具 `rpcTask`
+### 5.3 系统工具 `rpcTask`
 
 内置的任务管控接口，符合 REST 规范：
 
@@ -211,12 +210,71 @@ await manager.stopAll();
 
 ## 8. 传输层实现细节
 
+### 8.0 传输层基座 API：只有两个文件
+
+本节说的「基座」是**传输层的监听底座**（与 `ServerTools` / `RpcMethodsServerTool` 那些工具基类无关）。写一个新 transport 时，可复用的传输层基座 API 只有两个文件，各回答一个问题：
+
+| 文件 | 回答 | 适用于 |
+|---|---|---|
+| `route-path.ts` | **哪条路由**：前缀规范化（以 `/` 开头、去尾斜杠、根为 `/`）、重叠判定 | 任何按 path 挂载的插件，与协议无关 |
+| `socket-address.ts` | **哪个 socket**：`socketAddressFromBind()`（监听前，apiUrl + bind 参数 → 地址 URI）、`normalizeSocketAddress()`（写法规范化，监听前后的观测值也过它）、`normalizeListenBind()`（`BindOptions` 解析：socket 三别名、socket 优先于 host/port）、`unixSocketUri()` | 监听 TCP / unix socket 的 transport（本包的 HTTP；外部包 `@isdk/tool-rpc-fastify`；以后的 Express/Hono/WS） |
+
+- **名字里的 socket 指「监听底座」**（TCP socket 或 unix socket 文件），不是「只能 unix」：HTTP 只是同一个底座的其中一个写法家族。
+- **监听前后两个时刻不可合并**：`socketAddressFromBind()` 在 listen **前**推声明地址（`port: 0` 时端口是假的）；listen **后**要把内核观测值过 `socketAddressFromListen()`（本包的 HTTP 拿的是 Node `server.address()`；外部包 `@isdk/tool-rpc-fastify` 拿的是 Fastify `listen()` 的返回值，形状不同，由同一个函数区分）。两边必须算出同一个字符串，否则同一个 socket 在池里会有两个 key。
+- **物理底座不在基座 API 里**：`sharedServers` 池 / refCount / 最长前缀分发表属于 `http-server.ts`。基座 API 只处理字符串与参数，不碰监听对象。
+- **L0 不读 bind**：`ServerToolTransport.start(options?)` 只 `return this._start(options)`，基类从不读任何字段，`getListenAddr()` 是不透明字符串。所以基座 API 是**可选规则库**：mailbox transport 读 `options?.address`（总线名）、electron 的 `_start()` 无参，两者都不碰 `socket-address.ts`。`defaultBindOptions()` 也不在基类，只有监听 TCP/unix 的 transport 各自定义。
+- **为什么 `BindOptions` 不单独成文件**：`BindOptions`（调用方声明这一轮怎么监听）与 `socket-address.ts`（这一轮落在哪个地址）是同一件事的两半，`socketAddressFromBind()` 就是从前者算后者。拆开就会两边各读一遍 bind，声明地址与真实监听就会错开。
+
+#### 参考实现：本库自带的 transport
+
+本包自带的物理 transport 都是最基础的那几个，它们就是 transport 开发者的**参考实现**：同一个规则只写一处、地址只从基座 API 算、物理底座自己拥有。
+
+| transport | 底座 | 参考什么 |
+|---|---|---|
+| `HttpServerToolTransport`（`http-server.ts`） | TCP + unix socket | 底座池 + refCount + 最长前缀分发；监听后把观测值换进池 key（`port: 0`） |
+| `MailboxServerTransport`（`mailbox-server.ts`） | 信箱总线 | 不碰 `socket-address.ts`：`_start()` 读 `options?.address`，`getListenAddr()` 直接报总线名 |
+| `HttpClientToolTransport` / `MailboxClientTransport` | 客户端侧 | 客户端 transport 契约（含 `mount(ClientTools)`） |
+
+写新 transport 时先照 `mailbox-server.ts`（最简单，无物理底座）启个框架，需要监听 TCP/unix 再对照 `http-server.ts`。
+
+「参考实现」意味着抄它的人会抄走每一条隐含约定。下面这几条以前在这两个文件里是**破的**（抄过去就是复制缺陷），现在已修并被回归测试钉住，改这两个文件时不要退回旧写法：
+
+| 约定 | 旧写法错在哪 | 钉住它的测试 |
+|---|---|---|
+| 源流错误必须处理：`result.pipe(res)` 之外要接 `result.on('error')` | 只接了 `res.on('error')`，源流抛错变成未捕获异常，响应挂死到超时 | `http-server-regressions.test.ts` R4 |
+| 请求体按**字节**收集（`Buffer` 拼接后一次 `toString('utf8')`），`maxBodySize` 也按字节判 | `body += chunk.toString()` 在多字节字符跨 chunk 时静默损坏成 U+FFFD，还照样回 200；按字符数判会超发 | R5、R6 |
+| 回环判定用归一化地址（`normalizeSocketAddress`）解析出的 hostname，不用 `/localhost/i` 扫字符串 | `mylocalhost.example` 这种 vhost 被误判回环，于是绑到 `127.0.0.1`，外部访问不到 | R1、R1b |
+| `start()` 每轮都补齐本实例声明的路由，不用 `some()` 提前短路 | start 之后新增的路由第二次 start 也不注册 | R2 |
+| `options` 里继承来的 `http.ServerOptions` 要转交 `http.createServer` | `maxHeaderSize`/`keepAliveTimeout` 等静默失效 | R3 |
+| `stop()` 必须注销路由归属（`unregisterRoutes()`） | mailbox 侧 stop 后地址永久占位，下一个实例 `registerServer` 必报 `Routing Conflict` | `mailbox-server.test.ts`、`routing-regressions.test.ts` P12 |
+| 路由前缀归一化只从 `route-path.ts`（基类 `toPathname`）走，不在子类里另写一份 | mailbox 自写 `extractPath`，`new URL` 失败就退回 `'/'`：裸前缀声明全塌成根，`/y` 与 `/z` 被当成重复声明拒掉 | `mailbox-transport.test.ts`、`mailbox-server.test.ts` |
+
+> **Fastify 不在本包里。** `FastifyServerToolTransport` 属于**另一个仓库、另一个包** `@isdk/tool-rpc-fastify`（不是本库内置插件）。本包文档不描述它的实现细节，只保证基座 API 两边共用同一份；fastify 侧的约定（自己的观测形状、`defaultBindOptions()`、共享同一个 fastify 实例）写在 `tool-rpc-fastify` 自己的 README 里。
+
+#### 公开面判据：下游在用，或插件契约
+
+地址符号对外与否，两条判据（可 grep）：
+
+```shell
+grep -rn '\b符号名\b' ../tool-rpc-fastify/src ../tool-electron/src ../ai-tool/src ../tool-event/src
+```
+
+1. 命中 → 公开（下游在用）。
+2. grep 不到但是**插件契约**（写自定义 transport 时要拿它算 `getListenAddr()` 该报什么）→ 也公开。
+3. 两条都不命中 → 包内。
+
+| 下游在用 | 插件契约 | 包内 |
+|---|---|---|
+| `BindOptions`、`normalizeListenBind`、`socketAddressFromBind`、`socketAddressFromListen` | `ResolvedListenBind`（`normalizeListenBind` 的返回类型，必须可命名）、`normalizeSocketAddress`、`normalizeHostAndPort`、`unixSocketUri`、`unixSocketPath` | `hasUriScheme`、`nativeAddressFromBind`、`withBindOptions`、`normalizeNativeAddress` |
+
+名单在 `transports/index.ts` 与 `transports/browser.ts` 里是**显式**的（不是 `export *`），由 `test/browser-entry.test.ts` 钉住。改公开面时**先改那份名单**（它会红）再动代码：它是唯一能表达「这个符号不该公开」的机制——测试网钉得住行为，钉不住公开面。
+
 ### 8.1 HttpServerToolTransport
-*   **物理底座复用 (Physical Reuse)**：支持多个逻辑 Transport 实例共享同一个物理端口（Node.js `http.Server`）。通过静态池管理，基于归一化的声明身份 (`getBaseUrl`) 实现；实际绑定观测请用 `getBoundAddress()`，它不参与池 key。
-*   **bind 参数属于声明 (Declared Bind Options)**：`start({ host, port })` 是调用方**声明**的绑定，会改写声明身份（`withBindOptions`）——apiUrl 里的旧端口就此过时，不会继续占着它误报冲突。反之 `port: 0`（由内核挑端口）属于观测，不改写 key，所以审计 key 跨 start 边界仍稳定。apiUrl 是裸 path 前缀（只说了路由、没说底座）时，由 bind 参数加上传输层 `defaultBindOptions()` 的确定默认值**造**出底座 URI（`physicalUriFromBind`），于是 `/api` 与 `/v2` 两个实例能共用同一个 socket 而不是各自 EADDRINUSE。
-*   **地址归一化 (Normalization)**：声明身份是 canonical URI，如 `http://localhost:3000`（精确绑定）或 `http://*:8080`（通配监听）；回环别名（`127.0.0.1` / `[::1]`）归一为 `localhost`，默认端口由 URL 自身丢弃（`http://h:80` 与 `http://h` 同 key）。非回环 host 记为通配：本 transport 对非回环 host 一律监听 0.0.0.0（监听不属于本机的主机名会 EADDRNOTAVAIL），它占的底座就是 `*:port`。
-*   **底座复用方向性**：已监听通配的底座可被声明具体 host 的实例复用（不会再 listen 第二次）；反向不行，已有具体绑定时再监听 0.0.0.0 会 EADDRINUSE。
-*   **unix socket 底座**：`start({ path })`（也认 `socketPath` / `socket`）监听 unix socket，声明身份就是 `unix:<path>`，`getBoundAddress()` 返回同一形式。`unix:` 之后按 URI 规范处理：入参**先按段 percent-encode 再进 URI**，要原值用 `unixSocketPath()` decode（空格→`%20`、`#`→`%23`、字面 `%`→`%25`、非 ASCII→UTF-8 百分号序列）。词法归一（折叠 `//`、去尾斜杠、消 `.` / `..`）在**已编码**空间做，所以 `/` 只作分隔符、段内 `%2F` 是字面斜杠。两条不变量：`unixSocketPath(canonical)` 就是实际 listen 的路径；编码幂等且单射——`/tmp/a b.sock` → `unix:/tmp/a%20b.sock`，而 `/tmp/a%20b.sock` → `unix:/tmp/a%2520b.sock`，两个可共存的合法文件名不会塌成同一个 key（塌了会误报冲突、还会复用错 socket）。注意带 `unix:` 前缀的入参按已编码理解：`unix:/tmp/a%20b.sock` 指的文件是 `a b.sock`，字面叫 `a%20b.sock` 的要写 `unix:/tmp/a%2520b.sock`。socket 声明优先于 host/port（与 Node「有 port 就忽略 path」相反，否则声明身份与真实监听会错开）。库默认不删 socket 文件（Node 的 `close()` 不删，Fastify 会删），重启到同一路径需调用方先清掉旧文件。同一 socket 上重复挂载同一逻辑路由会被 Manager 报 `Routing Conflict`；不同 socket 文件就是不同底座。
+*   **物理底座复用 (Physical Reuse)**：支持多个逻辑 Transport 实例共享同一个物理端口（Node.js `http.Server`）。静态池只按 `getListenAddr()` 的字符串精确匹配：相等就复用同一个 server，不相等就各自 `listen()`，真撞了由内核报 `EADDRINUSE`。不做「通配覆盖具体 host」那种包含判断（非传递、会漏报，又会把不同 host 塌成同一个底座）。
+*   **地址跟着监听走**：`getListenAddr()` 在监听前是声明值（apiUrl + `start({ host, port, path })`），监听后是真实底座——`port: 0` 时只有内核知道端口，地址必须是「能被别人访问」的那个。地址定下来后调 `registerRoutes()` 重登归属。apiUrl 是裸 path 前缀（只说了路由、没说底座）时，由 bind 参数加上传输层 `defaultBindOptions()` 的确定默认值**造**出底座 URI，于是 `/api` 与 `/v2` 两个实例能共用同一个 socket 而不是各自 EADDRINUSE。
+*   **地址归一化 (`normalizeSocketAddress`)**：地址语义属于 HTTP transport，不在通用 URI 模块里。`http://localhost:3000`（精确绑定）、`http://*:8080`（通配监听）；只规范化「同一个 socket 的两种写法」：回环别名（`127.0.0.1` / `[::1]`）归一为 `localhost`，通配写法（`0.0.0.0` / `[::]` / `*`）归一为 `*`，默认端口由 URL 自身丢弃（`http://h:80` 与 `http://h` 同 key），无 scheme 的 `host:port`（绑定观测、legacy 写法）补 `http://`。具体 host 不塌成通配（否则 vhost 判死）。
+*   **Host 头归一**：Host 是客户端可控输入，会被拼进 `ToolRpcRequest.apiUrl` 喂给 SSRF 校验（`url.includes(pattern)` 式匹配），所以先过归一（小写、去末尾点、去默认端口）：不归一的话 `Host: LocalHost` 能绕过针对 `localhost` 的限制。
+*   **unix socket 底座**（本节属 `HttpServerToolTransport`：unix socket 是这个 HTTP transport 自带的监听模式，不是独立插件，所以 `unix:` 这种地址形式也在这里说——它是 `getListenAddr()` 会报的底座 key，不是另一套 API）：`start({ path })`（也认 `socketPath` / `socket`）监听 unix socket，`getListenAddr()` 就是 `unix:<path>`。`unix:` 之后按 URI 规范处理：入参**先按段 percent-encode 再进 URI**，要原值用 `unixSocketPath()` decode（空格→`%20`、`#`→`%23`、字面 `%`→`%25`、非 ASCII→UTF-8 百分号序列）。词法归一（折叠 `//`、去尾斜杠、消 `.` / `..`）在**已编码**空间做，所以 `/` 只作分隔符、段内 `%2F` 是字面斜杠。两条不变量：`unixSocketPath(canonical)` 就是实际 listen 的路径；编码幂等且单射——`/tmp/a b.sock` → `unix:/tmp/a%20b.sock`，而 `/tmp/a%20b.sock` → `unix:/tmp/a%2520b.sock`，两个可共存的合法文件名不会塌成同一个 key（塌了会误报冲突、还会复用错 socket）。注意带 `unix:` 前缀的入参按已编码理解：`unix:/tmp/a%20b.sock` 指的文件是 `a b.sock`，字面叫 `a%20b.sock` 的要写 `unix:/tmp/a%2520b.sock`。socket 声明优先于 host/port（与 Node「有 port 就忽略 path」相反，否则声明身份与真实监听会错开）。库默认不删 socket 文件（Node 的 `close()` 不删），重启到同一路径需调用方先清掉旧文件。同一 socket 上重复挂载同一逻辑路由会被 Manager 报 `Routing Conflict`；不同 socket 文件就是不同底座。
 *   **精准路由分发 (Longest Prefix Match)**：当物理端口接收到请求时，采用“最长前缀匹配”算法扫描逻辑实例。
 *   **路径规范化 (Canonical + Trailing Slash)**：逻辑路由（`getRoutes()`）以 canonical 形式声明——以 `/` 开头、不带尾随斜杠（根为 `/`）；写入物理分发表的 key 由基类 `toMatchPrefix()` 补尾随斜杠，保证 `/api` 不会误匹配 `/apix`。归一化与匹配 key 均由 `ServerToolTransport` 的 helper 统一派生，实现方不再手写字符串拼接。
 *   **多前缀与重复声明 (Route Claims + Remount)**：`addRpcHandler()` / `addDiscoveryHandler()` 通过基类 `claimRoute()` 登记前缀，同一实例可服务多个前缀，各自的 registry / discovery handler 互不覆盖（请求期按前缀解析）。对已声明前缀再次声明时，默认 `'replace'`（替换并告警，不重复注册物理路由）；传 `options.remount = 'throw'` 则经 `onDuplicateRoute()` 抛错，自带路由表的后端可覆写该钩子以上报框架原生错误。
@@ -230,9 +288,44 @@ await manager.stopAll();
 *   **流式背压**：原生支持 `ReadableStream` 管道透传，通过 `Readable.fromWeb` 桥接至 Node.js 网络层。
 
 ### 8.2 MailboxServerTransport
-*   **物理独占性保护**：由于 Mailbox 协议通常基于点对点地址，该 Transport 默认接管物理地址下的全量路径 (`/`)。在 Manager 的路由审计下，这确保了对特定 Mailbox 地址的物理独占，防止多实例对同一信箱地址的争抢。
+*   **物理独占性保护**：由于 Mailbox 协议通常基于点对点地址，该 Transport 默认接管物理地址下的全量路径 (`/`)。在 Manager 的路由归属登记下，这确保了对特定 Mailbox 地址的物理独占，防止多实例对同一信箱地址的争抢。
 *   **元数据注入**：自动在 context 中注入 `x-mailbox-from/to` 等追踪头信息，增强全链路观测性。
-*   **信号联动**：支持 `push` (订阅) 和 `pull` (轮询) 两种模式，适配不同的信箱底座。
+*   **信号联动**：支持 `push` (订阅) 和 `pull` (轮询) 两种模式，适配不同的信箱底座。一个地址上两者**只能选一种**：memory provider 的 `publish()` 以前既投递给监听器又入队，而 push 消费者从不 dequeue —— 队列按调用次数永久堆积，重新 `start()` 时 `drainBacklog()` 还会把已处理过的请求再执行一遍（副作用重复）。现在 provider 侧有 push 订阅者就只走 push；契约钉在 `mailbox/src/mailbox.test.ts` 与 `mailbox-transport.test.ts`（「push 模式不重复记账」）。注意 `MemoryEventBus` 是进程内单例，topic 跨 `Mailbox` 实例共享，测试里地址必须唯一。
+
+### 8.3 基座地址不变量（写 transport 要守的规则）
+
+服务端 transport 只有一个地址概念：`getListenAddr()` —— 别人访问本服务用的地址。框架把它当**不透明字符串**：只用作底座池 key、路由归属表 key、分发 key 与日志，不解析、不校验、不预测 bind 冲突。
+
+- 地址语义（host/port/socket、回环写法、默认端口、监听之后补真实端口）归按 scheme 分派到的那个 transport 自己管；HTTP 家族那套在 `socket-address.ts`。插件只需覆写 `getListenAddr()` 返回一个字符串（`unix:/run/ai.sock`、`mem://bus-a`）。
+- 基类默认返回 `apiUrl` 原值。覆写后报什么就是什么：两个 transport 报的字符串**相等就复用同一个底座**，**不相等就各自 `listen()`**，真撞了由内核报 `EADDRINUSE`（fail fast，不误报也不漏报）。**不做包含关系预测**（不把 `0.0.0.0:3000` 视为覆盖 `localhost:3000`）：那种关系非传递（会漏报），又会把不同 host 同端口塌成一个底座（误报、vhost 判死）。
+- 地址变了（`start({ port })` 改写、`port: 0` 观测到真实端口）时要调 `this.registerRoutes()` 重登归属，否则登记停在旧地址上：对真实地址漏报、对让出去的地址过报冲突。每次 `start()` 重算声明地址，不累加。
+- socket 别名与「socket 优先于 host/port」**只写一处**：`normalizeListenBind()`。`socketAddressFromBind()` 造声明地址时用它，transport 的 `_start()` 取监听参数时也用它。两边不同一份，声明地址与真实监听就会错开。
+- 监听前后的地址必须相等（同一个 socket 在池里只能有一个 key）：声明侧 `socketAddressFromBind()`、观测侧 `socketAddressFromListen()`，两边都过 `normalizeSocketAddress()`。
+
+#### 为什么 unix 路径要按段编码
+
+8.1 给了规则（先按段 percent-encode 再进 URI，词法归一在已编码空间做）。为什么只能这样切（均实测）：
+
+| 做法 | 结果 |
+|---|---|
+| `new URL('unix:/tmp/a b.sock')` | pathname `/tmp/a%20b.sock`，但字面 `%` 原样保留 → `/tmp/a b.sock` 与 `/tmp/a%20b.sock`（两个可共存的合法文件）塌成同一个 key；`#` / `?` 在 parse 阶段截断 pathname（`/tmp/a#b.sock` → pathname `/tmp/a`），那不是编码、无从 decode |
+| 整段 `encodeURIComponent(path)` | 分隔符也被编掉：`/tmp/a b.sock` → `%2Ftmp%2Fa%20b.sock`，底座层级没了 |
+| `encodeURI(path)` | 它按**整个 URI** 的转义集，刻意保留 `;/?:@&=+$,#`。喂给单个段就等于不转义 `#` / `?` → pathname 仍是 `/tmp/a` |
+| **按段 `encodeURIComponent`**（采用） | 空格→`%20`、`#`→`%23`、`?`→`%3F`、字面 `%`→`%25`、非 ASCII→UTF-8 序列；`/` 由切分保留为分隔符，段内出现的 `%2F` 只可能是字面斜杠，两者可区分 |
+
+另外：`decodeSegment` 把裸 `%` 先当 `%25`（`/tmp/%.sock` 里 `%` 不是合法转义序列，直接 `decodeURIComponent` 会抛 URIError）；词法消 `.` / `..` 是**文件系统**语义，`/../x` 在根上夹住成 `/x`（POSIX），不像 HTTP 请求路径那样报 400（对比 `route-path.ts` 的 mode）。
+
+### 8.4 transport 测试与环境坑
+
+- **改 `packages/mailbox` 的源码后要先重建 `dist`**。本包测试里 `import { Mailbox, MemoryProvider } from '@mboxlabs/mailbox'` 解析到的是 `packages/mailbox/dist/index.js`（workspace 软链 + `main` 字段），不是 `src`。只改源码不跑 `tsup`，下游测试看到的仍是旧行为（会误判「修复无效」或「测试假绿」）。
+- **端口不要先探测再 bind**。`findPort()` 是「探测 → 关闭 → 交给被测代码 bind」，中间有 TOCTOU 窗口；它内部的串行与递增重试只在**单进程**内有效，而 vitest 每个测试文件跑在独立 worker 里，两个套件从同一个起始端口出发就会同时认为它空闲，后 bind 的那个随机 `EADDRINUSE`。
+  - 只需要「一个可用端口」时：用 `test/helpers/ports.ts` 的 `startOnKernelPort()`——`port: 0` 由内核在 listen 时原子分配，没有窗口；端口从 `getListenAddr()` 读。路由要在 start 前声明，所以用**裸 path 前缀**（`/api`）声明路由，端口等监听后再拼给客户端。
+  - 确实需要预先知道端口时（例如两个 transport 要在 apiUrl 里写同一个 authority 才能落到同一底座）：用 `test/helpers/ports.ts` 的 `withReservedPort(from, factory, host?)`。它把探测与 bind 之间的窗口压到 factory 自己的 setup，且窗口内真被抢走时**换下一个号码重跑 factory**。
+    - factory 必须可重跑，且只放「构造 transport + 监听」；它的**返回值**就是 `withReservedPort` 的返回值（要拿端口就在末尾 `return p`）。`_start` 失败时会把脏底座从共享池删掉（`sharedServers.delete(key)`），换号重跑不留残留。
+    - 只有第一个真的 `listen` 的实例需要预留；挂到同一底座上的后续实例走 refCount，不会再 listen。
+- unix socket 文件：Node 的 `close()` **不会**删除 socket 文件，重启到同一路径要先清掉旧文件。测试里用唯一临时路径 + `finally` unlink。（外部包 `@isdk/tool-rpc-fastify` 不同：Fastify 自己的 `close()` 会删。）
+- socket 路径有长度上限（Linux 约 104 字节），临时目录名要短。
+- 底座是引用计数的共享池：测试里 start 出来的第二个 transport 若没 `stop()`，`stop(true)` 也不会关掉 server，进程会挂住不退出。
 
 ---
 
@@ -247,10 +340,7 @@ await manager.stopAll();
 
 ---
 
-## 9. 工具类继承体系
----
-
-## 8. 工具类继承体系
+## 10. 工具类继承体系
 
 开发时推荐根据业务语义继承不同的基类：
 
@@ -260,11 +350,11 @@ await manager.stopAll();
 
 ---
 
-## 9. 客户端高级连接范式 (Advanced Client Patterns)
+## 11. 客户端高级连接范式 (Advanced Client Patterns)
 
 为了实现业务逻辑与物理寻址的深度解耦，V2 架构推荐以下两种高级连接模式，取代传统的全局 `setTransport` 绑定。
 
-### 9.1 服务连接模式 (Service Connection Pattern)
+### 11.1 服务连接模式 (Service Connection Pattern)
 
 适用于“一个业务类需要对接多个后端实例”的场景。通过 `connect` 工厂方法，可以为同一个业务定义产生多个物理隔离的连接实例。
 
@@ -289,7 +379,7 @@ const orderB = await mbxSrv.createOrder.run({ id: 2 });
 - **隔离性**：每个 `connect` 产生的类拥有独立的 `items` 注册表，互不干扰。
 - **协议透明**：开发者只需关注业务类（`OrderService`），无需手动处理 Transport 细节。
 
-### 9.2 动态绑定调用 (On-demand Binding)
+### 11.2 动态绑定调用 (On-demand Binding)
 
 适用于“同一个工具 Stub 需要动态发往不同集群”的极致灵活性场景。利用 `with` 机制在执行时注入寻址信息。
 
@@ -307,11 +397,10 @@ const resCN = await chatTool.with({ apiUrl: 'https://cn.api.srv/v1' }).run({ tex
 
 ---
 
-## 10. 客户端使用范例
+## 12. 客户端使用范例
 
 ```typescript
-import { RpcTransportManager } from './transportsV2/manager';
-import { HttpClientToolTransport } from './transportsV2/http-client';
+import { RpcTransportManager, HttpClientToolTransport } from '@isdk/tool-rpc';
 import { ClientTools } from './client-tools';
 
 // 1. 注册协议解析器 (全局一次)
@@ -333,16 +422,16 @@ const rawRes = await transport.fetch('adder', { a: 1 });
 
 ---
 
-## 11. V1 到 V2 迁移指南
+## 13. V1 到 V2 迁移指南
 
-### 10.1 服务端兼容配置
+### 13.1 服务端兼容配置
 
 在 `RpcServerDispatcher` 初始化时，`compat` 选项默认开启以支持旧代码：
 
 * **enableParamBridge**：自动将旧的 `params.id/act` 同步至 context。
 * **enableContextInjection**：将原生底座对象注入 `params._req/_res`。
 
-### 10.2 推荐优化
+### 13.2 推荐优化
 
 建议新编写的任务显式定义保留策略：
 
@@ -358,6 +447,6 @@ class MyTool extends ServerTools {
 
 ---
 
-## 11. 评估与调试
+## 14. 评估与调试
 
 建议在生产环境通过 `RpcTransportManager.instance.validateRpcRequest` 扩展自定义的安全审计。在调试时，关注响应 Header 中的 `req-id` 确保全链路追踪的闭环。

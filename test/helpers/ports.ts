@@ -9,8 +9,8 @@ import type { IServerToolTransport } from '../../src/transports/server'
  * `findPort` 的进程内串行（以及 EADDRINUSE 时递增重试）跨不了进程，两个套件从同一个
  * 起始端口出发就会同时认为它空闲，后 bind 的那个随机 EADDRINUSE。
  *
- * `port: 0` 由内核在 listen 那一刻原子地分配，没有窗口。端口从 `getBoundAddress()`
- * （绑定观测）读，而不是从声明身份读——后者按设计不随内核端口变化。
+ * `port: 0` 由内核在 listen 那一刻原子地分配，没有窗口。端口从 `getListenAddr()` 读：
+ * 它就是「别人访问本服务用的地址」，监听后必须跟着内核选的真实端口。
  *
  * 路由要在 start 之前声明（物理路由表在 `_start` 里登记），所以这里用**裸 path 前缀**
  * 声明路由（只说路由、不说底座），端口留到监听之后再拼给客户端。
@@ -45,11 +45,11 @@ export async function withReservedPort<T>(
   return withFreePort(factory, from, host ? { host } : undefined)
 }
 
-/** 绑定观测（`address:port`）里的端口。 */
+/** 监听后的地址（`http://host:port` 之类）里的端口。 */
 export function kernelPort(transport: IServerToolTransport): number {
-  const bound = transport.getBoundAddress?.()
-  if (!bound) {throw new Error(`${transport.constructor.name} is not listening — call start() first`);}
-  const port = Number(String(bound).split(':').pop())
-  if (!Number.isInteger(port) || port <= 0) {throw new Error(`cannot read a port from bound address "${bound}"`);}
+  const addr = transport.getListenAddr()
+  if (!addr || Array.isArray(addr)) {throw new Error(`${transport.constructor.name} has no single listen address — call start() first`);}
+  const port = Number(String(addr).split(':').pop())
+  if (!Number.isInteger(port) || port <= 0) {throw new Error(`cannot read a port from listen address "${addr}"`);}
   return port;
 }

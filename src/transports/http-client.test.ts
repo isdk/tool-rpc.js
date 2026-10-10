@@ -190,6 +190,51 @@ describe('HttpClientToolTransport', () => {
         expect(objJson.k).toBe('v');
     });
 
+    it('should clear the stream idle timer when the consumer cancels', async () => {
+        // 旧实现只在 flush 里清定时器，而下游 cancel 不会跑 flush（实测）：
+        // 定时器会一直活到 idle 超时才在 controller.error 上触发
+        const setSpy = vi.spyOn(globalThis, 'setTimeout');
+        const clearSpy = vi.spyOn(globalThis, 'clearTimeout');
+
+        const sourceCancelSpy = vi.fn();
+        const body = new ReadableStream({ start(c) { c.enqueue('chunk'); }, cancel: sourceCancelSpy });
+        (globalThis.fetch as any).mockResolvedValue(new Response(body, {
+            status: 200,
+            headers: { 'content-type': 'application/octet-stream' },
+        }));
+
+        const res = (await transport._fetch('tool', {}, 'act', undefined, {
+            timeout: { value: 5000, streamIdleTimeout: 50 },
+        })) as Response;
+        const reader = res.body!.getReader();
+        await reader.read();
+        await reader.cancel();
+
+        // 只看最后一个 idle handle：`resetIdleTimer` 在 transform 里就会 clear 上一个，
+        // 若把全部 handle 都算上，旧实现（cancel 什么都不清）也能靠那次 clear 误判为通过。
+        const lastIdleHandle = setSpy.mock.results
+            .filter((_, i) => setSpy.mock.calls[i][1] === 50)
+            .map(r => r.value)
+            .filter(Boolean)
+            .pop();
+        expect(lastIdleHandle).toBeDefined();
+        expect(clearSpy.mock.calls.some(call => call[0] === lastIdleHandle)).toBe(true);
+        // 包一层不能把 cancel 吞掉：它还得往上游传到响应体本身
+        expect(sourceCancelSpy).toHaveBeenCalled();
+    });
+
+    it('should bridge the caller signal with { once: true } so listeners do not pile up', async () => {
+        (globalThis.fetch as any).mockResolvedValue({
+            ok: true, status: 200, headers: new Headers(), body: null,
+        });
+        const ac = new AbortController();
+        const spy = vi.spyOn(ac.signal, 'addEventListener');
+
+        await transport._fetch('tool', {}, 'act', undefined, { signal: ac.signal });
+
+        expect(spy.mock.calls.some(call => call[0] === 'abort' && (call[2] as any)?.once === true)).toBe(true);
+    });
+
     it('should handle complex base URLs correctly', async () => {
         transport = new HttpClientToolTransport('http://api.example.com/v1?token=abc#frag');
         (globalThis.fetch as any).mockResolvedValue({ ok: true, json: () => ({}) });

@@ -12,7 +12,7 @@
 
 ### 1.2 核心组件职责 (Trinity Architecture)
 
-1. **管理中心 (RpcTransportManager)**：协议注册中心、物理连接池与路由审计引擎。负责根据 `apiUrl` 寻址，管理传输实例的生命周期，并执行物理地址与逻辑路由的冲突校验。
+1. **管理中心 (RpcTransportManager)**：协议注册中心、物理连接池与路由归属登记引擎。负责根据 `apiUrl` 寻址，管理传输实例的生命周期，并执行物理地址与逻辑路由的冲突校验。
 2. **物理传输层 (IToolTransport)**：协议适配器与搬运工。负责协议报文与归一化对象的双向互转。在 V2 中引入了物理底座 (`getListenAddr`) 与逻辑路由 (`getRoutes`) 的分离，支持多实例对物理资源的共享。
 3. **执行调度器 (RpcServerDispatcher)**：服务端核心引擎。独立于协议，负责工具查找、能力协商、AoP 组装及执行死线裁决。
 4. **任务追踪器 (RpcActiveTaskTracker)**：活跃任务账本。隶属于调度器，支持跨协议的任务可见性、结果保留策略控制与物理中止联动。
@@ -24,13 +24,13 @@
 所有传输实现必须符合以下严密的接口继承规范，以确保多协议间的一致行为：
 
 - **`IToolTransport`** (顶层接口)：定义基础寻址 (`apiUrl`) 及连接管理。
-  - **`mount(tools: any)`**: `@deprecated` 临时保留的工具挂载方法。在 V2 中已由 `manager.addServer` 与 `addRpcHandler` 体系取代。
+  - **`mount(tools: any)`**: `@deprecated` 临时保留的工具挂载方法。在 V2 中已由 `manager.registerServer` 与 `addRpcHandler` 体系取代。
   - **`IServerToolTransport`** (服务端协议规范)：
     - **`getListenAddr()`**: 返回物理层面的监听地址标识（如 `:3000` 或 `localhost:8080`）。
       - **归一化要求**：实现类需将 `127.0.0.1`、`[::1]` 等回环地址归一化为 `localhost`，以确保物理底座池的精确命中。
       - **监听范围**：`:port` 表示监听 `0.0.0.0`，`host:port` 表示精确绑定。
     - **`getRoutes()`**: 返回该实例声明负责的逻辑路由列表（每个前缀一条）。
-      - **规范化要求（已修订）**：逻辑路由以 **canonical 形式**存储——以 `/` 开头、**不带**尾随斜杠（根路由为 `/`），并压缩重复斜杠；由 `ServerToolTransport.toPathname()` 统一实现。前缀匹配与物理路由表的 key 则由 `toMatchPrefix()` 派生（补尾随斜杠，根仍为 `/`），以保证 `/api` 不会误匹配 `/apix`。即：**审计比对用 canonical 形式，分发匹配用 match 形式**，两者由基类同一组 helper 派生，实现类不再手写拼接。
+      - **规范化要求（已修订）**：逻辑路由以 **canonical 形式**存储——以 `/` 开头、**不带**尾随斜杠（根路由为 `/`），并压缩重复斜杠；由 `ServerToolTransport.toPathname()` 统一实现。前缀匹配与物理路由表的 key 则由 `toMatchPrefix()` 派生（补尾随斜杠，根仍为 `/`），以保证 `/api` 不会误匹配 `/apix`。即：**归属登记比对用归一化前缀，分发匹配用 match 形式**，两者由基类同一组 helper 派生，实现类不再手写拼接。
       - **声明方式**：调用基类的 `claimRoute(apiUrl, kind, options)`，它同时完成归一化、多前缀簿记（`prefix -> { apiUrl, registry, discoveryHandler }`）与重复声明的 `remount` 决策（`'replace'` 默认 / `'throw'`）。
     - **`HttpServerToolTransport`** (基于 Node.js 原生 http 模块，支持物理复用)。
     - **`MailboxServerToolTransport`** (基于内部分布式信箱，天然物理独占)。
@@ -110,15 +110,16 @@
 ### 4.1 RpcTransportManager (逻辑路由与策略中心)
 
 - **多实例支持**：默认提供全局单例 `RpcTransportManager.instance`，同时也支持通过 `new` 创建独立实例以满足测试隔离或多租户需求。
-- **自动路由审计与冲突检测**：
-  - 在调用 `addServer(transport)` 时，Manager 会提取其物理地址 (`getListenAddr`) 和逻辑路由 (`getRoutes`)。
-  - 维护全局 `routeAudit` 审计表（`ListenAddr -> Set<RoutePath>`）。
+- **自动路由归属登记与冲突检测**：
+  - 在调用 `registerServer(transport)` 时，Manager 会提取其物理地址 (`getListenAddr`) 和逻辑路由 (`getRoutes`)。
+  - 维护全局 `routeOwnership` 归属表（`ListenAddr -> Set<RoutePath>`）。
   - **拦截规则**：若同一物理地址下尝试注册已存在的逻辑路由，立即抛出 `Routing Conflict` 异常，防止路由劫持。
+  - **动词对**：`registerServer()` / `unregisterServer()`（旧名 `addServer()` 已废弃，仅作转发）。`unregisterServer()` 只注销归属与 transport 映射，**不**停底层 server。与 transport 侧的 `registerRoutes()` / `unregisterRoutes()` 同族——后者是框架适配器的推荐入口，它同时完成 `claimRoute()` 与归属登记，且可重复调用（先注销再登记）。
 - **二级映射寻址算法**：
   1. **协议层注册 (Static)**：Scheme（如 `mailbox`）映射到具体类。支持多 Scheme 映射到单类。提供 `clearSchemes(scheme?)` 用于清空注册表，解决测试交叉污染。
   2. **动态解析器 (Resolvers)**：支持注册函数式解析器，在静态表未命中时动态返回实现类。
   3. **实例层缓存 (Instance)**：按 `apiUrl` 的 Origin 路径缓存 Transport 物理实例，确保连接池隔离。
-- **架构级策略校验 (`validateRpcRequest`)**：在调度前进行最终审计。包括 **SSRF 防御**（通过 `restrictedPatterns` 正则或字符串匹配）、协议白名单、工具访问权限控制。
+- **架构级策略校验 (`validateRpcRequest`)**：在调度前进行最终策略校验。包括 **SSRF 防御**（通过 `restrictedPatterns` 正则或字符串匹配）、协议白名单、工具访问权限控制。
 
 ### 4.2 RpcServerDispatcher (逻辑执行引擎)
 
@@ -175,10 +176,10 @@ V2 架构通过 `IServerToolTransport` 的扩展接口实现了对底层物理�
   - **地址归一化 (Normalization)**：自动将 `localhost` 等回环地址统一处理，确保同一物理端口仅开启一个 `http.Server`，最大限度实现资源共享。
   - **引用计数 (Ref Counting)**：通过计数器追踪物理 Server 的逻辑持有者数量。当最后一个逻辑 Transport 实例调用 `stop()` 时，物理底座自动回收并安全关闭监听端口。
   - **路由分发逻辑 (Routing)**：物理端口接收到请求后，采用 **“最长前缀匹配” (Longest Prefix Match)** 算法扫描逻辑实例。
-    - **路径规范化**：审计与 `getRoutes()` 使用 canonical 前缀（无尾随斜杠）；写入与比对物理分发表时再由 `toMatchPrefix()` 完成 **Trailing Slash Normalization**（尾随斜杠补齐），杜绝因路径拼接不规范导致的路由错配。
+    - **路径规范化**：归属登记与 `getRoutes()` 使用归一化前缀（无尾随斜杠）；写入与比对物理分发表时再由 `toMatchPrefix()` 完成 **Trailing Slash Normalization**（尾随斜杠补齐），杜绝因路径拼接不规范导致的路由错配。
     - **HTTPS 考量**：若未来涉及 HTTPS 共享，建议在物理底座池键名中加入协议前缀以区分 TLS/TCP 复用。
 - **Mailbox 独占性保护**：
-  - `MailboxServerTransport` 默认接管全量路径 (`/`)。在 Manager 的路由审计下，这意味着对于同一个 Mailbox 地址，系统只允许激活一个 Transport 实例，从而在分布式信箱环境中天然保护了物理执行的唯一性。
+  - `MailboxServerTransport` 默认接管全量路径 (`/`)。在 Manager 的路由归属登记下，这意味着对于同一个 Mailbox 地址，系统只允许激活一个 Transport 实例，从而在分布式信箱环境中天然保护了物理执行的唯一性。
 - **服务激活 (`startAll`)**：针对所有已注册的服务端 Transport 批量调用 `start()`。
 - **全局清理 (`stopAll`)**：批量调用所有逻辑实例的 `stop()` 或物理层的 `close()`。由于引入了引用计数，该操作能确保所有物理监听安全且完整地退出。
 
@@ -216,7 +217,7 @@ export abstract class ServerToolTransport extends ToolTransport {
       // 1. 物理层翻译：子类将物理报文翻译为归一化对象
       const rpcReq = await this.toRpcRequest(rawReq);
 
-      // 2. 架构层校验：调用 Manager 实例进行 SSRF/权限审计
+      // 2. 架构层校验：调用 Manager 实例进行 SSRF/权限校验
       this.manager.validateRpcRequest(rpcReq);
 
       // 3. 执行分发：交给独立的 Dispatcher 流水线

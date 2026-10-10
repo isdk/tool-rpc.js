@@ -13,8 +13,9 @@ export interface MailboxServerTransportOptions extends ServerToolTransportOption
 export class MailboxServerTransport extends ServerToolTransport {
   protected mailbox!: Mailbox;
   protected listenAddress: string = '';
-  protected apiPrefix: string = '/';
   protected discoveryHandlerInfo: { prefix: string; handler: () => any } | null = null;
+  /** 轮询循环只报一次错：服务端挂掉与「没有消息」在外部完全一样，不能静默吞。 */
+  protected pullLoopErrored = false;
   protected subscription: any;
   protected mode: 'push' | 'pull' = 'push';
   protected pullInterval: number = 1000;
@@ -36,35 +37,19 @@ export class MailboxServerTransport extends ServerToolTransport {
     }
     this.apiUrl = apiUrl;
     this.listenAddress = apiUrl;
-    this.apiPrefix = (this as any).extractPath(apiUrl);
 
     this.mode = options.mode || 'push';
     this.pullInterval = options.pullInterval || 1000;
   }
 
   /**
-   * 注意：与基类 toPathname 不同，这里要求 urlStr 是完整 URL，
-   * 解析失败一律退回 '/'（既有语义，测试依赖）。
+   * 路由前缀的归一化不另写一份：基类的 `toPathname`（route-path.ts 的
+   * `normalizeRoutePath`）已经处理了「完整 URL 取 path」与「裸 path 前缀」两种写法。
+   *
+   * 以前这里自己写一套 `extractPath`（`new URL` 失败就退回 '/'），于是裸前缀声明
+   * 全塌成 '/'：`addRpcHandler('/y')` 后再 `addRpcHandler('/z')` 会被当成重复声明
+   * 拒掉（实测），与基类「声明侧与请求侧同一套规则」的不变量直接矛盾。
    */
-  protected extractPath(urlStr: string): string {
-    try {
-      const url = new URL(urlStr);
-      let p = url.pathname.replace(/\/+/g, '/'); // 压缩连续斜杠
-      if (!p.startsWith('/')) p = '/' + p;
-      if (!p.endsWith('/')) p += '/';
-      return p;
-    } catch (e) {
-      return '/';
-    }
-  }
-
-  /**
-   * Mailbox 的 apiUrl 是地址而不是 http URL，沿用 extractPath 的解析结果，
-   * 再归一为基类的 canonical 形式（无尾斜杠），避免 claim key 里混入 scheme。
-   */
-  protected toPathname(apiUrl: string): string {
-    return this.extractPath(apiUrl).replace(/\/+$/, '') || '/';
-  }
 
   /**
    * Mailbox 默认接管全量路径：这是设计文档规定的独占保护（同一 mailbox 地址
@@ -83,7 +68,6 @@ export class MailboxServerTransport extends ServerToolTransport {
 
   public addRpcHandler(apiUrl: string, options?: RouteClaimOptions) {
     this.claimRoute(apiUrl, 'rpc', { remount: options?.remount });
-    this.apiPrefix = this.extractPath(apiUrl);
   }
 
   protected async onReceive(message: MailMessage) {
@@ -203,6 +187,7 @@ export class MailboxServerTransport extends ServerToolTransport {
 
     await this.mailbox.start?.();
 
+    this.pullLoopErrored = false;
     if (this.mode === 'push') {
       this.subscription = this.mailbox.subscribe(address, this.onReceive.bind(this));
       await this.drainBacklog(address);
@@ -233,7 +218,12 @@ export class MailboxServerTransport extends ServerToolTransport {
         } else {
           await new Promise(resolve => setTimeout(resolve, this.pullInterval));
         }
-      } catch (error) {
+      } catch (error: any) {
+        // 不静默吞：只报一次，否则刷日志比故障本身还响
+        if (!this.pullLoopErrored) {
+          this.pullLoopErrored = true;
+          console.warn(`[MailboxServerTransport] pull loop error on ${address}: ${error?.message || error}`);
+        }
         await new Promise(resolve => setTimeout(resolve, this.pullInterval));
       }
     }
@@ -241,6 +231,9 @@ export class MailboxServerTransport extends ServerToolTransport {
 
   public async stop(force?: boolean): Promise<void> {
     this.isRunning = false;
+    // 归属登记条目必须跟着释放（与 HttpServerToolTransport.stop 同一份约定）：
+    // 不释放的话这个地址上的路由永久占位，下一个实例 registerServer 必报 Routing Conflict
+    this.unregisterRoutes();
     if (this.subscription) {
       await this.subscription.unsubscribe();
       this.subscription = null;

@@ -121,6 +121,20 @@ export interface RemoteFuncItem extends BaseFuncItem {
 - **数据间隔超时 (Gap Timeout)**: 任意两个相邻 Chunk 之间的时间间隔不得超过 `streamIdleTimeout`。
 - **处理方式**: 一旦触发，传输层应向应用层抛出超时异常并关闭连接。
 
+### 6.1 传输层接入要求（适用于所有传输层）
+
+超时与流语义由 `RpcServerDispatcher` 统一实现，因此**任何服务端传输层必须把入站请求交给 `manager.processIncomingCall()`**，而不是自己调 `dispatcher.dispatch()`。这一层差异不是风格问题：
+
+| 经由 `processIncomingCall` | 自己 `dispatch` 会跳过 |
+| --- | --- |
+| `manager.validateRpcRequest()`（SSRF / 协议白名单 / 工具访问权限） | 架构级策略校验全部失效 |
+| `dispatcher.canStream()` 预检 | 流式意图与工具 `stream` 能力冲突时不会返回 `400`，而是进入 dispatch 后报 `500` |
+| 错误归一化为 `ToolRpcResponse` | 需自行实现错误体映射，容易不一致 |
+
+流式传输层还需在 `start()` 里挂上 `streamIdleTimeout`（首字节与相邻 chunk 间隔），并在 `stop()` 里销毁尚未结束的流（否则空闲流会泄漏）。参考实现：`HttpServerToolTransport`（`src/transports/http-server.ts`）。
+
+> 已知缺口：`@isdk/tool-electron` 的 `IpcServerToolTransport` 目前直接调 `dispatcher.dispatch()`，因此上述三项预检均未生效（它也不读 `streamIdleTimeout`、`stop()` 不注销路由归属）。接入时应改为 `processIncomingCall`。
+
 ---
 
 ## 7. 工具发现 (Discovery)

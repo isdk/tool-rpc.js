@@ -7,7 +7,7 @@
 ## ✨ 核心功能
 
 - **三位一体架构 (V2.6+):**
-  - **RpcTransportManager (管理中心)**: 协议注册中心、逻辑路由审计及传输实例生命周期管理。
+  - **RpcTransportManager (管理中心)**: 协议注册中心、逻辑路由归属登记及传输实例生命周期管理。
   - **RpcServerDispatcher (执行调度器)**: 独立于协议的执行引擎，内置并发隔离（影子实例）与任务追踪。
   - **RpcActiveTaskTracker (任务追踪器)**: 跨协议任务可见性，支持结果保留策略与后台执行 (102 Processing)。
 - **分层抽象:** 提供了一套分层的工具类 (`ServerTools`, `RpcMethodsServerTool`, `ResServerTools`)，允许您根据需求选择合适的抽象级别。
@@ -96,7 +96,7 @@ async function startServer() {
   serverTransport.addRpcHandler(apiUrl);
 
   // 4. 将传输层注册到管理器并启动所有服务
-  RpcTransportManager.instance.addServer(serverTransport);
+  RpcTransportManager.instance.registerServer(serverTransport);
   await RpcTransportManager.instance.startAll();
 
   console.log(`✅ 工具服务器已启动，地址: ${apiUrl}`);
@@ -152,7 +152,7 @@ async function main() {
 main();
 ```
 
-### 核心概念：分层抽象
+## 核心概念：分层抽象
 
 `@isdk/tool-rpc` 的核心设计思想是分层抽象，将网络通信与业务逻辑清晰分离。您可以根据需求的复杂度选择合适的抽象层级。
 
@@ -229,7 +229,7 @@ V2 架构引入了**影子实例**机制，彻底解决了异步环境下的 `th
 
 1. **RpcTransportManager (管理中心)**:
     - **物理映射**: 管理 `apiUrl` 到 `IToolTransport` 实例的映射。
-    - **路由审计**: 执行 `ListenAddr -> Set<RoutePath>` 冲突检测，防止在共享物理端口上发生路由劫持。
+    - **路由归属登记**: 维护 `ListenAddr -> Set<RoutePath>` 归属表并做冲突检测，防止在共享物理端口上发生路由劫持。
 2. **RpcServerDispatcher (执行调度器)**:
     - **归一化**: 将协议特定的对象转化为标准的 `ToolRpcContext`。
     - **死线裁决**: 实现软死线（触发 `102 Processing` 以转入后台执行）和硬死线（以 `408` 终止任务）。
@@ -503,8 +503,9 @@ import { ClientTools } from '@isdk/tool-rpc'
     1. **暴露发现端点**: 创建一个通常为 `GET` 的路由（例如 `/api`），当客户端访问时，它会返回所有已注册并可用的工具的 JSON 定义。这是通过 `addDiscoveryHandler` 方法实现的。
     2. **处理 RPC 调用**: 创建一个通用的 RPC 路由（例如 `/api/:toolId`），它接收请求，根据 `toolId` 查找对应的工具，执行它，然后返回结果。这是通过 `addRpcHandler` 方法实现的。
     3. 管理服务器生命周期 (`start`, `stop`)。
-    4. **物理感知 (V2)**: 通过 `getListenAddr()` 和 `getRoutes()` 实现物理端口复用与逻辑路由审计。
+    4. **物理感知 (V2)**: 通过 `getListenAddr()` 和 `getRoutes()` 实现物理端口复用与逻辑路由归属登记。
     5. **路由声明与重复挂载 (V2)**: `addRpcHandler()` / `addDiscoveryHandler()` 会在 `ServerToolTransport` 基类中声明（claim）其路径前缀，因此一个 transport 可同时服务多个前缀，各自绑定独立的注册表与发现处理器。逻辑路由以 canonical 形式上报（以 `/` 开头、不带尾随斜杠），前缀匹配用的尾斜杠形式由 `toMatchPrefix()` 派生。对已声明的前缀再次声明时，默认替换其注册表/处理器并告警；传入 `options.remount = 'throw'` 则改为抛错——自带路由表的后端可覆写 `onDuplicateRoute()` 上报框架原生的重复路由错误。
+    6. **路由注册成对方法 (V2)**: `registerRoutes()` / `unregisterRoutes()` 是 `ServerToolTransport` 基类的 **`protected`** 成员，只能在自己的 transport 子类内部调用；它们同步物理路由表与 Manager 的归属表，且可重复调用（先注销再登记）。框架适配器（Fastify、Electron、Express）应调用这一对，而不是只调 `claimRoute()`——只声明路由而不动归属表会留下残留条目，导致下次 `listen()` 报 `Routing Conflict`。Manager 侧对应的一对是 `registerServer()` / `unregisterServer()`（旧名 `addServer()` 已废弃，仅作转发）；`unregisterServer()` 只清理归属与 transport 映射，**不**停底层 server。
 - **`IClientToolTransport`**: 客户端传输必须实现的接口。其核心职责是：
     1. **加载 API 定义**: 调用 `loadApis()` 方法，该方法会访问服务器的发现端点以获取所有工具的定义。
     2. **执行远程调用**: 实现 `fetch()` 方法，该方法负责将客户端的工具调用（函数名和参数）序列化，发送到服务器的 RPC 端点，并处理响应。

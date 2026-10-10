@@ -20,7 +20,7 @@
 
 | 组件 | 角色 | 关键方法/属性 |
 |------|------|---------------|
-| `RpcTransportManager` | 协议注册中心、路由审计、连接池管理 | `bindScheme()`, `addServer()`, `startAll()`, `stopAll()`, `validateRpcRequest()` |
+| `RpcTransportManager` | 协议注册中心、路由归属登记、连接池管理 | `bindScheme()`, `registerServer()`, `startAll()`, `stopAll()`, `validateRpcRequest()` |
 | `RpcServerDispatcher` | 执行调度、能力协商、影子实例隔离、超时裁决 | `dispatch()`, `handleError()`, 自动注入 `this.ctx.tracker` |
 | `RpcActiveTaskTracker` | 任务注册、状态转换、硬死线、结果保留、物理中止联动 | `register()`, `get()`, 内部维护 `tasks` Map |
 
@@ -116,7 +116,7 @@ transport.addDiscoveryHandler(apiUrl, () => ServerTools.toJSON());
 transport.addRpcHandler(apiUrl);
 
 // 注册到 Manager（自动检测路由冲突）
-RpcTransportManager.instance.addServer(transport);
+RpcTransportManager.instance.registerServer(transport);
 await RpcTransportManager.instance.startAll();
 console.log(`Server ready at ${apiUrl}`);
 ```
@@ -292,7 +292,7 @@ transport.addRpcHandler(serverAddr);
 transport.addDiscoveryHandler(serverAddr, () => ServerTools.toJSON());
 
 // 启动
-RpcTransportManager.instance.addServer(transport);
+RpcTransportManager.instance.registerServer(transport);
 await RpcTransportManager.instance.startAll();
 ```
 
@@ -364,7 +364,7 @@ class FastifyServerTransport extends ServerToolTransport {
 const manager = new RpcTransportManager();
 const dispatcher = new RpcServerDispatcher({ tracker: new RpcActiveTaskTracker() });
 const transport = new HttpServerToolTransport({ apiUrl: 'http://localhost:3001/', dispatcher });
-manager.addServer(transport);
+manager.registerServer(transport);
 await manager.startAll();
 ```
 
@@ -372,6 +372,8 @@ await manager.startAll();
 
 ### 5.1 路径规范化
 逻辑路由（`getRoutes()`）以 **canonical 形式**声明：以 `/` 开头、**不带**尾随斜杠（根路由为 `/`），由 `ServerToolTransport.toPathname()` 归一化。前缀匹配与物理路由表的 key 由 `toMatchPrefix()` 补尾随斜杠后派生——**匹配阶段**仍遵循 Trailing Slash Normalization，`/api` 不会误匹配 `/apix`。声明路由请用 `claimRoute()`，不要手写字符串拼接。
+
+**归属登记与路由必须同步**：`claimRoute()` 只改路由表，Manager 的归属表由 `registerServer()` / `unregisterServer()` 维护。框架适配器（Fastify/Electron/Express）应在自己的子类里成对调用 `registerRoutes()` / `unregisterRoutes()`（它们同时做 claim 与归属登记），而不是只调 `claimRoute()`——否则 `close()` 后归属表残留条目，下次 `listen()` 会误报 `Routing Conflict`。
 
 ### 5.2 影子实例隔离
 Dispatcher 在执行时为每个请求创建 `Object.create(tool)` 的影子实例，`this.ctx` 仅属于本次调用。**严禁在工具函数中修改原始对象的属性**。
@@ -416,7 +418,7 @@ Dispatcher 在执行时为每个请求创建 `Object.create(tool)` 的影子实�
 | 旧版 | 新版 |
 |------|------|
 | `apiRoot` | `apiUrl`（完整 URL） |
-| `mount(tools)` | `addServer()` + `addRpcHandler()` |
+| `mount(tools)` | `registerServer()` + `addRpcHandler()` |
 | 全局单例依赖 | 支持 `new RpcTransportManager()` 独立实例 |
 | 无任务追踪 | 内置 `RpcActiveTaskTracker` + `RpcTaskResource` |
 | 手动管理流生命周期 | 自动包装 TransformStream，物理连接联动 |
@@ -455,7 +457,7 @@ Dispatcher 在执行时为每个请求创建 `Object.create(tool)` 的影子实�
 | 类 | 作用域 | 说明 |
 |-----|--------|------|
 | `RpcClientTransportManager` | 浏览器 + Node.js | 轻量版，仅含 `register()`, `getClient()`, `bindScheme()`, `clearSchemes()` 等客户端方法 |
-| `RpcTransportManager` | 浏览器 + Node.js | 继承自 `RpcClientTransportManager`，额外增加 `addServer()`, `startAll()`, `stopAll()`, `validateRpcRequest()` 等服务端方法 |
+| `RpcTransportManager` | 浏览器 + Node.js | 继承自 `RpcClientTransportManager`，额外增加 `registerServer()` / `unregisterServer()`, `startAll()`, `stopAll()`, `validateRpcRequest()` 等服务端方法（旧名 `addServer()` 已废弃） |
 
 ```
 src/transports/
@@ -531,6 +533,17 @@ interface IServerToolTransport {
   addDiscoveryHandler(apiUrl: string, handler: Function, options?: RouteClaimOptions): void;
 }
 ```
+
+下面这一对不在 `IServerToolTransport` 上，而是 `ServerToolTransport` 基类的 **`protected`** 成员，只能从自己的 transport 子类里调（框架适配器正是子类）：
+
+```typescript
+// ServerToolTransport（protected）
+registerRoutes(): void;      // 同步「物理路由表 + Manager 归属表」
+unregisterRoutes(): void;    // 反向；内部先 unregister 再 register，因此可重复调用
+protected processIncomingCall(rawReq, rawRes, registry?): Promise<void>;
+```
+
+Manager 侧对应的一对是 `registerServer()` / `unregisterServer()`（旧名 `addServer()` 已废弃）：前者把 transport 接入当前 Manager 并登记归属，后者只注销归属与 transport 映射，**不**停底层 server。
 
 ### 客户端关键接口
 

@@ -5,6 +5,33 @@ import { RPC_HEADERS } from "./models";
 export interface HttpClientToolTransportOptions extends ClientToolTransportOptions {
 }
 
+/**
+ * 下游 cancel 时跑 `onCancel`，并把 cancel 继续往上游传（还是会让 undici 断开响应体）。
+ *
+ * 为什么必须自己包一层：规范里唯一保证被调用的 cancel 钩子是自建 ReadableStream 的
+ * `underlyingSource.cancel`。`TransformStream` 的 `flush` 在 cancel 时不跑；它的第三个参数
+ * `readableStrategy` 走 `ConvertAndNormalizeQueuingStrategy`，只读 `highWaterMark`/`size`，
+ * 传 `cancel` 会被默默忽略（Node 22 实测不触发）。
+ */
+function cancelAware<T>(source: ReadableStream<T>, onCancel: () => void): ReadableStream<T> {
+   const reader = source.getReader();
+   return new ReadableStream<T>({
+      pull(controller) {
+         return reader.read().then(({ value, done }) => {
+            if (done) {
+               controller.close();
+               return;
+            }
+            controller.enqueue(value);
+         });
+      },
+      cancel(reason) {
+         onCancel();
+         return reader.cancel(reason);
+      }
+   });
+}
+
 export class HttpClientToolTransport extends ClientToolTransport {
 
    constructor(apiUrl: string, options?: HttpClientToolTransportOptions) {
@@ -80,7 +107,9 @@ export class HttpClientToolTransport extends ClientToolTransport {
       const controller = new AbortController();
 
       if (fetchOptions.signal) {
-         fetchOptions.signal.addEventListener('abort', () => controller.abort(fetchOptions.signal.reason));
+         // `once`: 触发后自动摘除。调用方共享一个 AbortController 连发请求时，
+         // 不加就会在它身上永久累积监听器（Node 会报 EventTarget 监听器泄漏告警）
+         fetchOptions.signal.addEventListener('abort', () => controller.abort(fetchOptions.signal.reason), { once: true });
       }
 
       reqOptions.signal = controller.signal;
@@ -163,6 +192,13 @@ export class HttpClientToolTransport extends ClientToolTransport {
                }, Number(idleTimeoutVal));
             };
 
+            // 下游 cancel 时定时器必须清，否则它活到 idle 超时才在 `controller.error` 上触发。
+            // 但两个「看起来能接 cancel」的地方都不行（实测 + 规范）：
+            //   - `flush`：cancel 不跑 flush；
+            //   - `new TransformStream(transformer, writableStrategy, readableStrategy)` 的第三个参数：
+            //     规范里它走 `ConvertAndNormalizeQueuingStrategy`，只读 `highWaterMark`/`size`，
+            //     `cancel` 直接被忽略（lib.dom 把它定成没有 cancel 的 `QueuingStrategy` 是对的）。
+            // 规范保证会调的只有自建 `ReadableStream` 的 `underlyingSource.cancel`，所以包一层。
             const transformer = new TransformStream({
                start(controller) {
                   resetIdleTimer(controller);
@@ -176,9 +212,10 @@ export class HttpClientToolTransport extends ClientToolTransport {
                }
             });
 
-            // Handle stream cancelation (if downstream cancels, we should clear timer)
             const originalStream = response.body;
-            const monitoredStream = originalStream.pipeThrough(transformer);
+            const monitoredStream = cancelAware(originalStream.pipeThrough(transformer), () => {
+               if (idleTimer) clearTimeout(idleTimer);
+            });
 
             // Re-wrap in Response to preserve headers
             return new Response(monitoredStream, {

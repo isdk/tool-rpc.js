@@ -7,12 +7,12 @@ describe('Transport V2 Resource Management & Multiplexing', () => {
   const PORT = 3004;
   const BASE_URL = `http://localhost:${PORT}`;
 
-  describe('1. Architecture Transparency', () => {    it('getBaseUrl should define physical base', () => {
+  describe('1. Architecture Transparency', () => {    it('getListenAddr should define physical base', () => {
       const t1 = new HttpServerToolTransport({ apiUrl: 'http://localhost:3001/v1' });
-      expect(t1.getBaseUrl()).toBe('http://localhost:3001');
+      expect(t1.getListenAddr()).toBe('http://localhost:3001');
 
       const t2 = new HttpServerToolTransport({ apiUrl: 'http://0.0.0.0:3002/api' });
-      expect(t2.getBaseUrl()).toBe('http://*:3002');
+      expect(t2.getListenAddr()).toBe('http://*:3002');
     });
 
     it('getRoutes should define logical scope', () => {
@@ -33,7 +33,7 @@ describe('Transport V2 Resource Management & Multiplexing', () => {
     beforeEach(() => {
       manager = new RpcTransportManager();
       // Clear audit table manually as it's private and we are testing a fresh scenario
-      (manager as any).routeAudit.clear();
+      (manager as any).routeOwnership.clear();
     });
 
     it('should intercept routing conflicts', () => {
@@ -43,10 +43,10 @@ describe('Transport V2 Resource Management & Multiplexing', () => {
       const t2 = new HttpServerToolTransport({ apiUrl: 'http://localhost:3003/api' });
       t2.addRpcHandler('http://localhost:3003/api'); // Same route
 
-      manager.addServer(t1);
+      manager.registerServer(t1);
 
       expect(() => {
-        manager.addServer(t2);
+        manager.registerServer(t2);
       }).toThrow(/Routing Conflict/);
     });
 
@@ -58,8 +58,8 @@ describe('Transport V2 Resource Management & Multiplexing', () => {
       t2.addRpcHandler('http://localhost:3003/v2');
 
       expect(() => {
-        manager.addServer(t1);
-        manager.addServer(t2);
+        manager.registerServer(t1);
+        manager.registerServer(t2);
       }).not.toThrow();
     });
   });
@@ -224,10 +224,15 @@ describe('Transport V2 Resource Management & Multiplexing', () => {
         const t1 = new HttpServerToolTransport({ apiUrl: `http://localhost:${PORT}/v1` });
         const t2 = new HttpServerToolTransport({ apiUrl: `http://127.0.0.1:${PORT}/v2` });
         const t3 = new HttpServerToolTransport({ apiUrl: `http://[::1]:${PORT}/v3` });
+        // 同一个底座上各占自己的前缀：都声明 '/' 就是真的冲突（谁服务根？），
+        // 以前是静默覆盖，现在直接拒掉
+        t1.addRpcHandler(`http://localhost:${PORT}/v1`);
+        t2.addRpcHandler(`http://127.0.0.1:${PORT}/v2`);
+        t3.addRpcHandler(`http://[::1]:${PORT}/v3`);
 
-        expect(t1.getBaseUrl()).toBe(`http://localhost:${PORT}`);
-        expect(t2.getBaseUrl()).toBe(`http://localhost:${PORT}`);
-        expect(t3.getBaseUrl()).toBe(`http://localhost:${PORT}`); // Normalized [::1] to localhost
+        expect(t1.getListenAddr()).toBe(`http://localhost:${PORT}`);
+        expect(t2.getListenAddr()).toBe(`http://localhost:${PORT}`);
+        expect(t3.getListenAddr()).toBe(`http://localhost:${PORT}`); // Normalized [::1] to localhost
 
         await t1.start();
         await t2.start();
@@ -250,7 +255,7 @@ describe('Transport V2 Resource Management & Multiplexing', () => {
         await t1.start(); // t1 becomes defaultInstance
         await t2.start();
 
-        const addr = t1.getBaseUrl();
+        const addr = t1.getListenAddr();
         const binding = (HttpServerToolTransport as any).sharedServers.get(addr);
         expect(binding.defaultInstance).toBe(t1);
 
@@ -270,7 +275,7 @@ describe('Transport V2 Resource Management & Multiplexing', () => {
       await Promise.all([t1.start(), t2.start()]);
 
       expect(t1.getRaw()).toBe(t2.getRaw());
-      expect((HttpServerToolTransport as any).sharedServers.get(t1.getBaseUrl()).refCount).toBe(2);
+      expect((HttpServerToolTransport as any).sharedServers.get(t1.getListenAddr()).refCount).toBe(2);
 
       await t1.stop();
       await t2.stop();
@@ -281,10 +286,10 @@ describe('Transport V2 Resource Management & Multiplexing', () => {
       const t1 = new HttpServerToolTransport({ apiUrl: `${BASE_URL}/v1` });
       t1.addRpcHandler(`${BASE_URL}/v1`);
 
-      manager.addServer(t1);
+      manager.registerServer(t1);
       await t1.start();
 
-      const addr = t1.getBaseUrl();
+      const addr = t1.getListenAddr();
       expect((HttpServerToolTransport as any).sharedServers.has(addr)).toBe(true);
 
       await manager.stopAll();
@@ -301,12 +306,12 @@ describe('Transport V2 Resource Management & Multiplexing', () => {
       t1.addRpcHandler(`${BASE_URL}/api/v1`);
       t1.addDiscoveryHandler(`${BASE_URL}/api/info`, () => ({}));
 
-      manager.addServer(t1);
+      manager.registerServer(t1);
 
       const t2 = new HttpServerToolTransport({ apiUrl: `${BASE_URL}/api` });
       t2.addRpcHandler(`${BASE_URL}/api/v1`); // Conflict with t1's RPC route
 
-      expect(() => manager.addServer(t2)).toThrow(/Routing Conflict/);
+      expect(() => manager.registerServer(t2)).toThrow(/Routing Conflict/);
     });
 
     it('should allow overlapping physical address with distinct logical routes', () => {
@@ -319,8 +324,8 @@ describe('Transport V2 Resource Management & Multiplexing', () => {
 
       // Audit should pass because although they resolve to same localhost:PORT, paths /t1/ and /t2/ are distinct
       expect(() => {
-        manager.addServer(t1);
-        manager.addServer(t2);
+        manager.registerServer(t1);
+        manager.registerServer(t2);
       }).not.toThrow();
     });
   });
@@ -416,14 +421,14 @@ describe('Transport V2 Resource Management & Multiplexing', () => {
 
     it('should cause conflict for same address', () => {
       const manager = new RpcTransportManager();
-      (manager as any).routeAudit.clear();
+      (manager as any).routeOwnership.clear();
 
       const mb1 = new MockMailboxTransport('mailbox://common');
       const mb2 = new MockMailboxTransport('mailbox://common');
 
-      manager.addServer(mb1);
+      manager.registerServer(mb1);
       expect(() => {
-        manager.addServer(mb2);
+        manager.registerServer(mb2);
       }).toThrow(/Routing Conflict/);
     });
   });
