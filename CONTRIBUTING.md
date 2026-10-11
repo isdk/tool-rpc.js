@@ -11,8 +11,7 @@ Please feel free to file GitHub Issues or propose Pull Requests. We're always ha
 | `README.md` / `README.cn.md` | 使用者 | 安装、快速开始、工具注册与隔离模型、超时策略、常见误区 |
 | `ARCHITECTURE.cn.md` | 想理解整体设计的人 | 容器 / 业务 / 隔离的分层抽象与为什么这样设计 |
 | `src/transports/README.cn.md` | **transport 开发者** | 传输层全部细节：请求归一化、调度、任务保留、**传输层基座 API（`route-path.ts` / `socket-address.ts`）**、地址不变量、自带 transport 作为参考实现、transport 测试坑 |
-| `mailbox-arch.cn.md` / `mailbox-tool-rpc-integration.md` | 信箱底座相关 | mailbox 协议与其和 RPC 的集成 |
-| `pubsub.md` | 用 pubsub 的人 | 发布订阅用法 |
+| `mailbox-tool-rpc-integration.md` | 信箱底座相关 | mailbox 协议与其和 RPC 的集成 |
 | `AGENT.md` | 给 agent / 工具目录用 | 本包作为工具暴露的面 |
 | `docs/api/**` | 使用者 | **自动生成**（typedoc，由 `release` 重生成），不要手改 |
 | `CHANGELOG.md` | 使用者 | **自动生成**（`standard-version`），不要手改 |
