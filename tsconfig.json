@@ -1,11 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": [
-      "ES2022",
-      "DOM",
-      "dom.iterable"
-    ],
+    "lib": ["ES2022", "DOM", "dom.iterable"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "strict": true,
@@ -34,14 +30,6 @@
   },
   // 开发/编辑器视角：测试文件也要在 program 里，否则 VS Code 会把它们
   // 当成 invisible file 放进 inferred project，types 配置对它们无效。
-  "include": [
-    "src/**/*",
-    "test/**/*"
-  ],
-  "exclude": [
-    "node_modules",
-    "dist",
-    "web",
-    "docs"
-  ]
+  "include": ["src/**/*", "test/**/*"],
+  "exclude": ["node_modules", "dist", "web", "docs"]
 }

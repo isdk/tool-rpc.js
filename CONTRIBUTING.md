@@ -28,8 +28,8 @@ npx tsup --dts --dts-resolve                                # 构建 dist（下�
 ```
 
 - **别用 `npx tsc`**：会命中 npm 上的占位包 `tsc`，报 “This is not the tsc command you are looking for”，与代码无关。用 `./node_modules/.bin/tsc`。
-- `eslint .` 目前跑不起来：本包只有 legacy `.eslintrc.cjs`，ESLint 9 需要 flat config（HEAD 上即失败）。要补的话单独一轮做。
-- `prettier -c` 对 markdown 有既有 warn，非本轮引入。
+- `eslint .` 的 flat config 里 `eslint.config.mjs`（@antfu 的 base）：ESLint 只负责「正确性」，风格类层（`stylistic`、`perfectionist/*`、`unicorn` …）整体关闭，代码风格交给 prettier。`lint:fix` 对现有 code 的 0 line 的 changed——那's the point: 用 @antfu 的默认配置会报 10886 处问题，`lint:fix` 会把整个 src 重写，diff 里不可读。想重新启用某层，把对应的 `false` 改成 `true` 即可。
+- `format` 的 default 只 checks json/jsonc/yaml/yml（config 里 files）；markdown 和 code 的 opt-in 的 `format:docs` / `format:code`——prettier 的 table padding 和 code reformat 的 diff 里 noisy，不 in the default path.
 - 跨包行为要跑**真实包入口**（`dist` / `require('@isdk/tool-rpc')`），只跑测试桩会漏掉导出与 bundle 层的问题。
 
 ## 测试

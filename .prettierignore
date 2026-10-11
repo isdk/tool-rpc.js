@@ -2,3 +2,7 @@ node_modules
 dist
 web
 docs
+.cache
+
+# 由 commit-and-tag-version 生成
+CHANGELOG.md
