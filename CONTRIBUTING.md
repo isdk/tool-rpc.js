@@ -18,6 +18,8 @@ Please feel free to file GitHub Issues or propose Pull Requests. We're always ha
 
 「基座 API」这个词只用在**传输层监听底座**上（`src/transports/`）。工具基类（`ServerTools`、`RpcMethodsServerTool`、`ResServerTools`）是另一套东西，不要混称——它们的内容在 `src/transports/README.cn.md` 的工具类继承体系一节与顶层 README。
 
+**引用其他包时用完整包名**，不要写 `../mailbox/...` 这类同级仓库目录：文档会被发布出去，读者手上只有 `node_modules`，没有你的工作区布局。写 `@mboxlabs/mailbox/src/interfaces.ts:120-162`，读者能对着已安装的包核行号。本包自己的文件写仓库内相对路径（`src/transports/mailbox-server.ts:123`）。
+
 ## 本地检查（实际跑得通的那套）
 
 ```shell
