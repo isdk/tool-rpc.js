@@ -144,6 +144,8 @@ export class RpcClientTransportManager {
     const clientPromises = Array.from(this.transports.values()).map(inst => {
       if (typeof (inst as any).stop === 'function') return (inst as any).stop(force);
       if (typeof inst.close === 'function') return inst.close();
+      // 没有 stop / close 的：nothing to await，Promise.all 的 ignores undefined
+      return undefined;
     });
 
     await Promise.all(clientPromises);
