@@ -389,6 +389,30 @@ grep -rn '\b符号名\b' ../tool-rpc-fastify/src ../tool-electron/src ../ai-tool
    （继承 `ServerTools` 加的字段、`isApi` / `stream` / `description` 等）。框架不读 `tool` 的任何字段、不解释其含义，
    字段名是部署与业务之间的私有约定。
 
+**逐工具控制：字段是数据，生效靠谓词**（第 7 条的展开，也是最常见的误读）：
+
+在工具注册处写一个 `allowAnonymous: true` **不会**让该工具匿名可进——框架不读 `tool` 的任何字段，那个字段
+对框架而言与 `authScope` / `isApi` 无异。要逐工具判定，得在策略侧写谓词读它：
+
+```ts
+new RpcBearerPolicy({
+  verify,
+  // 默认必须认证；工具注册时显式 allowAnonymous: true 才放行匿名
+  allowAnonymous: (ctx) => (ctx.tool as any)?.allowAnonymous === true,
+})
+```
+
+- 字段名与策略选项 `allowAnonymous` 同名容易让人误以为两者有联动（其实没有）。不介意就沿用；想避开歧义就换名，
+  比如 `publicAccess: true` 配 `allowAnonymous: (ctx) => (ctx.tool as any)?.publicAccess === true`。
+- `ctx.tool` 可能是 `undefined`（工具未寻到 / 不在该前缀注册表里）。谓词要按 `undefined` 明确表态：
+  上面那种写法是「寻不到就拒绝」，写成 `(ctx.tool as any)?.requireAuth !== true` 则是「寻不到就放行」。
+- 布尔与谓词不共存：`allowAnonymous: false` 一刀切拒绝，不会去看工具字段；要逐工具必须传谓词。
+- 这个选项只在 bearer 策略上有；`RpcSessionIdentityPolicy` 没有拒绝路径（凭证不认就是另起新会话），
+  要逐工具决定认不认，自己实现 `RpcIdentityPolicy`。
+
+测试：`src/transports/identity-server.test.ts`（「字段本身不生效」+「谓词读字段才生效」）、
+`test/identity-e2e.test.ts`（`authScope` 版，端到端）。
+
 登记表（`RpcCredentialRegistry`）四条实现契约：`ensureCredential` 对同一身份幂等复用并滑动 TTL；
 `lookupIdentity` 只数**出示**次数、过期/超次数即作废并**删除条目**；满容量先 `prune` 一次、仍满则返回
 `undefined`（策略降级为不发续用凭证，连接照常服务）；**框架侧无定时器**，清理只发生在 `lookupIdentity` 命中作废项

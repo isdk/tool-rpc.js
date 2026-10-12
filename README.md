@@ -610,8 +610,13 @@ class AdminTool extends ServerTools {
 }
 ```
 
-Two boundaries:
+Three boundaries:
 
+- **The field on the tool does nothing by itself.** The framework reads no fields off `tool`, so writing
+  `allowAnonymous = true` at registration has no effect until a policy reads it:
+  `allowAnonymous: (ctx) => (ctx.tool as any)?.allowAnonymous === true` — that form is what the tests pin down
+  (`src/transports/identity-server.test.ts`). Any name works (`authScope` above, `publicAccess`, …); the predicate
+  is what gives it meaning, and `ctx.tool` can be `undefined`, so decide what that case means.
 - This is **authentication** (does this call need a credential), not **authorization** (who may call which
   tool). Authorization stays in `validateRpcRequest` and in the business tools.
 - **Discovery is a built-in tool (`rpcApis`)**, not a special route: it goes through the same pipeline as any

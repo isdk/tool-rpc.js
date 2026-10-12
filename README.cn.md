@@ -607,8 +607,12 @@ class AdminTool extends ServerTools {
 }
 ```
 
-两点边界：
+三点边界：
 
+- **工具上的字段本身不生效**：框架不读 `tool` 的任何字段，所以在注册处写 `allowAnonymous = true` 不起作用，
+  除非策略读它：`allowAnonymous: (ctx) => (ctx.tool as any)?.allowAnonymous === true`（测试钉的就是这个写法，
+  见 `src/transports/identity-server.test.ts`）。字段名随你定（上面的 `authScope`、或 `publicAccess`），
+  是谓词让它有意义；`ctx.tool` 可能是 `undefined`，要提前定那种情况算允许还是拒绝。
 - 这是**认证**（要不要凭证），不是**授权**（谁能调哪个工具）。授权在 `validateRpcRequest` 与业务工具里做。
 - **发现端点是内置工具（`rpcApis`）**，不是特殊路由：它与任何调用走同一条判定（`match` → 必要时 `assign`，策略抛错才是 401）。
   默认公开（上面例子里 `ctx.toolId === 'rpcApis'` 就是显式放行它）；要它必须认证，谓词对它返 `false` 即可。

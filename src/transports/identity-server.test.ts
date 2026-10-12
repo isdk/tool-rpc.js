@@ -327,6 +327,53 @@ describe('identity in the server pipeline', () => {
     expect(seen[1].tool).toBe(adminTool);         // 前缀 claim 的 registry，与 dispatcher 同一解析顺序
   });
 
+  // 设计文档 §16：工具上带自定义字段只是**数据**，生效靠策略谓词读它。
+  // 这两条钉住边界，免得有人以为注册时写个 `allowAnonymous: true` 框架就会认。
+  it('工具上写 `allowAnonymous: true` 本身不生效：框架不读 `tool` 的字段（§16）', async () => {
+    const registry = {
+      get: (id: string) => (id === 'public' ? { name: 'public', allowAnonymous: true } : { name: 'strict' }),
+    };
+    const transport = new HttpServerToolTransport({
+      apiUrl: 'http://localhost/v1',
+      dispatcher: echoDispatcher() as any,
+      identity: new RpcBearerPolicy({ verify: () => ({ id: 'u' }), allowAnonymous: false }),
+    });
+    transport.addRpcHandler('http://localhost/v1', { registry });
+
+    const resPublic = mockRes();
+    await (transport as any).processIncomingCall(mockReq({}, '/v1/public'), resPublic);
+    const resStrict = mockRes();
+    await (transport as any).processIncomingCall(mockReq({}, '/v1/strict'), resStrict);
+
+    // 两个都是 401：那个字段对框架而言与 `authScope` / `isApi` 无异，没人读它
+    expect(resPublic.statusCode).toBe(401);
+    expect(resStrict.statusCode).toBe(401);
+  });
+
+  it('谓词读 `ctx.tool` 上的字段才生效：逐工具的 allowAnonymous 是这么写的（§16）', async () => {
+    const registry = {
+      get: (id: string) => (id === 'public' ? { name: 'public', allowAnonymous: true } : { name: 'strict' }),
+    };
+    const transport = new HttpServerToolTransport({
+      apiUrl: 'http://localhost/v1',
+      dispatcher: echoDispatcher() as any,
+      identity: new RpcBearerPolicy({
+        verify: () => ({ id: 'u' }),
+        allowAnonymous: (ctx) => (ctx.tool as any)?.allowAnonymous === true,
+      }),
+    });
+    transport.addRpcHandler('http://localhost/v1', { registry });
+
+    const resPublic = mockRes();
+    await (transport as any).processIncomingCall(mockReq({}, '/v1/public'), resPublic);
+    expect(resPublic.statusCode).toBe(200);
+
+    const resStrict = mockRes();
+    await (transport as any).processIncomingCall(mockReq({}, '/v1/strict'), resStrict);
+    expect(resStrict.statusCode).toBe(401);
+    expect(JSON.parse(resStrict.body).error).toMatchObject({ code: 401, status: 'unauthenticated' });
+  });
+
   it('钩子可 async：框架侧一律 await（契约 10）', async () => {
     const disp = echoDispatcher();
     const transport = new HttpServerToolTransport({

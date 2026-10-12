@@ -77,6 +77,10 @@ export interface RpcIdentityContext<Req = any, Res = any> {
    *
    * 它是**只读备料**：策略可以读注册时带的自定义字段（继承 `ServerTools` 加的字段、`isApi` / `stream` /
    * `timeout` / `description` 等）来做「这个 API 要不要认证」的判定。框架不读它的任何字段、不解释语义。
+   *
+   * 所以「逐工具控制认不认」要自己写谓词，字段本身不产生效果：
+   * `RpcBearerPolicy({ allowAnonymous: (ctx) => (ctx.tool as any)?.allowAnonymous === true })`。
+   * 注意 `tool` 可能是 `undefined`（工具未寻到），谓词要按 `undefined` 明确表态。
    */
   tool?: any;
 }

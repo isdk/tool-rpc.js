@@ -606,6 +606,36 @@ export const createSSEIdentity = (o?: SSETokenIdentityOptions) =>
   策略读 `ctx.prefix` 自己判。
 - 这是**认证**（要不要凭证），不是**授权**（谁能调哪个工具）。§10 的分工不变：授权仍在 `validateRpcRequest` 与业务。
 
+**逐工具 / 逐 API 的认证判定：字段是数据，生效靠谓词**：
+
+上面那个 `authScope` 例子容易被读成「工具上写个字段框架就认」，这里把边界钉清：
+
+- **工具上的字段本身不产生任何认证效果。** 框架不读 `tool` 的任何字段（上面已写），所以注册时随手写一个
+  `allowAnonymous: true` 不会有任何作用——它和 `authScope` / `isApi` 一样只是数据。
+- **生效靠策略谓词读它。** 约定一个字段名，再在策略里读：
+
+```ts
+new RpcBearerPolicy({
+  verify,
+  // 默认必须认证；工具注册时显式 allowAnonymous: true 才放行匿名
+  allowAnonymous: (ctx) => (ctx.tool as any)?.allowAnonymous === true,
+})
+```
+
+- **字段名与 `allowAnonymous` 同名的代价**：与策略选项 `allowAnonymous` 撞名，读代码的人容易以为两者有联动
+  （其实没有）。不介意就沿用（上面那个例子，也是测试钉住的写法）；想避开歧义就换个名，
+  比如 `publicAccess: true` 配 `allowAnonymous: (ctx) => (ctx.tool as any)?.publicAccess === true`。
+- **`ctx.tool` 可能是 `undefined`**（工具还没寻到 / 不在该前缀注册表里）。谓词要按 `undefined` 明确表态：
+  上面那种「只有显式 true 才放行」的写法，寻不到工具就是拒绝（默认公开）；反过来写
+  `(ctx.tool as any)?.requireAuth !== true` 则是寻不到工具就放行（默认公开）。两种都合理，但必须选一个。
+- **布尔与谓词不能同时表达逐工具**：`allowAnonymous: false` 是一刀切拒绝，不会去看工具字段；
+  要逐工具就必须传谓词。反过来 `allowAnonymous: true` 是一刀切允许，凭证不认也放行。
+- 这个选项**只在 bearer 策略上有**：`RpcSessionIdentityPolicy` 没有拒绝路径（凭证不认就是另起新会话），
+  要逐工具决定认不认，自己实现 `RpcIdentityPolicy`（§10）。
+
+测试：`src/transports/identity-server.test.ts` 的「工具上写 `allowAnonymous: true` 本身不生效」与
+「谓词读 `ctx.tool` 上的字段才生效」两条；`test/identity-e2e.test.ts` 的「逐 API 的认证判定」是同一模式的端到端版。
+
 **发现端点：它是框架自有的一个内置 API，走同一条判定**（本轮的实现方式已被 §17 取代，结论不变）：
 
 - 当时响应仍由物理路由直接回（不经 `dispatcher`），只是在回之前多一步 `resolveBuiltinIdentity('discovery', …)`。
