@@ -168,12 +168,20 @@ await manager.stopAll();
 2.  Handle 的 `streamPending` 标记变为 `true`。
 3.  此时，即使调用 `aborter.abort()` 也会联动调用 `stream.cancel()`，确保物理资源被正确释放。
 
-### 5.3 系统工具 `rpcTask`
+### 5.3 系统工具 `rpcTask` 与 `rpcApis`
 
-内置的任务管控接口，符合 REST 规范：
+`rpcTask`：内置的任务管控接口，符合 REST 规范：
 
 * **状态查询**：`GET /api/rpcTask/:requestId`。返回 102 (运行中)、200 (已完成并带结果) 或 500/408 (错误/中止)。
 * **任务取消**：`POST /api/rpcTask/:requestId?act=$cancel`（物理中止）。
+
+`rpcApis`（`RpcApisResource`，id 常量 `RPC_APIS_TOOL_ID`）：内置发现工具，就是发现端点的实现：
+
+* **列清单**：`GET <前缀根>`（Mailbox 侧是无 `toolId` 且 `act: 'list' | 'get'`）。它从 `ctx.registry` 取
+  **本次命中前缀**的注册表，所以多前缀多注册表时各列各自的工具；`timeout: 0`（纯内存操作，不吃超时预算）。
+* **不是旁路**：它与业务工具同在一个 `systemRegistry`、走同一条流水线（路由表解析 → 身份判定 →
+  `validateRpcRequest` → dispatch）。要换掉它：在自己注册表里注册同名 `rpcApis`（业务表优先于系统表），
+  或 `addRoute()` 声明同一路由行。
 
 ---
 
@@ -224,7 +232,7 @@ await manager.stopAll();
 - **名字里的 socket 指「监听底座」**（TCP socket 或 unix socket 文件），不是「只能 unix」：HTTP 只是同一个底座的其中一个写法家族。
 - **监听前后两个时刻不可合并**：`socketAddressFromBind()` 在 listen **前**推声明地址（`port: 0` 时端口是假的）；listen **后**要把内核观测值过 `socketAddressFromListen()`（本包的 HTTP 拿的是 Node `server.address()`；外部包 `@isdk/tool-rpc-fastify` 拿的是 Fastify `listen()` 的返回值，形状不同，由同一个函数区分）。两边必须算出同一个字符串，否则同一个 socket 在池里会有两个 key。
 - **物理底座不在 helper 里**：`sharedServers` 池 / refCount / 最长前缀分发表属于 `http-server.ts`。helper 只处理字符串与参数，不碰监听对象。
-- **L0 不读 bind**：`ServerToolTransport.start(options?)`（`src/transports/server.ts:149`）只做三件事：把 `this.options` 深合并进参数、按当前地址 `registerRoutes()`、`return this._start(options)`。基类从不读 bind 字段去算地址，`getListenAddr()` 对它只是个不透明值。所以 helper 是**可选规则库**：mailbox transport 读 `options?.address`（总线名）、electron 的 `_start()` 无参，两者都不碰 `socket-address.ts`。`defaultBindOptions()` 也不在基类，只有监听 TCP/unix 的 transport 各自定义。
+- **L0 不读 bind**：`ServerToolTransport.start(options?)`（`src/transports/server.ts:210`）只做三件事：把 `this.options` 深合并进参数、按当前地址 `registerRoutes()`、`return this._start(options)`。基类从不读 bind 字段去算地址，`getListenAddr()` 对它只是个不透明值。所以 helper 是**可选规则库**：mailbox transport 读 `options?.address`（总线名）、electron 的 `_start()` 无参，两者都不碰 `socket-address.ts`。`defaultBindOptions()` 也不在基类，只有监听 TCP/unix 的 transport 各自定义。
 - **为什么 `BindOptions` 不单独成文件**：`BindOptions`（调用方声明这一轮怎么监听）与 `socket-address.ts`（这一轮落在哪个地址）是同一件事的两半，`socketAddressFromBind()` 就是从前者算后者。拆开就会两边各读一遍 bind，声明地址与真实监听就会错开。
 
 #### 参考实现：本库自带的 transport
@@ -279,7 +287,8 @@ grep -rn '\b符号名\b' ../tool-rpc-fastify/src ../tool-electron/src ../ai-tool
 *   **unix socket 底座**（本节属 `HttpServerToolTransport`：unix socket 是这个 HTTP transport 自带的监听模式，不是独立插件，所以 `unix:` 这种地址形式也在这里说——它是 `getListenAddr()` 会报的底座 key，不是另一套 API）：`start({ path })`（也认 `socketPath` / `socket`）监听 unix socket，`getListenAddr()` 就是 `unix:<path>`。`unix:` 之后按 URI 规范处理：入参**先按段 percent-encode 再进 URI**，要原值用 `unixSocketPath()` decode（空格→`%20`、`#`→`%23`、字面 `%`→`%25`、非 ASCII→UTF-8 百分号序列）。词法归一（折叠 `//`、去尾斜杠、消 `.` / `..`）在**已编码**空间做，所以 `/` 只作分隔符、段内 `%2F` 是字面斜杠。两条不变量：`unixSocketPath(canonical)` 就是实际 listen 的路径；编码幂等且单射——`/tmp/a b.sock` → `unix:/tmp/a%20b.sock`，而 `/tmp/a%20b.sock` → `unix:/tmp/a%2520b.sock`，两个可共存的合法文件名不会塌成同一个 key（塌了会误报冲突、还会复用错 socket）。注意带 `unix:` 前缀的入参按已编码理解：`unix:/tmp/a%20b.sock` 指的文件是 `a b.sock`，字面叫 `a%20b.sock` 的要写 `unix:/tmp/a%2520b.sock`。socket 声明优先于 host/port（与 Node「有 port 就忽略 path」相反，否则声明身份与真实监听会错开）。库默认不删 socket 文件（Node 的 `close()` 不删），重启到同一路径需调用方先清掉旧文件。同一 socket 上重复挂载同一逻辑路由会被 Manager 报 `Routing Conflict`；不同 socket 文件就是不同底座。
 *   **精准路由分发 (Longest Prefix Match)**：当物理端口接收到请求时，采用“最长前缀匹配”算法扫描逻辑实例。
 *   **路径规范化 (Canonical + Trailing Slash)**：逻辑路由（`getRoutes()`）以 canonical 形式声明——以 `/` 开头、不带尾随斜杠（根为 `/`）；写入物理分发表的 key 由基类 `toMatchPrefix()` 补尾随斜杠，保证 `/api` 不会误匹配 `/apix`。归一化与匹配 key 均由 `ServerToolTransport` 的 helper 统一派生，实现方不再手写字符串拼接。
-*   **多前缀与重复声明 (Route Claims + Remount)**：`addRpcHandler()` / `addDiscoveryHandler()` 通过基类 `claimRoute()` 登记前缀，同一实例可服务多个前缀，各自的 registry / discovery handler 互不覆盖（请求期按前缀解析）。对已声明前缀再次声明时，默认 `'replace'`（替换并告警，不重复注册物理路由）；传 `options.remount = 'throw'` 则经 `onDuplicateRoute()` 抛错，自带路由表的后端可覆写该钩子以上报框架原生错误。
+*   **多前缀与重复声明 (Route Claims + Remount)**：`addRpcHandler()` / `addDiscoveryHandler()` 通过基类 `claimRoute()` 登记前缀，同一实例可服务多个前缀，各自的 registry / discovery handler 互不覆盖（请求期按前缀解析）。对已声明前缀再次声明时，默认 `'replace'`（替换并告警，不重复注册物理路由）；传 `options.remount = 'throw'` 则经 `onDuplicateRoute()` 抛错，自带路由表的后端可覆写该钩子以上报框架原生错误。`addDiscoveryHandler()` 已 **@deprecated**（发现端点由内置 `rpcApis` 回答，见下条）：基类仍要求实现它，但首次调用会经 `warnDiscoveryDeprecated()` 打一次迁移提示（进程级 flag，不刷屏），只有要自定义清单内容时才保留它。
+*   **路由表 (Route Table)**：每个前缀还带一张「前缀内路径 → 工具寻址」的表：`addRoute(apiUrl, { path, when: { method?, act? }, toolId, act })` 声明，`getRouteTable()` 读出（含内置行），适配器可拿去自己框架里原生注册。内置发现端点就是表里的普通行（`GET 前缀根` 与 `act: 'list' | 'get'` 都指向 `rpcApis`），第三方用同一路径同条件声明就能换掉它——没有特权通道。`path: ''` 与 `'/'` 同义（都归为前缀根）；`/x` 与 `/x/` 默认同义（`strictTrailingSlash: true` 才分两条）。
 *   **引用计数管理 (Ref Counting)**：逻辑实例通过引用计数自动控制物理 Server 的生命周期，实现“最后一人离开时关灯”。
 *   **寻址优先级**：Header 显式指令 > URL Path 降级解析 (`/api/tool/resId`模式)。
 *   **HTTP 102 信号映射**：由于多数现代 fetch 工具（如 `undici`）对 1xx 信息性状态码的处理存在不确定性，V2 在物理层将 `102 Processing` 逻辑映射为 **`202 Accepted`**，并返回包含任务 ID 的 Body 负载，确保客户端能稳定解析。
@@ -296,7 +305,7 @@ grep -rn '\b符号名\b' ../tool-rpc-fastify/src ../tool-electron/src ../ai-tool
 
 ### 8.3 监听地址不变量（写 transport 要守的规则）
 
-服务端 transport 只有一个地址概念：`getListenAddr()` —— 别人访问本服务用的地址。框架把它当**不透明字符串**：只用作底座池 key、路由归属表 key、分发 key 与日志，不解析、不校验、不预测 bind 冲突。签名是 `string | string[]`（`src/transports/server.ts:106`）：一个实例同时监听多个地址就报多个，Manager 在 `src/transports/server-manager.ts:99-100` 摊平成逐地址登记，仍然一个字符串一个 key。
+服务端 transport 只有一个地址概念：`getListenAddr()` —— 别人访问本服务用的地址。框架把它当**不透明字符串**：只用作底座池 key、路由归属表 key、分发 key 与日志，不解析、不校验、不预测 bind 冲突。签名是 `string | string[]`（`src/transports/server.ts:160`）：一个实例同时监听多个地址就报多个，Manager 在 `src/transports/server-manager.ts:99-100` 摊平成逐地址登记，仍然一个字符串一个 key。
 
 - 地址语义（host/port/socket、回环写法、默认端口、监听之后补真实端口）归按 scheme 分派到的那个 transport 自己管；HTTP 家族那套在 `socket-address.ts`。插件只需覆写 `getListenAddr()` 返回一个字符串（`unix:/run/ai.sock`、`mem://bus-a`）。
 - 基类默认返回 `apiUrl` 原值。覆写后报什么就是什么：两个 transport 报的字符串**相等就复用同一个底座**，**不相等就各自 `listen()`**，真撞了由内核报 `EADDRINUSE`（fail fast，不误报也不漏报）。**不做包含关系预测**（不把 `0.0.0.0:3000` 视为覆盖 `localhost:3000`）：那种关系非传递（会漏报），又会把不同 host 同端口塌成一个底座（误报、vhost 判死）。
@@ -331,7 +340,64 @@ grep -rn '\b符号名\b' ../tool-rpc-fastify/src ../tool-electron/src ../ai-tool
 
 ---
 
-## 9. 信号联动与延迟中止
+## 9. 身份策略（服务端运行时）
+
+回答一个问题：**这个请求是谁**。三个文件，都在 `src/transports/` 下（browser-safe 边界与装配入口在 transport 上）：
+
+| 文件 | 内容 |
+|---|---|
+| `identity.ts` | 抽象：`RpcIdentity` / `RpcIdentityContext` / `RpcCredentialReader` / `RpcCredentialSource` / `RpcIdentityPolicy` / `RpcCredentialRegistry`，零实现 |
+| `identity-session.ts` | 默认实现 A：`RpcSessionIdentityPolicy`（服务端自签发会话凭证）+ `RpcInProcessCredentialRegistry` |
+| `identity-bearer.ts` | 默认实现 B：`RpcBearerPolicy`（凭证外部签发，服务端只验） |
+
+完整规格（契约、差异表、继承规矩、分期）在根目录 `IDENTITY_POLICY_DESIGN.cn.md`。本节只写 transport 开发者要守的东西。
+
+**判定只有一套**：`ServerToolTransport.resolveRequestIdentity`，插在 `processIncomingCall` 的
+`toRpcRequest` 之后、`manager.validateRpcRequest` 之前；内置发现工具也是普通工具，所以它没有第二个入点（见下面第 6 条）——插在这里，Manager 的 SSRF / 拦截钩子才能看到
+`request.identity`。构造选项 `{ identity, credentialReader }`，**没传就是 no-op**，基类不启用任何身份逻辑，
+行为与不装策略的部署逐字节一致。`protected` 可覆写（非 HTTP 协议要换 ctx 备料方式时才需要）。
+
+框架侧备的 `ctx`：`credential`（reader 取出的）/ `headers`（已归一化）/ `prefix` / `apiUrl`，加寻址结果 `toolId` / `act` / `resId`、
+注册表里那个**只读工具实例** `tool`，再加 `req`/`res` 逃生口。`tool` 按 dispatcher 的解析顺序取
+（前缀 claim 的 registry → transport 自己的 → dispatcher 的 → 系统保留层），取不到就是 `undefined`——工具不存在由 dispatcher 报 404，
+身份这一步不抢它的活；框架保留工具（`rpcTask` / `rpcApis`）不在业务注册表里，要单独判定它用 `ctx.toolId`。
+框架侧**只调接口**：不 `instanceof`、不按 `name` 匹配、不读策略内部、不缓存返回值；三个钩子（`match`/`assign`/`revoke`）
+一律 `await`。状态（登记表、TTL、计数器）、凭证怎么生成校验、凭证在 wire 上的位置与下发通道，全在策略内
+（交付句柄是 `ctx.res`，框架侧不定义凭证的 header 名）。
+
+写 transport 时要守的七条：
+
+1. **凭证取法归 transport**：`credentialReader` 从原生 req 取一个字符串。内置默认只读标准字段 `authorization`
+   （去 `Bearer` 前缀）；私有 header（鉴权代理、Electron payload、EventSource 的 query）由部署写自己的 reader。
+   HTTP 与 Mailbox 的原生请求都带 `headers`，所以默认 reader 直接覆盖两者。
+2. **采信什么由策略决定**：客户端自报的 `clientId` 在 `ctx.headers[RPC_HEADERS.CLIENT_ID]`，不在 `ctx` 顶层；
+   基类不把 header 值塞进 `clientId`。装了策略则基类保证 `request.clientId === identity.id`（`clientId` 类型保持
+   `string`：它是 wire 字段与下游 Map 的 key）。
+3. **`ctx.peer` 不在 ctx**：反代后 socket 地址是代理地址、不可信，策略要用就从 `ctx.req` 自己取。
+4. **`revoke` 在 P0/P1 没有调用点**：「一个 HTTP 请求结束」不等于「会话结束」。它给通道的会话活性事件预留
+   （流关死、通道 reset）。会话活性（resume window 那类「会话还活着吗」）归通道，不进 `RpcIdentityPolicy`。
+5. **拒绝的码走枚举**：策略拒绝一律抛 `RpcError('Unauthenticated', RpcStatusCode.UNAUTHENTICATED, 'unauthenticated')`
+   （401）。顶级防护按 `err.code` 映射响应状态码，`dispatcher.handleError` 对 401 自动补 `unauthenticated` 状态串，
+   客户端拿到的就是 `err.code === 401` / `err.status === 'unauthenticated'`。
+6. **发现端点就是内置工具 `rpcApis`，没有旁路**：它由路由表在 `toRpcRequest` 阶段解析成普通寻址（HTTP：
+   `GET 前缀根`；Mailbox：无 `toolId` 且 `act: 'list' | 'get'`），于是它与业务调用走同一条流水线（身份判定 →
+   `validateRpcRequest` → `dispatcher.dispatch` → 顶级防护回错误封包）。**不要**再给内置端点开第二条身份路径，
+   也不要在物理路由里直接回清单。策略里要单独决定它认不认，就比 `ctx.toolId === 'rpcApis'`；不装策略就是今天的逐字节行为。
+7. **逐 API 的认证判定在策略里，不在 transport 上**：transport 不为某个 API 开认证开关，只负责把寻址结果与
+   `tool` 实例备到 `ctx` 里。要「这个 API 必须认证」，策略侧写谓词（`RpcBearerPolicy.allowAnonymous: (ctx) => ...`），
+   读 `ctx.toolId` / `ctx.act` / `ctx.resId` / `ctx.prefix`，或读 `ctx.tool` 上注册时自带的字段
+   （继承 `ServerTools` 加的字段、`isApi` / `stream` / `description` 等）。框架不读 `tool` 的任何字段、不解释其含义，
+   字段名是部署与业务之间的私有约定。
+
+登记表（`RpcCredentialRegistry`）四条实现契约：`ensureCredential` 对同一身份幂等复用并滑动 TTL；
+`lookupIdentity` 只数**出示**次数、过期/超次数即作废并**删除条目**；满容量先 `prune` 一次、仍满则返回
+`undefined`（策略降级为不发续用凭证，连接照常服务）；**框架侧无定时器**，清理只发生在 `lookupIdentity` 命中作废项
+与 `ensureCredential` 满容量两处，`prune` 是给部署接定时任务的入口。内置实现按**凭证**为 key、按身份找凭证靠
+第二索引（`identityId → credential`），要持久化 / 跨进程共享 / LRU 就自己实现那四个方法从 `registry` 口子注入。
+
+---
+
+## 10. 信号联动与延迟中止
 当任务触发硬超时（Hard Deadline）或收到取消请求时：
 1.  `Dispatcher` 会同步调用 `aborter.abort(reason)`。
 2.  `RpcDeadlineGuard` 进入 **“延迟中止”** 阶段，先通过信号通知业务代码进行清理。
@@ -342,7 +408,7 @@ grep -rn '\b符号名\b' ../tool-rpc-fastify/src ../tool-electron/src ../ai-tool
 
 ---
 
-## 10. 工具类继承体系
+## 11. 工具类继承体系
 
 开发时推荐根据业务语义继承不同的基类：
 
@@ -352,11 +418,18 @@ grep -rn '\b符号名\b' ../tool-rpc-fastify/src ../tool-electron/src ../ai-tool
 
 ---
 
-## 11. 客户端高级连接范式 (Advanced Client Patterns)
+## 12. 客户端高级连接范式 (Advanced Client Patterns)
 
-为了实现业务逻辑与物理寻址的深度解耦，V2 架构推荐以下两种高级连接模式，取代传统的全局 `setTransport` 绑定。
+为了实现业务逻辑与物理寻址的深度解耦，V2 架构推荐以下连接模式，取代传统的全局 `setTransport` 绑定。
 
-### 11.1 服务连接模式 (Service Connection Pattern)
+`ClientTools.setTransport(transport)` 已 **@deprecated**（它等价于下面 §12.3 那两行，再顺带调同样已废弃的
+`transport.mount(Class)`）。废弃后按地址写，而不是往类上注入 transport：
+
+- 只有地址：`Class.connect(apiUrl)` 或 `Class.apiUrl = apiUrl`，再 `await Class.loadFrom()`；transport 由
+  `RpcClientTransportManager.getClient(apiUrl)` 按 scheme 自建（自定义协议先 `RpcClientTransportManager.bindScheme(scheme, Class)`）。
+- 已经自己构好了 transport 实例：见 §12.3。
+
+### 12.1 服务连接模式 (Service Connection Pattern)
 
 适用于“一个业务类需要对接多个后端实例”的场景。通过 `connect` 工厂方法，可以为同一个业务定义产生多个物理隔离的连接实例。
 
@@ -381,7 +454,7 @@ const orderB = await mbxSrv.createOrder.run({ id: 2 });
 - **隔离性**：每个 `connect` 产生的类拥有独立的 `items` 注册表，互不干扰。
 - **协议透明**：开发者只需关注业务类（`OrderService`），无需手动处理 Transport 细节。
 
-### 11.2 动态绑定调用 (On-demand Binding)
+### 12.2 动态绑定调用 (On-demand Binding)
 
 适用于“同一个工具 Stub 需要动态发往不同集群”的极致灵活性场景。利用 `with` 机制在执行时注入寻址信息。
 
@@ -399,7 +472,22 @@ const resCN = await chatTool.with({ apiUrl: 'https://cn.api.srv/v1' }).run({ tex
 
 ---
 
-## 12. 客户端使用范例
+### 12.3 预构 transport 实例（带协议专有选项）
+
+mailbox 要 `clientAddress`、自定义协议要带自己的选项时，实例只能自己 new。这时不再 `setTransport`，而是注册到管理器：
+
+```typescript
+const clientTransport = new MailboxClientTransport({ mailbox, apiUrl, clientAddress, timeout: 2000 });
+await clientTransport.start();
+
+RpcClientTransportManager.instance.register(clientTransport);   // 按 apiUrl 登记
+OrderService.apiUrl = clientTransport.apiUrl;                    // 类上只留地址
+await OrderService.loadFrom();
+```
+
+后面的调用与 §12.1 完全同一条路：`getClient(apiUrl)` 先查已登记实例，查不到才按 scheme 新建。
+
+## 13. 客户端使用范例
 
 ```typescript
 import { RpcTransportManager, HttpClientToolTransport } from '@isdk/tool-rpc';
@@ -424,16 +512,16 @@ const rawRes = await transport.fetch('adder', { a: 1 });
 
 ---
 
-## 13. V1 到 V2 迁移指南
+## 14. V1 到 V2 迁移指南
 
-### 13.1 服务端兼容配置
+### 14.1 服务端兼容配置
 
 在 `RpcServerDispatcher` 初始化时，`compat` 选项默认开启以支持旧代码：
 
 * **enableParamBridge**：自动将旧的 `params.id/act` 同步至 context。
 * **enableContextInjection**：将原生底座对象注入 `params._req/_res`。
 
-### 13.2 推荐优化
+### 14.2 推荐优化
 
 建议新编写的任务显式定义保留策略：
 
@@ -449,6 +537,6 @@ class MyTool extends ServerTools {
 
 ---
 
-## 14. 评估与调试
+## 15. 评估与调试
 
 建议在生产环境通过 `RpcTransportManager.instance.validateRpcRequest` 扩展自定义的安全审计。在调试时，关注响应 Header 中的 `req-id` 确保全链路追踪的闭环。

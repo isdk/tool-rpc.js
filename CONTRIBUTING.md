@@ -25,7 +25,7 @@ Please feel free to file GitHub Issues or propose Pull Requests. We're always ha
 |---|---|---|
 | **服务类**（工具容器，业务侧） | 一个工具 / 一组工具怎么定义 | `ServerTools` / `ClientTools`、`RpcMethodsServerTool` / `RpcMethodsClientTool`、`ResServerTools` / `ResClientTools` |
 | **服务端运行时**（调度与生命周期） | 一次调用怎么被找到、计时、取消、记账 | `RpcServerDispatcher`、`RpcActiveTaskTracker` / `RpcActiveTaskHandle`、`RpcDeadlineGuard`、`RpcTransportManager` / `RpcClientTransportManager` |
-| **身份策略**（服务端运行时侧） | 这个请求是谁 | **待实现**：11 个符号（`RpcIdentity` / `RpcIdentityPolicy` / `RpcCredentialRegistry` 等），落在 `identity.ts` / `identity-session.ts` / `identity-bearer.ts`；设计见根目录 `IDENTITY_POLICY_DESIGN.cn.md` |
+| **身份策略**（服务端运行时侧） | 这个请求是谁 | 11 个符号（`RpcIdentity` / `RpcIdentityPolicy` / `RpcCredentialRegistry` / `RpcSessionIdentityPolicy` / `RpcBearerPolicy` 等），落在 `identity.ts` / `identity-session.ts` / `identity-bearer.ts`；框架侧调用点是 `ServerToolTransport.resolveRequestIdentity`；设计见根目录 `IDENTITY_POLICY_DESIGN.cn.md` |
 | **传输层**（协议侧） | 一次调用怎么进出某个协议 | `ToolTransport`、`ServerToolTransport` / `ClientToolTransport`、HTTP / Mailbox 各实现 |
 | **传输层 helper**（纯函数规则库） | 路由字符串与监听地址字符串怎么写 | `route-path.ts`、`socket-address.ts` |
 

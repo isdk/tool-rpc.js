@@ -90,9 +90,8 @@ async function startServer() {
   });
 
   // 3. Configure the logical routes for this transport
-  // Expose the tool definitions for client-side discovery
-  serverTransport.addDiscoveryHandler(apiUrl, () => ServerTools.toJSON());
-  // Expose the RPC endpoint for tool execution
+  // Expose the RPC endpoint for tool execution. Service discovery is built in
+  // (the `rpcApis` tool answers `GET /api`), so no extra call is needed for it.
   serverTransport.addRpcHandler(apiUrl);
 
   // 4. Register the transport to the Manager and start all services
@@ -499,12 +498,13 @@ The architecture is built around a few key interfaces:
 
 - **`IToolTransport`**: The common base interface for all transports, defining basic operations like `mount`.
 - **`IServerToolTransport`**: The interface that a server-side transport must implement. Its core responsibilities are:
-    1. **Exposing a Discovery Endpoint**: Create a route, typically `GET` (e.g., `/api`), which, when accessed by a client, returns the JSON definitions of all registered and available tools. This is achieved via the `addDiscoveryHandler` method.
+    1. **Exposing a Discovery Endpoint**: The route that lists the tools (typically `GET /api`) is served by the framework's built-in `rpcApis` tool, registered automatically for every claimed prefix. It is an ordinary tool: it goes through the same identity, validation and timeout pipeline as business calls, and it lists the registry bound to the **matched prefix**. `addDiscoveryHandler(apiUrl, handler)` is **deprecated** — it only overrides the listing content for that prefix, and the first call logs a one-time migration warning. Keep it only when the listing itself must be customized (or register your own tool with `addRoute(apiUrl, { path: '/', when: { method: 'GET' }, toolId: 'myListing' })`).
     2. **Handling RPC Calls**: Create a generic RPC route (e.g., `/api/:toolId`) that receives requests, finds the corresponding tool by `toolId`, executes it, and returns the result. This is handled by the `addRpcHandler` method.
     3. Managing the server lifecycle (`start`, `stop`).
     4. **Physical Awareness (V2)**: Methods like `getListenAddr()` and `getRoutes()` allow for physical port reuse and logical route ownership registration.
     5. **Route Claims & Remount (V2)**: `addRpcHandler()` / `addDiscoveryHandler()` claim their path prefix in the `ServerToolTransport` base class, so one transport can serve several prefixes, each with its own registry and discovery handler. Logical routes are reported in canonical form (leading `/`, no trailing slash); the trailing-slash form used for prefix matching is derived by `toMatchPrefix()`. Re-declaring an already claimed prefix replaces its registry/handler and logs a warning; pass `options.remount = 'throw'` to raise an error instead — backends with their own router override `onDuplicateRoute()` to surface a native duplicate-route error.
-    6. **Route Registration Pair (V2)**: `registerRoutes()` / `unregisterRoutes()` — `protected` members of the `ServerToolTransport` base class, called from inside your own transport subclass — keep the physical route table and the Manager's ownership table in sync, and are re-entrant (they unregister first, then register). Framework adapters (Fastify, Electron, Express) should call this pair rather than `claimRoute()` alone — claiming routes without touching the ownership table leaves stale entries that make the next `listen()` fail with `Routing Conflict`. On the Manager side the matching pair is `registerServer()` / `unregisterServer()` (the old name `addServer()` is deprecated and only forwards); `unregisterServer()` clears ownership and the transport mapping but does **not** stop the underlying server.
+    6. **Route Table (V2)**: `addRoute(apiUrl, { path, when, toolId, act })` maps a path inside a prefix to a tool, and `getRouteTable()` returns every row (including the built-in discovery rows) so adapters can register them natively. The built-in discovery endpoint is just a row in that table — a third party overrides it by declaring the same path and condition, with no privileged channel. `path: ''` and `'/'` are the same route; `/x` and `/x/` are the same unless `strictTrailingSlash: true`.
+    7. **Route Registration Pair (V2)**: `registerRoutes()` / `unregisterRoutes()` — `protected` members of the `ServerToolTransport` base class, called from inside your own transport subclass — keep the physical route table and the Manager's ownership table in sync, and are re-entrant (they unregister first, then register). Framework adapters (Fastify, Electron, Express) should call this pair rather than `claimRoute()` alone — claiming routes without touching the ownership table leaves stale entries that make the next `listen()` fail with `Routing Conflict`. On the Manager side the matching pair is `registerServer()` / `unregisterServer()` (the old name `addServer()` is deprecated and only forwards); `unregisterServer()` clears ownership and the transport mapping but does **not** stop the underlying server.
 - **`IClientToolTransport`**: The interface that a client-side transport must implement. Its core responsibilities are:
     1. **Loading API Definitions**: Call the `loadApis()` method, which accesses the server's discovery endpoint to get the definitions of all tools.
     2. **Executing Remote Calls**: Implement the `fetch()` method, which is responsible for serializing the client's tool call (function name and parameters), sending it to the server's RPC endpoint, and processing the response.
@@ -515,7 +515,9 @@ The architecture is built around a few key interfaces:
 The library provides plug-and-play transport implementations:
 
 - **`HttpServerToolTransport` (HTTP server)**: Built on Node.js's built-in `http` module. In V2 it supports **Longest Prefix Match** routing, letting several logical instances share one physical port (physical base reuse). It automatically:
-    - Creates a `GET /prefix` route for service discovery.
+    - Answers `GET /prefix` with the built-in `rpcApis` tool. It is an ordinary tool in the route table, so it
+      passes the same identity, validation and timeout pipeline as business calls (see
+      [Identity Policy](#-identity-policy)); it is public by default, and a policy can require a credential for it.
     - Creates an RPC route that carries the tool name, resolving arguments from the request body or URL parameters.
 - **`HttpClientToolTransport` (HTTP client)**: Built on the cross-platform `fetch` API. The V2 version polls background-task status automatically.
 - **`Mailbox Transports`**: Native support for the internal distributed mailbox protocol.
@@ -530,11 +532,145 @@ The library provides plug-and-play transport implementations:
 
 1. Create a `FastifyServerTransport` class that implements `IServerToolTransport`.
 2. In the `mount` method, instead of creating a new `http` server, you would accept an existing `FastifyInstance` as an option.
-3. Use `fastify.get(apiPrefix, ...)` to register the discovery route, with a handler that calls `ServerTools.toJSON()`.
+3. Read `transport.getRouteTable()` and register each row natively (`fastify.get(prefix + path, ...)`) — the built-in discovery endpoint is one of those rows, so you do not hand-code a `ServerTools.toJSON()` handler.
 4. Use `fastify.all(apiPrefix + '/:toolId', ...)` to register the RPC route. The handler would extract parameters from `request.body` or `request.query`, call the appropriate tool, and use `reply` to send the response.
 5. The `start` and `stop` methods could delegate to the Fastify instance's `listen` and `close` methods.
 
 This pluggable architecture gives `@isdk/tool-rpc` immense flexibility, allowing it to easily adapt to various project requirements and tech stacks.
+
+## 🪪 Identity Policy
+
+The server has to answer one question: **who is this request**. This package defines the interface plus two
+default implementations. **Without a policy the behaviour is byte-for-byte what it always was** (`clientId` is
+whatever the client self-reports, `ctx.identity` is `undefined`).
+
+### The two default implementations
+
+**A. `RpcSessionIdentityPolicy`** — the server issues a session credential on first connect. Once connected the
+identity cannot be spoofed (the server decides, the client cannot self-report), and disconnects can resume.
+**It does not authenticate** (anyone can connect).
+
+```typescript
+import { HttpServerToolTransport, RpcSessionIdentityPolicy } from '@isdk/tool-rpc';
+
+new HttpServerToolTransport({ apiUrl: '/api', identity: new RpcSessionIdentityPolicy() });
+```
+
+**B. `RpcBearerPolicy`** — credentials are issued elsewhere (JWT / OAuth2 access token / your own api key);
+the server only verifies them. **It does authenticate**; stateless, so it works across replicas out of the box.
+
+```typescript
+const identity = new RpcBearerPolicy({
+  verify: async (token) => {
+    const p = await jwt.verify(token, JWKS);
+    return p ? { id: p.sub, attributes: { scopes: p.scopes } } : undefined;
+  },
+  allowAnonymous: false,   // reject with 401 instead of handing out an anonymous identity
+});
+new HttpServerToolTransport({ apiUrl: '/api', identity });
+```
+
+| | `RpcSessionIdentityPolicy` | `RpcBearerPolicy` |
+|---|---|---|
+| Authentication (who may connect) | No | Yes (`verify` rejects with 401) |
+| Anti-spoofing once connected | Yes | Yes, but a credential-less connection has no resumable identity |
+| Where credentials come from | Issued by the server on first connect | Provided by the deployment (auth service / admin plane) |
+| State | In-process credential registry | Stateless |
+| Across replicas | In-process by default → sticky sessions; swap the `registry` to share | Works as-is |
+| Granularity of `id` | Per connection (uuid by default) | Decided by `verify`: a user-level id merges downstream sessions |
+| Semantics | Identifies "which session" only, carries no authorization | Carries attributes from the authenticating side (scopes / tenant) |
+
+> **`id: p.sub` has a cost.** A user-level stable id lands in `clientId`. On transports that key their session
+> tables by clientId (SSE-style ones), **several tabs and devices of the same user merge into one session**.
+> Plain request/response HTTP RPC is unaffected. For a user-level identity with per-connection sessions, use
+> `id: uuidv4()` plus `attributes: { userId: p.sub }`.
+
+### Per-API authentication decisions
+
+`allowAnonymous` accepts a **predicate** as well as a boolean, so the granularity can be a single API:
+
+```typescript
+const identity = new RpcBearerPolicy({
+  verify: (token) => verifyToken(token),
+  // public by default: only tools carrying an authScope require a credential; discovery is let through
+  allowAnonymous: (ctx) => ctx.toolId === 'rpcApis' || !ctx.tool?.authScope,
+});
+```
+
+The `ctx` the predicate receives is the addressing result for this call: `toolId` / `act` / `resId`,
+`prefix` / `apiUrl` (multi-prefix tenancy), plus `tool` — the instance from the registry (read-only supply,
+resolved in the same order the dispatcher uses; `undefined` when it cannot be found). The framework's own
+discovery endpoint is addressed as `toolId === 'rpcApis'`; it has no separate flag, because it is an ordinary
+tool. So "does this API require a credential" can live where the tool is registered:
+
+```typescript
+class AdminTool extends ServerTools {
+  authScope = 'admin'          // the field name is a private convention between deployment and business code
+  func(params, ctx) { /* … */ }
+}
+```
+
+Two boundaries:
+
+- This is **authentication** (does this call need a credential), not **authorization** (who may call which
+  tool). Authorization stays in `validateRpcRequest` and in the business tools.
+- **Discovery is a built-in tool (`rpcApis`)**, not a special route: it goes through the same pipeline as any
+  call (`match` → `assign` when needed; only a policy throwing produces a 401). It is public by default; make it
+  require a credential by returning `false` for `ctx.toolId === 'rpcApis'` in the predicate. On the client,
+  `ClientTools.loadFrom()` merges the class-level `fetchOptions` (where the credential lives) into the discovery
+  call, otherwise an authenticated discovery endpoint would return no tool list.
+
+### Reading it in business code
+
+Identity lands in exactly one place, `ctx.identity`:
+
+```typescript
+ServerTools.register({
+  name: 'whoami',
+  func: (params, ctx) => ({ who: ctx.identity?.id, scopes: ctx.identity?.attributes?.scopes }),
+});
+```
+
+The client brings the credential back (which header carries it is the deployment's transport's call; the bearer
+default reads `authorization`):
+
+```typescript
+await someTool.run({ q: 1 }, { headers: { authorization: `Bearer ${token}` } });
+```
+
+### The policy interface
+
+To plug in an auth-proxy header / mTLS certificate mapping / your own auth service, implement the two hooks of
+`RpcIdentityPolicy`:
+
+```typescript
+class ProxyHeaderPolicy implements RpcIdentityPolicy<IncomingMessage> {
+  readonly name = 'proxy-header';
+  match(ctx: RpcIdentityContext<IncomingMessage>) {
+    const t = ctx.credential;
+    if (!t) return undefined;                       // undefined = start a new session, not a rejection
+    return { id: t.slice(0, 16), attributes: { tenant: ctx.headers?.['x-tenant'] } };
+  }
+  assign() { return { id: uuidv4() }; }
+}
+
+new HttpServerToolTransport({
+  apiUrl: '/api',
+  identity: new ProxyHeaderPolicy(),
+  credentialReader: (r) => r.headers['x-auth'],      // private headers: write your own reader
+});
+```
+
+Key rules (the full contract list lives in `IDENTITY_POLICY_DESIGN.cn.md` at the repository root):
+
+- `match` returning `undefined` means "start a new session"; **a rejection must throw**
+  `new RpcError('Unauthenticated', RpcStatusCode.UNAUTHENTICATED, 'unauthenticated')` (401).
+- `match` and `assign` are two separate judgments and cannot be merged; all three hooks may be sync or async.
+- Both default classes are subclassable (swap `verify` / id generation / add attributes in 3–8 lines);
+  every override point is `protected`.
+- Storage for server-issued credentials is swappable: implement the four `RpcCredentialRegistry` methods and
+  inject it through the `registry` option (persistence / cross-process sharing / Redis / LRU eviction).
+- "Who may call which tool" is not the policy's job — put it in `manager.validateRpcRequest` or in the tool.
 
 ## Advanced Usage
 

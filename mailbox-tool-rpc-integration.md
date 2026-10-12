@@ -38,8 +38,9 @@ const serverTransport = new MailboxServerTransport({
   apiUrl: 'mailto:api@myservice.com' // 物理网关地址
 })
 
-// 3. 声明发现路由（**必须显式声明**，没有内置的 system.discover 服务）
-serverTransport.addDiscoveryHandler('mailto:api@myservice.com', () => ServerTools.toJSON())
+// 3.（可选）覆盖发现端点。发现已是内置的：无 `rpc-fn` 且 `rpc-act` 为 list/get
+// 就寻址到内置工具 `rpcApis`，它列的就是本 transport 的注册表。要换成自己的清单才写：
+// serverTransport.addDiscoveryHandler('mailto:api@myservice.com', () => ServerTools.toJSON())
 
 await serverTransport.start()
 ```
@@ -48,8 +49,8 @@ await serverTransport.start()
 
 1. 只订阅**构造时那一个** `apiUrl`（`mailbox.subscribe(address, onReceive)`，`:192`）。旧版本文写「遍历所有 Provider 并订阅各自的 listenAddress」——代码不做这件事，协议选择交给 mailbox 底座。
 2. 订阅之后立刻 `drainBacklog(address)` 清积压（`:193`），保证「先接新信、再收旧信」的顺序。
-3. `onReceive` 按 **headers** 解析目标（`:77-90`）：`rpc-fn` 决定工具，`rpc-act` 决定动作。
-4. 发现请求的判定是 `!rpc-fn && (rpc-act === 'list' || rpc-act === 'get')`（`:79`），命中后调用 `addDiscoveryHandler` 登记的 handler。
+3. `onReceive`（`:72`）不再分叉，直接进 `processIncomingCall`；目标在 `toRpcRequest`（`:86`）里按 **headers** 解析：`rpc-fn` 决定工具，`rpc-act` 决定动作。
+4. 发现请求的判定是 `!toolId` 时查路由表（`:123-128`）：`act: 'list' | 'get'` 命中内置行 → `toolId = 'rpcApis'`。它只是一个寻址结果，所以 `validateRpcRequest` / 身份判定 / `globalTimeout` 都管得到它；`addDiscoveryHandler` 登记的 handler 现在只是该前缀的 `rpcApis` 实现（兼容外壳）。
 5. 路由独占：`getRoutes()` 恒返回 `['/']`（`:58`）——同一 mailbox 地址只允许一个服务端实例，声明具体前缀不会缩小独占范围。
 
 > 旧版本文第 (f) 条「路由时把 Headers 中的空字符串清理为 `undefined`」：代码没有这一步，也不需要——空串在 falsy 检查下等价于缺失（客户端 `if (name)` 才写 `rpc-fn`，`mailbox-client.ts:112`；服务端 `if (!toolId)` 直接 `BAD_REQUEST`，`mailbox-server.ts:125-126`）。
@@ -65,7 +66,7 @@ import { MailboxClientTransport, ClientTools } from '@isdk/tool-rpc'
 const clientTransport = new MailboxClientTransport({
   mailbox,
   apiUrl: 'mailto:api@myservice.com',   // 物理网关地址（必填）
-  clientAddress: 'mailto:user@myclient.com', // 自己的接收地址（必填，:40-42）
+  clientAddress: 'mailto:user@myclient.com', // 自己的接收地址（必填，:39-41）
   timeout: 30000                        // 可选，见第 4 节
 })
 
@@ -106,11 +107,13 @@ const result = await greeter.run({ name: 'World' })
 ## 2. 工作流程：一次完整的异步 RPC 调用
 
 1. **配置阶段**
-   - 服务端：创建 `Mailbox`，注册 Provider；`MailboxServerTransport({ mailbox, apiUrl })`，并 `addDiscoveryHandler(apiUrl, handler)`。
+   - 服务端：创建 `Mailbox`，注册 Provider；`MailboxServerTransport({ mailbox, apiUrl })` 并 `addRpcHandler(apiUrl)`。
+     发现端点内置（寻址到 `rpcApis`），不需要额外调用；`addDiscoveryHandler(apiUrl, handler)` 已 **@deprecated**，
+     只在该地址要自定义清单内容时才用（首次调用会打一次迁移提示）。
    - 客户端：创建 `Mailbox`；`MailboxClientTransport({ mailbox, apiUrl, clientAddress, timeout? })`。
 
 2. **启动与发现阶段**
-   - 服务端 `start()`：`subscribe(apiUrl)` → `drainBacklog(apiUrl)`（`:192-193`）。
+   - 服务端 `start()`：`subscribe(apiUrl)` → `drainBacklog(apiUrl)`（`:198-199`）。
    - 客户端 `ClientTools.loadFrom()` → 发一封**无 `rpc-fn`、`rpc-act: 'get'`** 的信到 `apiUrl`。
    - 服务端命中发现分支（`:79`），调用 handler，回信 body **直接是 handler 的结果**（`sendRpcResponse` 走 `resultBody = rpcRes.data`，`:161`）。旧版本文写的 `{ tools, gateways }` 服务地图形状不存在——handler 返回什么，body 就是什么（典型实现是 `ServerTools.toJSON()`，即工具定义表）。
 
@@ -212,7 +215,8 @@ sequenceDiagram
     C_Transport->>Mailbox: post({to: apiUrl, headers: {rpc-act: 'get', req-id}})
     note left of C_Transport: 发现请求：空工具名，不带 rpc-fn
     Mailbox->>S_Transport: onReceive(MailMessage)
-    S_Transport->>S_Transport: 命中 !rpc-fn && act==='get'，调用 discoveryHandler
+    S_Transport->>S_Transport: 命中 !rpc-fn && (act==='get' 或 'list')
+    note right of S_Transport: 装了 identity 先过同一条认证（不认就回 401），再调 discoveryHandler
     S_Transport-->>Mailbox: post({to: replyTo, body: handler 的结果})
     Mailbox->>C_Transport: onReceive(MailMessage)
 

@@ -90,9 +90,7 @@ async function startServer() {
   });
 
   // 3. 配置该传输层的逻辑路由
-  // 暴露工具定义供客户端发现
-  serverTransport.addDiscoveryHandler(apiUrl, () => ServerTools.toJSON());
-  // 暴露 RPC 端点供工具执行
+  // 暴露 RPC 端点供工具执行。服务发现是内置的（`rpcApis` 工具回答 `GET /api`），无需额外声明。
   serverTransport.addRpcHandler(apiUrl);
 
   // 4. 将传输层注册到管理器并启动所有服务
@@ -500,12 +498,13 @@ import { ClientTools } from '@isdk/tool-rpc'
 
 - **`IToolTransport`**: 所有传输的通用基础接口，定义了 `mount`（挂载）等基本操作。
 - **`IServerToolTransport`**: 服务器端传输必须实现的接口。其核心职责是：
-    1. **暴露发现端点**: 创建一个通常为 `GET` 的路由（例如 `/api`），当客户端访问时，它会返回所有已注册并可用的工具的 JSON 定义。这是通过 `addDiscoveryHandler` 方法实现的。
+    1. **暴露发现端点**: 列出工具的路由（通常为 `GET /api`）由框架内置的 `rpcApis` 工具回答，每个被声明的前缀会自动登记它。它是一个普通工具：与业务调用走同一条身份/校验/超时流水线，且列的是**命中前缀**所绑定的注册表。`addDiscoveryHandler(apiUrl, handler)` 已标 **@deprecated**——它只覆盖该前缀的清单内容，首次调用会打一次迁移提示（进程级，不刷屏）。只有需要自定义清单时才保留它（或自己注册一个工具再 `addRoute(apiUrl, { path: '/', when: { method: 'GET' }, toolId: 'myListing' })`）。
     2. **处理 RPC 调用**: 创建一个通用的 RPC 路由（例如 `/api/:toolId`），它接收请求，根据 `toolId` 查找对应的工具，执行它，然后返回结果。这是通过 `addRpcHandler` 方法实现的。
     3. 管理服务器生命周期 (`start`, `stop`)。
     4. **物理感知 (V2)**: 通过 `getListenAddr()` 和 `getRoutes()` 实现物理端口复用与逻辑路由归属登记。
     5. **路由声明与重复挂载 (V2)**: `addRpcHandler()` / `addDiscoveryHandler()` 会在 `ServerToolTransport` 基类中声明（claim）其路径前缀，因此一个 transport 可同时服务多个前缀，各自绑定独立的注册表与发现处理器。逻辑路由以 canonical 形式上报（以 `/` 开头、不带尾随斜杠），前缀匹配用的尾斜杠形式由 `toMatchPrefix()` 派生。对已声明的前缀再次声明时，默认替换其注册表/处理器并告警；传入 `options.remount = 'throw'` 则改为抛错——自带路由表的后端可覆写 `onDuplicateRoute()` 上报框架原生的重复路由错误。
-    6. **路由注册成对方法 (V2)**: `registerRoutes()` / `unregisterRoutes()` 是 `ServerToolTransport` 基类的 **`protected`** 成员，只能在自己的 transport 子类内部调用；它们同步物理路由表与 Manager 的归属表，且可重复调用（先注销再登记）。框架适配器（Fastify、Electron、Express）应调用这一对，而不是只调 `claimRoute()`——只声明路由而不动归属表会留下残留条目，导致下次 `listen()` 报 `Routing Conflict`。Manager 侧对应的一对是 `registerServer()` / `unregisterServer()`（旧名 `addServer()` 已废弃，仅作转发）；`unregisterServer()` 只清理归属与 transport 映射，**不**停底层 server。
+    6. **路由表 (V2)**: `addRoute(apiUrl, { path, when, toolId, act })` 把前缀内的一个路径映射到一个工具，`getRouteTable()` 返回包内置行的全部条目，适配器可拿去自己框架里原生注册。内置发现端点就是表里的一行——第三方用同一路径同条件声明就能换掉它，没有特权通道。`path: ''` 与 `'/'` 是同一条路由；`/x` 与 `/x/` 默认同义（`strictTrailingSlash: true` 才分成两条）。
+    7. **路由注册成对方法 (V2)**: `registerRoutes()` / `unregisterRoutes()` 是 `ServerToolTransport` 基类的 **`protected`** 成员，只能在自己的 transport 子类内部调用；它们同步物理路由表与 Manager 的归属表，且可重复调用（先注销再登记）。框架适配器（Fastify、Electron、Express）应调用这一对，而不是只调 `claimRoute()`——只声明路由而不动归属表会留下残留条目，导致下次 `listen()` 报 `Routing Conflict`。Manager 侧对应的一对是 `registerServer()` / `unregisterServer()`（旧名 `addServer()` 已废弃，仅作转发）；`unregisterServer()` 只清理归属与 transport 映射，**不**停底层 server。
 - **`IClientToolTransport`**: 客户端传输必须实现的接口。其核心职责是：
     1. **加载 API 定义**: 调用 `loadApis()` 方法，该方法会访问服务器的发现端点以获取所有工具的定义。
     2. **执行远程调用**: 实现 `fetch()` 方法，该方法负责将客户端的工具调用（函数名和参数）序列化，发送到服务器的 RPC 端点，并处理响应。
@@ -516,7 +515,8 @@ import { ClientTools } from '@isdk/tool-rpc'
 本库提供了多套即插即用的传输实现，无需额外配置：
 
 - **`HttpServerToolTransport` (HTTP 服务端)**: 基于 Node.js 内置 `http` 模块。在 V2 中，它支持 **最长前缀匹配 (Longest Prefix Match)** 路由，允许多个逻辑实例共享同一个物理端口（物理底座复用）。它会自动：
-  - 创建一个 `GET /prefix` 路由用于服务发现。
+  - 用内置 `rpcApis` 工具回答 `GET /prefix`。它是路由表里的一个普通工具，所以它与业务调用走同一条
+    身份、校验、超时流水线（见[身份策略](#-身份策略-identity-policy)）；默认公开，策略可以要求它凭证。
   - 创建一个包含工具名的 RPC 路由，智能解析请求体或 URL 参数。
 
 - **`HttpClientToolTransport` (HTTP 客户端)**: 基于跨平台 `fetch` API。V2 版本支持对后台任务的自动状态轮询。
@@ -533,11 +533,135 @@ import { ClientTools } from '@isdk/tool-rpc'
 
 1. 创建一个 `FastifyServerTransport` 类并实现 `IServerToolTransport`。
 2. 在 `mount` 方法中，您不再创建新的 `http` 服务器，而是接收一个现有的 `FastifyInstance` 作为选项。
-3. 使用 `fastify.get(apiPrefix, ...)` 来注册发现路由，其处理器调用 `ServerTools.toJSON()`。
+3. 读 `transport.getRouteTable()` 并逐条原生注册（`fastify.get(prefix + path, ...)`）——内置发现端点就是其中一行，所以不需要手写 `ServerTools.toJSON()` 的处理器。
 4. 使用 `fastify.all(apiPrefix + '/:toolId', ...)` 来注册 RPC 路由，其处理器从 `request.body` 或 `request.query` 中提取参数，调用相应的工具，然后使用 `reply` 发送响应。
 5. `start` 和 `stop` 方法可以委托给 Fastify 实例的 `listen` 和 `close`。
 
 这种可插拔的架构为 `@isdk/tool-rpc` 提供了极大的灵活性，使其能够轻松适应各种项目需求和技术栈。
+
+## 🪪 身份策略 (Identity Policy)
+
+服务端要回答一个问题：**这个请求是谁**。本包只定义接口与两个默认实现，**不装策略时行为与今天逐字节一致**
+（`clientId` 就是客户端自报值，`ctx.identity` 是 `undefined`）。
+
+### 两个默认实现
+
+**A. `RpcSessionIdentityPolicy`**：服务端在首次连接自动签发会话凭证。连上之后不可冒充（身份由服务端定，
+客户端不能自报），断线可续；**不做认证**（任何人都能连上）。
+
+```typescript
+import { HttpServerToolTransport, RpcSessionIdentityPolicy } from '@isdk/tool-rpc';
+
+new HttpServerToolTransport({ apiUrl: '/api', identity: new RpcSessionIdentityPolicy() });
+```
+
+**B. `RpcBearerPolicy`**：凭证由外部签发（JWT / OAuth2 access token / 自有 api key），服务端只验。
+**做认证**；无状态，天然跳副本可用。
+
+```typescript
+const identity = new RpcBearerPolicy({
+  verify: async (token) => {
+    const p = await jwt.verify(token, JWKS);
+    return p ? { id: p.sub, attributes: { scopes: p.scopes } } : undefined;
+  },
+  allowAnonymous: false,   // 不认就 401，不给匿名身份
+});
+new HttpServerToolTransport({ apiUrl: '/api', identity });
+```
+
+| | `RpcSessionIdentityPolicy` | `RpcBearerPolicy` |
+|---|---|---|
+| 认证（谁能连） | 不做 | 做（`verify` 不认就 401） |
+| 防伪（连上后不可冒充） | 做 | 做，但不带凭证的连接没有可续用身份 |
+| 凭证从哪来 | 服务端首次连接自动下发 | 部署方自备（外部认证服务 / 管理面签发） |
+| 状态 | 进程内登记表 | 无状态 |
+| 跳副本 | 默认进程内，要 sticky session；要共享就换 `registry` | 天然可用 |
+| `id` 粒度 | 连接级（默认 uuid） | 由 `verify` 定：用户级会合并下游会话 |
+| 语义 | 只标识「哪个会话」，不含授权 | 携带认证方给的属性（scopes / tenant） |
+
+> **`id: p.sub` 要写清代价**：`p.sub` 是用户级稳定 id，会被写进 `clientId`。在按 clientId 建会话表的
+> transport 上（如 SSE 那类），**同一用户的多个标签页与多个设备会合并成一个会话**。纯请求-响应的 HTTP RPC
+> 不受影响。要用户级身份又要有连接级会话，就 `id: uuidv4()` + `attributes: { userId: p.sub }`。
+
+### 逐 API 的认证判定
+
+`allowAnonymous` 除了布尔，还可以是**谓词**，粒度到单个 API：
+
+```typescript
+const identity = new RpcBearerPolicy({
+  verify: (token) => verifyToken(token),
+  // 默认公开：只有带 authScope 的工具必须认证；发现端点单独放行
+  allowAnonymous: (ctx) => ctx.toolId === 'rpcApis' || !ctx.tool?.authScope,
+});
+```
+
+谓词拿到的 `ctx` 就是本次调用的寻址结果：`toolId` / `act` / `resId`、`prefix` / `apiUrl`（多前缀分租户），
+以及 `tool`——注册表里那个工具实例（只读备料，按 dispatcher 的解析顺序取，取不到就是 `undefined`）。
+框架自有的发现端点寻址为 `toolId === 'rpcApis'`；它没有单独开关，因为它就是一个普通工具。
+所以“这个 API 要不要认证”可以写在注册处：
+
+```typescript
+class AdminTool extends ServerTools {
+  authScope = 'admin'          // 字段名是部署与业务的私有约定，框架不读不解释
+  func(params, ctx) { /* … */ }
+}
+```
+
+两点边界：
+
+- 这是**认证**（要不要凭证），不是**授权**（谁能调哪个工具）。授权在 `validateRpcRequest` 与业务工具里做。
+- **发现端点是内置工具（`rpcApis`）**，不是特殊路由：它与任何调用走同一条判定（`match` → 必要时 `assign`，策略抛错才是 401）。
+  默认公开（上面例子里 `ctx.toolId === 'rpcApis'` 就是显式放行它）；要它必须认证，谓词对它返 `false` 即可。
+  客户端侧 `ClientTools.loadFrom()`
+  会把类级 `fetchOptions`（凭证就在那）合进发现调用，否则开了认证就取不到工具清单。
+
+### 业务侧读法
+
+身份只落 `ctx.identity` 一处：
+
+```typescript
+ServerTools.register({
+  name: 'whoami',
+  func: (params, ctx) => ({ who: ctx.identity?.id, scopes: ctx.identity?.attributes?.scopes }),
+});
+```
+
+客户端把凭证带回来（写哪个 header 由部署的 transport 定，bearer 默认读 `authorization`）：
+
+```typescript
+await someTool.run({ q: 1 }, { headers: { authorization: `Bearer ${token}` } });
+```
+
+### 策略接口
+
+自己接鉴权代理 header / mTLS 证书映射 / 自有 auth 服务，就实现 `RpcIdentityPolicy` 的两个钩子：
+
+```typescript
+class ProxyHeaderPolicy implements RpcIdentityPolicy<IncomingMessage> {
+  readonly name = 'proxy-header';
+  match(ctx: RpcIdentityContext<IncomingMessage>) {
+    const t = ctx.credential;
+    if (!t) return undefined;                       // undefined = 另起新会话，不是拒绝
+    return { id: t.slice(0, 16), attributes: { tenant: ctx.headers?.['x-tenant'] } };
+  }
+  assign() { return { id: uuidv4() }; }
+}
+
+new HttpServerToolTransport({
+  apiUrl: '/api',
+  identity: new ProxyHeaderPolicy(),
+  credentialReader: (r) => r.headers['x-auth'],      // 私有 header 由部署写自己的 reader
+});
+```
+
+要点（完整契约见根目录 `IDENTITY_POLICY_DESIGN.cn.md`）：
+
+- `match` 返回 `undefined` = 另起新会话；**拒绝必须抛** `new RpcError('Unauthenticated', RpcStatusCode.UNAUTHENTICATED, 'unauthenticated')`（401）。
+- `match` 与 `assign` 是两条判定，不可合并；三个钩子都可同步可异步。
+- 两个默认类都可继承（换 verify / 换 id 生成 / 加属性，3–8 行），覆写点一律 `protected`。
+- 服务端自签发凭证的存储可换：实现 `RpcCredentialRegistry` 四个方法，从 `registry` 选项注入
+  （持久化 / 跳进程共享 / 外接 Redis / LRU 淘汰）。
+- 「谁能调哪个工具」不在策略，在 `manager.validateRpcRequest` 或业务工具。
 
 ## 高级用法
 

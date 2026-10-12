@@ -27,6 +27,20 @@
 - **逻辑寻址标识**：不再依赖全局唯一的 Transport 实例，而是通过 URL（如 `http://srv/v1` 或 `mailbox://peer-1/api`）进行逻辑匹配。
 - **协议透明化**：`ClientTools` 类持有 `apiUrl` 后，底层 `RpcTransportManager` 会根据 URL 的 Scheme 自动调度正确的物理传输层。
 
+### 1.4 两级寻址：前缀归属 + 前缀内路由表
+
+`apiUrl` 只回答「哪个 transport 实例管这段路径」；**前缀内**的路径→工具寻址另有一张表（`addRoute()` 声明、`getRouteTable()` 读出）：
+
+- **表里是普通行**：`{ path, when?: { method?, act? }, toolId, act?, resId? }`。内置发现端点（`GET 前缀根` 与 `act: 'list' | 'get'` → `rpcApis`）
+  也是其中一行，所以发现调用与业务调用走同一条流水线（`validateRpcRequest` / 身份判定 / `globalTimeout` 均管得到），
+  第三方用同一路径同条件声明就能换掉它——**没有特权通道**。
+- **规则只有一份**：归一化与最长前缀匹配在 `src/transports/route-path.ts`，注册侧与请求侧共用，插件拿不到裸串。
+  `path: ''` 与 `'/'` 同义；`/x` 与 `/x/` 默认同义（`strictTrailingSlash: true` 才分两条）。
+- **注册表按前缀分层**：`requestRegistry(rpcReq)` 把「前缀 claim 的 registry → transport 自己的 → dispatcher 的 → 系统保留」
+  叠成一个 `get(toolId)` 视图，所以同一个工具 id 在不同前缀下可以解析到不同实例。
+
+细节与约定期见 `src/transports/README.cn.md`（实现向）与 `TRANSPORT_REFACTOR_DESIGN.cn.md` §2（接口契约向）与 §4.5（分发与物理复用）。
+
 ## 2. 核心机制解析
 
 ### 2.1 发现隔离算法 (Discovery Filtering)
@@ -123,6 +137,10 @@ static toJSON() {
 - **理由**：`tool-rpc` 专注于通信能力的连通。
 - **隐患**：如果传输层未显式校验 `isApi !== false`，则存在“隐蔽路径访问”风险。
 - **架构建议**：安全性应作为独立的拦截器（Middleware）或切面（Aspect）存在，通过读取实例的元数据（如自定义权限标签）来决定是否允许执行。
+- **已落地的机制**（不在本文件展开，规格见 `IDENTITY_POLICY_DESIGN.cn.md`）：服务端拦截器就是 `RpcIdentityPolicy`，
+  它在业务之前跑（插在 `toRpcRequest` 与 `validateRpcRequest` 之间）。**认证**（这个 API 要不要凭证）可以在策略谓词里
+  读注册表里那个实例的元数据（`ctx.tool`，只读）逐 API 判定；**授权**（谁能调哪个工具）在 `manager.validateRpcRequest`
+  与业务工具里。两者都不靠 `isApi`——它只是可见性标记。
 
 ### 4.2 包内可见性
 

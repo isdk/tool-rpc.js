@@ -32,6 +32,13 @@
     - **`getRoutes()`**: 返回该实例声明负责的逻辑路由列表（每个前缀一条）。
       - **规范化要求（已修订）**：逻辑路由以 **canonical 形式**存储——以 `/` 开头、**不带**尾随斜杠（根路由为 `/`），并压缩重复斜杠；由 `ServerToolTransport.toPathname()` 统一实现。前缀匹配与物理路由表的 key 则由 `toMatchPrefix()` 派生（补尾随斜杠，根仍为 `/`），以保证 `/api` 不会误匹配 `/apix`。即：**归属登记比对用归一化前缀，分发匹配用 match 形式**，两者由基类同一组 helper 派生，实现类不再手写拼接。
       - **声明方式**：调用基类的 `claimRoute(apiUrl, kind, options)`，它同时完成归一化、多前缀簿记（`prefix -> { apiUrl, registry, discoveryHandler }`）与重复声明的 `remount` 决策（`'replace'` 默认 / `'throw'`）。
+    - **`addRoute(apiUrl, entry)` / `getRouteTable()`**（已修订：新增的路由表）：前缀本身只回答「这个实例管哪段路径」，前缀**内**的路径→工具寻址由一张表描述：
+      `entry = { path, when?: { method?, act? }, toolId, act?, resId? }`（`path` 是前缀内路径，根为 `'/'`）。
+      `getRouteTable()` 返回含内置行的全部条目，适配器可拿去自己框架里原生注册；内置发现端点（`GET 前缀根` 与
+      `act: 'list' | 'get'` → `rpcApis`）就是表里的普通行，第三方用同一路径同条件声明就能换掉它——**没有特权通道**。
+      匹配规则（`''` 与 `'/'` 同义、`/x` 与 `/x/` 默认同义、最长前缀胜出）集中在 `route-path.ts`，请求侧与注册侧共用同一套。
+    - **`addDiscoveryHandler(apiUrl, handler)`**（已标 `@deprecated`）：发现端点已由内置工具 `rpcApis` 回答，它降为兼容外壳：
+      只把 handler 挂成该前缀的 `rpcApis` 清单实现，不再生成第二条物理路由；首次调用经 `warnDiscoveryDeprecated()` 打一次迁移提示。
     - **`HttpServerToolTransport`** (基于 Node.js 原生 http 模块，支持物理复用)。
     - **`MailboxServerToolTransport`** (基于内部分布式信箱，天然物理独占)。
   - **`IClientToolTransport`** (客户端协议规范)：
@@ -177,6 +184,9 @@ V2 架构通过 `IServerToolTransport` 的扩展接口实现了对底层物理�
   - **引用计数 (Ref Counting)**：通过计数器追踪物理 Server 的逻辑持有者数量。当最后一个逻辑 Transport 实例调用 `stop()` 时，物理底座自动回收并安全关闭监听端口。
   - **路由分发逻辑 (Routing)**：物理端口接收到请求后，采用 **“最长前缀匹配” (Longest Prefix Match)** 算法扫描逻辑实例。
     - **路径规范化**：归属登记与 `getRoutes()` 使用归一化前缀（无尾随斜杠）；写入与比对物理分发表时再由 `toMatchPrefix()` 完成 **Trailing Slash Normalization**（尾随斜杠补齐），杜绝因路径拼接不规范导致的路由错配。
+    - **前缀内寻址（路由表）**：前缀命中后，请求在**该前缀的路由表**里再做一次匹配（前缀内路径 + `method` / `act` 条件 → `toolId`）。
+      内置发现行就在表里，所以发现调用与业务调用走同一条流水线（`validateRpcRequest` / 身份判定 / `globalTimeout` 均管得到）；
+      旧客户端只发 `act: 'list' | 'get'` 也能命中同一行。
     - **HTTPS 考量**：若未来涉及 HTTPS 共享，建议在物理底座池键名中加入协议前缀以区分 TLS/TCP 复用。
 - **Mailbox 独占性保护**：
   - `MailboxServerTransport` 默认接管全量路径 (`/`)。在 Manager 的路由归属登记下，这意味着对于同一个 Mailbox 地址，系统只允许激活一个 Transport 实例，从而在分布式信箱环境中天然保护了物理执行的唯一性。
@@ -262,8 +272,16 @@ async handleInterim(response: ToolRpcResponse, originalRequest: ToolRpcRequest) 
 ## 7. 兼容性与迁移策略
 
 - **apiRoot 自动映射**：系统将其包装为 `http://localhost/apiRoot` 格式。
-- **setTransport 适配器**：将原有 Transport 实例注册至 `RpcTransportManager.instance` 全局单例。
+- **`ClientTools.setTransport(transport)`（已标 `@deprecated`）**：兼容层仍把实例注册至 `RpcClientTransportManager.instance` 全局单例（顺带调同样已废弃的
+  `transport.mount(Class)`），行为不变。现行写法按地址寻：`Class.connect(apiUrl)` / `Class.apiUrl = apiUrl` 后 `loadFrom()`，
+  transport 由 `getClient(apiUrl)` 按 scheme 自建（自定义协议先 `RpcClientTransportManager.bindScheme(scheme, Class)`）；
+  必须自己构实例（mailbox 要 `clientAddress`）就 `instance.register(transport)` + `Class.apiUrl = transport.apiUrl`。
+  废弃理由：往类上注入 transport 使类与物理通道耦合，同进程多实例时后者覆盖前者，且无法按调用选通道。
 - **旧版参数桥接**：`elevateV1ParamsToV2Request` 确保写在 `params.id/act` 中的信息能被 V2 调度器正确识别。
+- **发现端点（已修订）**：`addDiscoveryHandler(apiUrl, handler)` 已标 `@deprecated`——清单由内置工具 `rpcApis` 从**命中前缀**的注册表出，
+  所以下游通常只需 `addRpcHandler(prefix)`。只有要自定义清单内容时才保留它（或自己注册一个工具再
+  `addRoute(apiUrl, { path: '/', when: { method: 'GET' }, toolId: 'myListing' })`）。首次调用会打一次迁移提示（进程级，不刷屏）；
+  基类仍**要求实现**该方法，所以自带路由表的后端不会被破。旧客户端（只发 `act: 'list' | 'get'`，不带 `toolId`）仍经内置行命中，行为不变。
 
 ---
 

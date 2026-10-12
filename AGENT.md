@@ -29,8 +29,12 @@
 - **`rpcTask`**（`RpcTaskResource`）：由 `RpcServerDispatcher` 自动注册到 `systemRegistry`，提供标准任务轮询和取消端点。
   - `GET /api/rpcTask/{resId}` — 查询任务状态（返回 102/200/404/408）
   - `POST /api/rpcTask/{resId}?act=cancel` — 取消任务
+- **`rpcApis`**（`RpcApisResource`，id 常量 `RPC_APIS_TOOL_ID`）：内置发现工具，同样自动注册到 `systemRegistry`。
+  它从执行上下文里拿**本次命中前缀**的注册表（`ctx.registry`）列工具清单，`timeout: 0`。
+  - `GET /api` — 列该前缀的全部工具（`act: 'get'` 带 `resId` 则只回那一个）
+  - Mailbox：无 `toolId` 且 `act: 'list' | 'get'` 即发现请求，同样寻址到它
 
-**注意**：不要手动注册 `RpcTaskResource`，否则导致重复注册错误。
+**注意**：不要手动注册 `RpcTaskResource` / `RpcApisResource`，否则导致重复注册错误。
 
 ### 2.4 标准化数据模型
 
@@ -42,7 +46,8 @@
 | `toolId` | string | 是 | 工具注册名 |
 | `act` | string | 否 | 子方法（如 `status`, `cancel`） |
 | `resId` | string | 否 | 资源 ID |
-| `clientId` | string | 否 | 客户端标识（用于 session 识别，自动透传至 header `rpc-client-id`） |
+| `clientId` | string | 否 | 客户端标识（用于 session 识别，自动透传至 header `rpc-client-id`）；装了身份策略后由服务端判定值接管 |
+| `identity` | `RpcIdentity` | 否 | 服务端判定的身份（`{ id, attributes?, credential? }`）；**未装策略时不存在** |
 | `requestId` | string | 是 | 唯一调用 ID（用于幂等、追踪） |
 | `params` | any | 是 | 业务参数 |
 | `headers` | object | 否 | 标准 Header（如 `rpc-timeout`, `rpc-act`, `rpc-client-id`） |
@@ -52,7 +57,7 @@
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `status` | number | 状态码（200/102/400/404/408/413/504） |
+| `status` | number | 状态码（200/102/400/401/404/408/413/504） |
 | `data` | any \| ReadableStream | 业务结果或流 |
 | `error` | object | 结构化错误（`code`, `message`, `data`） |
 | `headers` | object | 元数据（如 `rpc-retry-after`） |
@@ -61,6 +66,7 @@
 - 200：成功
 - 102：任务进入后台（`keepAliveOnTimeout` 触发）
 - 400：能力冲突（请求流但工具不支持）
+- 401：身份策略拒绝（凭证缺失或验不过，`RpcStatusCode.UNAUTHENTICATED`）
 - 404：工具或任务不存在
 - 408：硬死线终止
 - 409：requestId 冲突
@@ -112,7 +118,7 @@ const dispatcher = new RpcServerDispatcher({ registry: ServerTools.items, tracke
 // 创建 HTTP 传输
 const apiUrl = 'http://localhost:3000/api/';
 const transport = new HttpServerToolTransport({ apiUrl, dispatcher });
-transport.addDiscoveryHandler(apiUrl, () => ServerTools.toJSON());
+// 发现端点内置（`rpcApis` 回答 `GET /api`），无需 addDiscoveryHandler
 transport.addRpcHandler(apiUrl);
 
 // 注册到 Manager（自动检测路由冲突）
@@ -287,9 +293,8 @@ const transport = new MailboxServerTransport({ mailbox, apiUrl: serverAddr, disp
 // 注册工具（同前）
 new ServerTools({ name: 'greet', isApi: true, func: ({ name }: { name: string }) => `Hello, ${name}!` }).register();
 
-// 注册路由
+// 注册路由（发现端点内置，无需额外声明）
 transport.addRpcHandler(serverAddr);
-transport.addDiscoveryHandler(serverAddr, () => ServerTools.toJSON());
 
 // 启动
 RpcTransportManager.instance.registerServer(transport);
@@ -341,6 +346,9 @@ const result = await someTool.run(
 
 业务代码可通过 `this.ctx.clientId`（若 `ToolRpcContext` 扩展）或 `this.ctx.headers['rpc-client-id']` 获取。
 
+> **自报值不是身份**。`clientId` 是客户端自己填的；要「连上之后不可冒充」就得装身份策略（见 §4.6）：
+> 装了策略后基类保证 `clientId === identity.id`，业务侧读 `this.ctx.identity`。
+
 ### 4.5 自定义传输层
 
 实现 `IServerToolTransport` 或 `IClientToolTransport` 接口；服务端建议直接继承 `ServerToolTransport` 基类，以复用路由声明内核（多前缀、归一化、`remount`）。例如集成 Fastify：
@@ -350,8 +358,11 @@ const result = await someTool.run(
 class FastifyServerTransport extends ServerToolTransport {
   // 必须实现：toRpcRequest(), sendRpcResponse(), _start(), stop(),
   //           addRpcHandler(apiUrl, { registry, remount }), addDiscoveryHandler(apiUrl, handler, { remount })
+  //           （后者已 @deprecated：基类仍要求实现它，但新代码不该调它，内置 `rpcApis` 就是清单）
   // 两个 handler 方法内部应调用基类的 claimRoute()：它负责归一化、多前缀簿记与 remount 决策；
   // 返回 null 表示该前缀已声明，只需替换 registry/handler，不应再注册物理路由。
+  // 发现端点不必自己写：claimRoute() 会铺内置路由行（`GET 前缀根 → rpcApis`），
+  // 要原生注册就读 getRouteTable()，要换掉它就 addRoute(apiUrl, { path: '/', when: { method: 'GET' }, toolId: 'myRoot' })。
   // 仅当需要上报框架原生的重复路由错误时才覆写 onDuplicateRoute()
   // 物理底座标识与 apiUrl 不同时才覆写 getListenAddr()
 }
@@ -367,6 +378,44 @@ const transport = new HttpServerToolTransport({ apiUrl: 'http://localhost:3001/'
 manager.registerServer(transport);
 await manager.startAll();
 ```
+
+### 4.6 身份策略（Identity Policy）
+
+服务端回答「这个请求是谁」。三个文件：`identity.ts`（抽象）、`identity-session.ts`（服务端自签发会话凭证）、
+`identity-bearer.ts`（凭证外部签发、服务端只验）。完整规格见根目录 `IDENTITY_POLICY_DESIGN.cn.md`。
+
+```typescript
+// A：服务端首次连接自动签发会话凭证（不做认证，但连上后不可冒充、断线可续）
+new HttpServerToolTransport({ apiUrl: '/api', identity: new RpcSessionIdentityPolicy() });
+
+// B：JWT / api key（做认证；不认就 401）
+new HttpServerToolTransport({
+  apiUrl: '/api',
+  identity: new RpcBearerPolicy({
+    verify: async (token) => {
+      const p = await jwt.verify(token, JWKS);
+      return p ? { id: p.sub, attributes: { scopes: p.scopes } } : undefined;
+    },
+    allowAnonymous: false,
+  }),
+});
+```
+
+- **业务侧唯一读法**：`ctx.identity?.id` / `ctx.identity?.attributes?.scopes`。不平铺 `ctx.userId` / `ctx.tenantId`。
+- **不装策略就是 no-op**：`ctx.identity` 为 `undefined`，`clientId` 仍是客户端自报值（与旧行为逐字节一致）。
+- **拒绝要抛** `new RpcError('Unauthenticated', RpcStatusCode.UNAUTHENTICATED, 'unauthenticated')`（401）；
+  `match` 返回 `undefined` 只是「另起新会话」。
+- **凭证取法可换**：`credentialReader` 从原生 req 取字符串，内置默认只读 `authorization`（去 Bearer 前缀）；
+  私有 header 自己写 reader。
+- **逐 API 的认证判定在策略里，不在 transport 上**：`allowAnonymous` 可以是谓词（`(ctx) => boolean`）。
+  `ctx` 带寻址结果与备料：`toolId` / `act` / `resId`、`prefix` / `apiUrl`、`tool`（注册表里那个实例，**只读**，
+  按 dispatcher 的解析顺序取，取不到就 `undefined`）。没有 `builtin` 开关——内置端点也是普通工具，
+  要区分就比 `ctx.toolId === 'rpcApis'`。工具注册级元数据直接读 `ctx.tool` 上自带的字段（继承 `ServerTools` 加字段）。
+  **不要**在路由声明或工具注册上加 `requireIdentity` 这类开关字段——那等于框架开始解释业务元数据，且与策略谓词重复。
+- **发现端点就是内置工具 `rpcApis`**：它与业务调用走同一条流水线（`toRpcRequest` 经路由表解析出 toolId →
+  身份判定 → `validateRpcRequest` → `dispatcher.dispatch`），**没有第二条身份路径**，也没有“物理路由直接回”的分支。
+  默认公开，要不要认由策略谓词定（`ctx.toolId === 'rpcApis'`）。客户端 `ClientTools.loadFrom()` 会把类级
+  `fetchOptions`（凭证就在那）合进发现调用。
 
 ## 五、关键注意事项
 
@@ -389,8 +438,10 @@ Dispatcher 在执行时为每个请求创建 `Object.create(tool)` 的影子实�
 - 客户端请求流但工具不支持 → 返回 400。
 - 传输层不支持流（如 Mailbox）但工具返回流 → 返回 400。
 
-### 5.6 不要手动注册 `RpcTaskResource`
-它由 `RpcServerDispatcher` 在初始化时自动注册到 `systemRegistry`。手动注册会导致重复注册错误。
+### 5.6 不要手动注册 `RpcTaskResource` / `RpcApisResource`
+它们由 `RpcServerDispatcher` 在初始化时自动注册到 `systemRegistry`。手动注册会导致重复注册错误。
+要换掉发现端点，不必删内置项：在自己注册表里注册同名 `rpcApis` 就覆盖它（解析顺序：业务表优先于系统表），
+或者用 `addRoute()` 声明同一路由行把 `GET 前缀根` 指向自己的工具。
 
 ### 5.7 超时与死线
 - **软死线**：触发 102 Processing，任务转入后台（需设置 `keepAliveOnTimeout: true`）。
@@ -419,12 +470,17 @@ Dispatcher 在执行时为每个请求创建 `Object.create(tool)` 的影子实�
 |------|------|
 | `apiRoot` | `apiUrl`（完整 URL） |
 | `mount(tools)` | `registerServer()` + `addRpcHandler()` |
+| `ClientTools.setTransport(transport)` | `ClientTools.connect(apiUrl)` + `loadFrom()`（地址在类上，transport 按 scheme 自建）；已经自己构好一个 transport（mailbox 要 `clientAddress`、自定义协议要带选项）就 `RpcClientTransportManager.instance.register(transport)` + `Class.apiUrl = transport.apiUrl` |
+| `addDiscoveryHandler(apiUrl, handler)` | 什么都不用加：发现清单由内置工具 `rpcApis` 回答（`addRpcHandler(prefix)` 就够）。要自定义清单内容才保留它，或自己注册一个工具再 `addRoute(apiUrl, { path: '/', when: { method: 'GET' }, toolId: 'myListing' })` |
 | 全局单例依赖 | 支持 `new RpcTransportManager()` 独立实例 |
 | 无任务追踪 | 内置 `RpcActiveTaskTracker` + `RpcTaskResource` |
 | 手动管理流生命周期 | 自动包装 TransformStream，物理连接联动 |
 | 自定义轮询端点 | 使用系统内置 `rpcTask` |
 
-**自动桥接**：旧版 `apiRoot` 会被包装为 `http://localhost/apiRoot`，旧版 `setTransport` 会注册到全局单例。
+**自动桥接**：旧版 `apiRoot` 会被包装为 `http://localhost/apiRoot`，旧版 `setTransport` 会注册到全局单例
+（它等价于 `manager.register(transport)` + 把 `transport.apiUrl` 写进类的 `apiUrl`，顺带调同样已废弃的 `transport.mount()`）。
+两个旧入口都仍可用，但已标 `@deprecated`：新代码按 `apiUrl` 寻址，不要把一个 transport 全局绑到一个工具类上
+（多个后端会互相覆盖）。
 
 ## 八、浏览器端使用
 
@@ -446,6 +502,7 @@ Dispatcher 在执行时为每个请求创建 `Object.create(tool)` 的影子实�
   - `RpcActiveTaskTracker` / `RpcActiveTaskHandle` — 任务追踪
   - `RpcDeadlineGuard` — 死线守卫
   - `RpcTaskResource` — 系统内置的 rpcTask 资源
+  - `RpcApisResource` / `RPC_APIS_TOOL_ID` — 系统内置的发现工具（列工具清单）
 - **共享类型和常量**: `RPC_HEADERS`, `RPC_DEFAULTS`, `RpcStatusCode`, `RpcError`, `ToolTransport`, `ToolRpcRequest` 等
 
 **不包含**的 Node.js 特有模块：`HttpServerToolTransport`、`MailboxServerTransport`、`MailboxClientTransport`。
@@ -530,7 +587,11 @@ interface IServerToolTransport {
   stop(): Promise<void>;
   // 以下两个在 ServerToolTransport 基类上，内部通过 claimRoute() 登记前缀
   addRpcHandler(apiUrl: string, options?: RouteClaimOptions): void;             // { registry?, remount? }
+  // 兼容外壳（已 @deprecated，首次调用打一次迁移提示）：它只把自定义清单挂成该前缀的 `rpcApis` 实现；不写也有内置发现端点
   addDiscoveryHandler(apiUrl: string, handler: Function, options?: RouteClaimOptions): void;
+  // 路由表：声明/读取前缀内的路径 → 工具寻址（内置发现行就在里面，第三方同 key 声明可换掉）
+  addRoute(apiUrl: string, entry: RouteEntry): void;   // { path, when?: { method?, act? }, toolId, act? }
+  getRouteTable(): Array<RouteEntry & { prefix: string }>;
 }
 ```
 
@@ -541,6 +602,11 @@ interface IServerToolTransport {
 registerRoutes(): void;      // 同步「物理路由表 + Manager 归属表」
 unregisterRoutes(): void;    // 反向；内部先 unregister 再 register，因此可重复调用
 protected processIncomingCall(rawReq, rawRes, registry?): Promise<void>;
+// 身份管道（装了 identity 策略才生效；不装就是 no-op）：
+protected resolveRequestIdentity(rpcReq, rawReq?, rawRes?): Promise<void>;
+protected resolveRouteTool(rpcReq): any;                   // 策略看到的 `ctx.tool`（只读备料）
+protected requestRegistry(rpcReq): any;                    // 本次请求的注册表视图（分层解析）
+protected sendPipelineError(err, rawRes): Promise<void>;   // 顶级防护的出口，取码规则全仓同一套
 ```
 
 Manager 侧对应的一对是 `registerServer()` / `unregisterServer()`（旧名 `addServer()` 已废弃）：前者把 transport 接入当前 Manager 并登记归属，后者只注销归属与 transport 映射，**不**停底层 server。
