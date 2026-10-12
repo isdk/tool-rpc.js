@@ -24,7 +24,10 @@ describe('Models', () => {
     expect(RpcStatusCode.OK).toBe(200);
     expect(RpcStatusCode.PROCESSING).toBe(102);
     expect(RpcStatusCode.BAD_REQUEST).toBe(400);
+    // 身份策略拒绝用的码（identity-bearer 的 reject 默认抛这个）
+    expect(RpcStatusCode.UNAUTHENTICATED).toBe(401);
     expect(RpcStatusCode.NOT_FOUND).toBe(404);
+    expect(RpcStatusCode.CONFLICT).toBe(409);
     expect(RpcStatusCode.TERMINATED).toBe(408);
     expect(RpcStatusCode.INTERNAL_ERROR).toBe(500);
     expect(RpcStatusCode.GATEWAY_TIMEOUT).toBe(504);
@@ -63,6 +66,20 @@ describe('Models', () => {
 
       const res = dispatcher.handleError(mockRequest, abortErr);
       expect(res.status).toBe(RpcStatusCode.GATEWAY_TIMEOUT);
+    });
+
+    it('should auto-fill the unauthenticated status string for a bare 401 code', () => {
+      const dispatcher = new RpcServerDispatcher();
+      const mockRequest = { toolId: 'test', requestId: '1' } as any;
+
+      // 只给码、不给状态串（业务自己 throw new Error + code = 401 的常见写法）
+      const err: any = new Error('no credential');
+      err.code = RpcStatusCode.UNAUTHENTICATED;
+
+      const res = dispatcher.handleError(mockRequest, err);
+      expect(res.status).toBe(401);
+      expect(res.error?.code).toBe(401);
+      expect(res.error?.status).toBe('unauthenticated');
     });
   });
 });

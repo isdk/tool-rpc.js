@@ -13,7 +13,6 @@ export interface MailboxServerTransportOptions extends ServerToolTransportOption
 export class MailboxServerTransport extends ServerToolTransport {
   protected mailbox!: Mailbox;
   protected listenAddress: string = '';
-  protected discoveryHandlerInfo: { prefix: string; handler: () => any } | null = null;
   /** 轮询循环只报一次错：服务端挂掉与「没有消息」在外部完全一样，不能静默吞。 */
   protected pullLoopErrored = false;
   protected subscription: any;
@@ -59,40 +58,36 @@ export class MailboxServerTransport extends ServerToolTransport {
     return ['/'];
   }
 
+  /**
+   * @deprecated 发现端点已由内置工具 `rpcApis` 接管（与 HTTP 侧同一结论）；只有要自定义
+   * 该地址列什么时才需要它。迁移提示进程级只打一次（`warnDiscoveryDeprecated`）。
+   */
   public addDiscoveryHandler(apiUrl: string, handler: () => any, options?: RouteClaimOptions): void {
-    // mailbox 按地址路由而非按路径路由，这里只保留「最近一次声明」的 handler；
-    // 但重复声明的处理（替换 + 告警 / 抛错）与 remount 选项仍由基类统一裁决。
+    this.warnDiscoveryDeprecated();
+    // mailbox 按地址路由而非按路径路由，所以只有一份清单内容；它登记在 claim 上，
+    // 请求期由 `requestRegistry` 把它当成该前缀的 `rpcApis` 实现（与 HTTP 同一条路径）。
+    // 重复声明的处理（替换 + 告警 / 抛错）与 remount 选项仍由基类统一裁决。
     this.claimRoute(apiUrl, 'discovery', { discoveryHandler: handler, remount: options?.remount });
-    this.discoveryHandlerInfo = { prefix: this.toPathname(apiUrl), handler };
   }
 
   public addRpcHandler(apiUrl: string, options?: RouteClaimOptions) {
-    this.claimRoute(apiUrl, 'rpc', { remount: options?.remount });
+    // registry 也按前缀登记（与 HTTP 侧同一套 claim 簿记）：内置 `rpcApis` 与工具解析
+    // 都从该前缀的 claim 上取注册表，不传则退到 transport / dispatcher 的那一份。
+    this.claimRoute(apiUrl, 'rpc', { registry: options?.registry, remount: options?.remount });
   }
 
   protected async onReceive(message: MailMessage) {
-    const { headers } = message;
-    const toolId = headers?.[RPC_HEADERS.TOOL_ID];
-    const act = headers?.[RPC_HEADERS.ACT];
-
-    // 处理内置发现逻辑 (Discovery)
-    if (!toolId && this.discoveryHandlerInfo && (act === 'list' || act === 'get')) {
-      try {
-        let result = await this.discoveryHandlerInfo.handler();
-        if (typeof result?.toJSON === 'function') {
-          result = result.toJSON();
-        }
-        await this.sendRpcResponse({ status: RpcStatusCode.OK, data: result }, message);
-      } catch (err: any) {
-        await this.sendRpcResponse({
-          status: RpcStatusCode.INTERNAL_ERROR,
-          error: { message: err.message, code: err.code || 500, status: 'error' }
-        }, message);
-      }
-      return;
-    }
-
+    // 没有发现端点分叉：「无 toolId + act list/get」在 toRpcRequest 里经路由表解析成
+    // 内置工具 `rpcApis`，于是它与业务调用走同一条流水线（validateRpcRequest / 身份判定 / 超时）。
     await this.processIncomingCall(message, message);
+  }
+
+  /** Mailbox 按地址路由：前缀就是它自己声明的那条（多条时取归一化 apiUrl 对应的那条）。 */
+  private claimPrefixOf(): string {
+    const self = this.toPathname(this.apiUrl || '/');
+    if (this.routeClaims.has(self)) {return self;}
+    const first = this.routeClaims.keys().next();
+    return first.done ? '/' : first.value;
   }
 
   protected async toRpcRequest(rawReq: MailMessage): Promise<ToolRpcRequest> {
@@ -116,11 +111,22 @@ export class MailboxServerTransport extends ServerToolTransport {
     if (msgId) rpcHeaders['x-mailbox-msg-id'] = String(msgId);
 
     // 标准化路由控制头映射
-    const toolId = rpcHeaders[RPC_HEADERS.TOOL_ID];
-    const act = rpcHeaders[RPC_HEADERS.ACT];
+    let toolId = rpcHeaders[RPC_HEADERS.TOOL_ID];
+    let act = rpcHeaders[RPC_HEADERS.ACT];
     const resId = rpcHeaders[RPC_HEADERS.RES_ID];
     const traceId = rpcHeaders[RPC_HEADERS.TRACE_ID];
     const reqId = rpcHeaders[RPC_HEADERS.REQUEST_ID] || (this.options?.strict === false ? msgId : undefined);
+
+    // 路由表：无 toolId 且 act 是 list/get 时，它就是内置发现端点（`rpcApis`）。
+    // 以前这里是一条分叉，直接回包不经 dispatcher；现在它只是一个寻址结果，
+    // 所以 validateRpcRequest / 身份判定 / globalTimeout 都管得到它。
+    if (!toolId) {
+      const entry = this.matchRouteEntry(this.claimPrefixOf(), { path: '/', act });
+      if (entry) {
+        toolId = entry.toolId;
+        if (entry.act) {act = entry.act;}
+      }
+    }
 
     if (!toolId) {
       throw new RpcError(`Invalid request to ${toStr}: missing tool identifier (rpc-fn)`, RpcStatusCode.BAD_REQUEST);

@@ -205,7 +205,12 @@ export class HttpServerToolTransport extends ServerToolTransport {
       return this.getRoutes().every(path => binding.routes.get(this.toMatchPrefix(path)) === this);
    }
 
+   /**
+    * @deprecated 发现端点已由内置工具 `rpcApis` 接管；只有要自定义该前缀列什么时才需要它。
+    * 迁移提示进程级只打一次（`warnDiscoveryDeprecated`）。
+    */
    public addDiscoveryHandler(apiUrl: string, handler: () => any, options?: RouteClaimOptions): void {
+      this.warnDiscoveryDeprecated();
       if (!this.apiUrl) this.apiUrl = apiUrl;
       // 发现处理器登记在基类的 claim 上（按前缀），同一实例声明多个前缀时互不覆盖；
       // 重复声明同一前缀由 remount 决定替换还是抛错。
@@ -237,6 +242,20 @@ export class HttpServerToolTransport extends ServerToolTransport {
          }
       }
       return best;
+   }
+
+   /**
+    * 基类只能从 apiUrl 反推命中前缀；HTTP 在物理分发阶段已经算过（`HTTP_CLAIM`），
+    * 直接取它，不让注册表分层与路由表再各做一最长匹配（两侧规则不一致就会列错工具）。
+    */
+   protected matchedPrefix(rpcReq: ToolRpcRequest): string | undefined {
+      const rawReq: any = rpcReq.raw?._req;
+      if (!rawReq) {return super.matchedPrefix(rpcReq);}
+
+      const claimed = rawReq[HTTP_CLAIM];
+      if (claimed) {return claimed;}
+      if (this.routeClaims.size > 0) {return this.claimPrefixOf(rawReq);}
+      return super.matchedPrefix(rpcReq);
    }
 
    /** 归一化后的请求路径；物理分发已算过则直接取。 */
@@ -450,8 +469,6 @@ export class HttpServerToolTransport extends ServerToolTransport {
     * 内部逻辑分发
     */
    private async handleInternalRequest(req: http.IncomingMessage, res: http.ServerResponse) {
-      const { method } = req;
-
       let route: NormalizedRoutePath;
       try {
          route = this.routeOf(req);
@@ -465,21 +482,9 @@ export class HttpServerToolTransport extends ServerToolTransport {
       const matchPrefix = this.toMatchPrefix(claimPrefix);
       const matchKey = routeMatchKey(route.path);
 
-      // 1. Discovery Handler
-      const discoveryHandler = this.routeDiscoveryHandler(claimPrefix);
-      if (discoveryHandler && method === 'GET' && matchKey === this.toMatchPrefix(claimPrefix)) {
-         try {
-            const result = discoveryHandler();
-            res.setHeader('Content-Type', 'application/json');
-            res.statusCode = 200;
-            res.end(JSON.stringify(result));
-         } catch (e: any) {
-            this.sendError(res, 500, e.message);
-         }
-         return;
-      }
-
-      // 2. RPC Handler (基于命中前缀的业务流水线)
+      // 业务流水线（包含内置发现端点）：请求属于哪个前缀就交给它的 processIncomingCall，
+      // 「这条 URL 算哪个工具」由路由表在 toRpcRequest 里算（内置发现端点就是表里的一行）。
+      // 这里不再为发现端点开分叉——开了它就绕过 validateRpcRequest / 身份判定 / 超时。
       if (matchKey.startsWith(matchPrefix)) {
          await this.processIncomingCall(req, res);
          return;
@@ -494,7 +499,8 @@ export class HttpServerToolTransport extends ServerToolTransport {
       res.end(JSON.stringify({ error: message }));
    }
 
-   protected async toRpcRequest(rawReq: http.IncomingMessage, rawRes?: http.ServerResponse): Promise<ToolRpcRequest> {
+   /** header 归一化：数组拼接、去 undefined。业务流水线与内置端点的身份判定共用。 */
+   protected normalizeHeaders(rawReq: http.IncomingMessage): Record<string, string> {
       const headersStr: Record<string, string> = {};
       for (const [k, v] of Object.entries(rawReq.headers)) {
          if (Array.isArray(v)) {
@@ -503,6 +509,11 @@ export class HttpServerToolTransport extends ServerToolTransport {
             headersStr[k] = v;
          }
       }
+      return headersStr;
+   }
+
+   protected async toRpcRequest(rawReq: http.IncomingMessage, rawRes?: http.ServerResponse): Promise<ToolRpcRequest> {
+      const headersStr = this.normalizeHeaders(rawReq);
 
       let toolId = headersStr[RPC_HEADERS.TOOL_ID] || headersStr[RPC_HEADERS.FUNC];
       let act = headersStr[RPC_HEADERS.ACT];
@@ -511,14 +522,24 @@ export class HttpServerToolTransport extends ServerToolTransport {
       const claimPrefix = this.claimPrefixOf(rawReq);
       const matchPrefix = this.toMatchPrefix(claimPrefix);
 
+      // 取归一化路径里 claim 之后的段：段已按段解码，且 `%2F` 保持编码，
+      // 所以 `/api/a%2Fb` 的 toolId 是 `a%2Fb` 而不是两个段（以前先 split 再 decode，
+      // 会把编码斜杠解成分隔符，一个段被切成两个 toolId）。
+      const route = this.routeOf(rawReq);
+      const claimDepth = normalizeRoutePath(claimPrefix, { mode: 'request', strictTrailingSlash: this.strictTrailingSlash }).segments.length;
+      const parts = route.segments.slice(claimDepth);
+      // 前缀内路径（根就是 '/'；`''` 与 `'/'` 同义，归一化后只有一个形态）
+      const relPath = `/${parts.join('/')}`;
+
+      // 路由表优先：内置发现端点（GET 前缀根 → `rpcApis`）与第三方 `addRoute` 声明都走这一条。
+      // 只在请求没显式给 toolId header 时生效——header 是显式寻址，比路径声明更硬。
       if (!toolId) {
-         // 取归一化路径里 claim 之后的段：段已按段解码，且 `%2F` 保持编码，
-         // 所以 `/api/a%2Fb` 的 toolId 是 `a%2Fb` 而不是两个段（以前先 split 再 decode，
-         // 会把编码斜杠解成分隔符，一个段被切成两个 toolId）。
-         const route = this.routeOf(rawReq);
-         const claimDepth = normalizeRoutePath(claimPrefix, { mode: 'request', strictTrailingSlash: this.strictTrailingSlash }).segments.length;
-         const parts = route.segments.slice(claimDepth);
-         if (parts.length > 0) {
+         const entry = this.matchRouteEntry(claimPrefix, { path: relPath, method: rawReq.method, act });
+         if (entry) {
+            toolId = entry.toolId;
+            if (entry.act) {act = entry.act;}
+            if (entry.resId !== undefined && resId === undefined) {resId = entry.resId;}
+         } else if (parts.length > 0) {
             toolId = parts[0];
             if (parts.length > 1 && resId === undefined) {
                resId = parts[1];

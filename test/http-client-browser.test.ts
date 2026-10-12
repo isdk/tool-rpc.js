@@ -648,7 +648,7 @@ describe('HttpClientToolTransport (browser-like environment)', () => {
   // ==========================================================
 
   describe('loadApis', () => {
-    it('should request discovery via GET on root', async () => {
+    it('should request discovery via the built-in rpcApis tool', async () => {
       mockFetch.mockResolvedValue(new Response(JSON.stringify({
         echo: { name: 'echo', params: { msg: { type: 'string' } } }
       }), {
@@ -659,11 +659,28 @@ describe('HttpClientToolTransport (browser-like environment)', () => {
       const apis = await transport.loadApis()
 
       const [url, opts] = mockFetch.mock.calls[0]
-      // loadApis calls fetch('', undefined, 'get', ...) → URL becomes base + '/'
-      expect(url).toBe('http://browser-test/api/')
+      // 发现端点就是一个普通工具调用：与业务调用同一个寻址、同一条管道
+      expect(url).toBe('http://browser-test/api/rpcApis')
       expect((opts as any).method).toBe('GET')
       expect(apis.echo).toBeDefined()
       expect(apis.echo.name).toBe('echo')
+    })
+
+    it('should fall back to the root path when the server 404s on rpcApis', async () => {
+      // 旧服务端把 `rpcApis` 当成一个普通工具，报 404 → 退到旧写法（空工具名 = GET 根）
+      mockFetch
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          error: { code: 404, message: 'Tool not found: rpcApis' }
+        }), { status: 404, statusText: 'Not Found' }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          echo: { name: 'echo' }
+        }), { status: 200, headers: { 'content-type': 'application/json' } }))
+
+      const apis = await transport.loadApis()
+
+      expect(mockFetch).toHaveBeenCalledTimes(2)
+      expect(mockFetch.mock.calls[1][0]).toBe('http://browser-test/api/')
+      expect(apis.echo).toBeDefined()
     })
 
     it('should pass custom headers in discovery request', async () => {

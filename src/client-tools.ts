@@ -93,7 +93,9 @@ export class ClientTools extends ToolFunc {
    * Loads tool definitions from the remote server via the configured transport.
    * This method populates the local `ToolFunc` registry with `ClientTools` stubs.
    * @param items - Optional map of tool function metadata.
-   * @param options - Additional options for the discovery call (e.g., timeout, apiUrl).
+   * @param options - Additional options for the discovery call (e.g., timeout, apiUrl, headers).
+   *   类级 `fetchOptions`（如 `headers` 里的凭证）会作为默认值合并进来：发现端点是框架的内置 API，
+   *   装了身份策略后它同样要过认证。
    */
   static async loadFrom(items?: Funcs, options?: any) {
     const apiUrl = options?.apiUrl || this.apiUrl;
@@ -102,7 +104,9 @@ export class ClientTools extends ToolFunc {
         throwError('apiUrl is required for ClientTools.loadFrom when items is not provided', 'ClientTools');
       }
       const transport = RpcClientTransportManager.instance.getClient(apiUrl!, options);
-      items = await transport.loadApis(options);
+      // 发现端点是框架自有的内置 API：装了身份策略后它也要过认证，所以它用与业务调用同一份
+      // 类级 `fetchOptions`（凭证就在那里），否则 `loadFrom()` 会在 401 上拿不到工具清单。
+      items = await transport.loadApis(defaultsDeep(options, this.fetchOptions));
       if (!this.apiUrl) this.apiUrl = apiUrl;
     }
     if (items) this.loadFromSync(items, apiUrl);

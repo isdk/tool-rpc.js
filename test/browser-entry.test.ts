@@ -86,6 +86,9 @@ const EXPECTED_SERVER_TYPES = [
   'RpcActiveTaskHandle',
   'RpcDeadlineGuard',
   'RpcTaskResource',
+  // 内置发现工具（列工具清单的那个内置 API，见 src/transports/rpc-apis.ts）
+  'RpcApisResource',
+  'RPC_APIS_TOOL_ID',
   'DEFAULT_COMPAT_OPTIONS',
 ]
 
@@ -110,6 +113,29 @@ const INTERNAL_ADDRESS_HELPERS = [
   'hasUriScheme',
   'nativeAddressFromBind',
   'withBindOptions',
+]
+
+// 身份策略（设计见根目录 IDENTITY_POLICY_DESIGN.cn.md）：11 个公开符号。
+// 名单在 src/transports/index.ts 与 src/transports/browser.ts 里是**显式**的（那两个入口
+// 其余行是 export *，靠它顺带带出的符号没人钉）。其中只有三个类是运行时值，
+// 其余八个是类型——类型进不了运行时 import，只能由 dist/*.d.ts 的断言钉（未构建时 skip）。
+const EXPECTED_IDENTITY_TYPES = [
+  'RpcIdentity',
+  'RpcIdentityContext',
+  'RpcCredentialReader',
+  'RpcCredentialSource',
+  'RpcIdentityPolicy',
+  'RpcCredentialRegistry',
+  'RpcSessionIdentityPolicy',
+  'RpcSessionIdentityOptions',
+  'RpcInProcessCredentialRegistry',
+  'RpcBearerPolicy',
+  'RpcVerifiedCredentialOptions',
+]
+const EXPECTED_IDENTITY_VALUES = [
+  'RpcSessionIdentityPolicy',
+  'RpcInProcessCredentialRegistry',
+  'RpcBearerPolicy',
 ]
 
 // Types that should NOT appear in dist/browser.d.ts (Node.js-only modules)
@@ -186,6 +212,10 @@ describe('Browser Entry (@isdk/tool-rpc/browser)', () => {
 
     // RPC task resource
     expect(browser.RpcTaskResource).toBeDefined()
+
+    // 内置发现工具（客户端 loadApis 就是寻址它）
+    expect(browser.RpcApisResource).toBeDefined()
+    expect(browser.RPC_APIS_TOOL_ID).toBe('rpcApis')
   })
 
   it('should NOT export Node.js-only server modules', async () => {
@@ -216,6 +246,27 @@ describe('Browser Entry (@isdk/tool-rpc/browser)', () => {
     // 两个入口的地址工具得是同一份：自定义 transport 在浏览器侧也要能算出同一个审计 key
     expect(browser.normalizeSocketAddress, 'entries should share normalizeSocketAddress')
       .toBe(node.normalizeSocketAddress)
+  })
+
+  it('should export the identity policy classes from both entries', async () => {
+    const browser = await import('../src/browser')
+    const node = await import('../src/index')
+
+    for (const name of EXPECTED_IDENTITY_VALUES) {
+      expect(typeof (browser as any)[name], `browser entry should export '${name}'`).toBe('function')
+      expect(typeof (node as any)[name], `node entry should export '${name}'`).toBe('function')
+    }
+
+    // 两个入口是同一份实现：策略实例在浏览器侧装配与 Node 侧装配必须是同一个类
+    expect(browser.RpcSessionIdentityPolicy, 'entries should share RpcSessionIdentityPolicy')
+      .toBe(node.RpcSessionIdentityPolicy)
+    expect(browser.RpcBearerPolicy, 'entries should share RpcBearerPolicy')
+      .toBe(node.RpcBearerPolicy)
+
+    // 抽象层零实现：identity.ts 只定义类型，不往公开面带出任何运行时符号
+    for (const name of ['RpcIdentity', 'RpcIdentityPolicy', 'RpcCredentialRegistry']) {
+      expect((browser as any)[name], `'${name}' is a type, not a runtime value`).toBeUndefined()
+    }
   })
 
   // ==========================================================
@@ -287,6 +338,14 @@ describe('Browser Entry (@isdk/tool-rpc/browser)', () => {
     expect(taskRes.name).toBe('rpcTask')
     expect(taskRes.methods).toContain('get')
     expect(taskRes.methods).toContain('$cancel')
+  })
+
+  it('RpcApisResource should be constructable with the reserved id', async () => {
+    const { RpcApisResource, RPC_APIS_TOOL_ID } = await import('../src/browser')
+    const apis = new RpcApisResource()
+    expect(apis.name).toBe(RPC_APIS_TOOL_ID)
+    // 列清单是纯内存操作：不吃超时预算（timeout: 0），与 rpcTask 同一套约定
+    expect((apis as any).timeout).toBe(0)
   })
 
   // ==========================================================
@@ -690,6 +749,21 @@ describe('Browser Entry (@isdk/tool-rpc/browser)', () => {
       const declarationPattern = new RegExp(`(declare\\s+(class|namespace|interface|type)|export\\s+.*)\\b${typeName}\\b`)
       const hasDeclaration = declarationPattern.test(content)
       expect(hasDeclaration, `dist/browser.d.ts should not contain server-only type '${typeName}'`).toBe(false)
+    }
+  })
+
+  it('should pin the identity policy symbols in dist/browser.d.ts (if built)', () => {
+    const dtsPath = resolve(__dirname, '../dist/browser.d.ts')
+    if (!existsSync(dtsPath)) {
+      console.warn("Skipping: dist/browser.d.ts not found. Run 'pnpm build' first.")
+      return
+    }
+
+    const content = readFileSync(dtsPath, 'utf-8')
+    const exportBlocks = content.match(/export\s*\{[^}]*\}/g)?.join('\n') ?? ''
+
+    for (const name of EXPECTED_IDENTITY_TYPES) {
+      expect(new RegExp(`\\b${name}\\b`).test(exportBlocks), `dist/browser.d.ts should export '${name}'`).toBe(true)
     }
   })
 

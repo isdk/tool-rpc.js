@@ -168,12 +168,19 @@ export interface RouteMatch<T> {
 /**
  * 最长前缀匹配。`table` 的 key 必须是 `routeMatchKey()` 产出的形式——
  * 插件只能通过本函数查表，拿不到裸串，两侧规则就没机会分叉。
+ *
+ * 命中条件与 `ServerToolTransport.matchedPrefix()` 同一套：路径**等于**前缀也算命中
+ * （`/api` 这个请求归 `/api` 这个 claim），或落在前缀之下（`startsWith(key)`，key 已补尾斜杠，
+ * 所以 `/apix` 不会误配 `/api`）。只写 `startsWith` 会漏掉「等于前缀」那种请求：调用方得先自己
+ * `routeMatchKey()` 才能命中，那是个只有内部知道的约定，插件踩得到。
  */
 export function matchRoute<T>(table: Map<string, T>, normalizedPath: string): RouteMatch<T> | undefined {
   let best: RouteMatch<T> | undefined;
   for (const [key, value] of table) {
-    if (normalizedPath.startsWith(key) && (!best || key.length > best.key.length)) {
-      best = { key, prefix: key === '/' ? '/' : key.slice(0, -1), value };
+    const prefix = key === '/' ? '/' : key.slice(0, -1);
+    if ((normalizedPath === prefix || normalizedPath.startsWith(key))
+      && (!best || key.length > best.key.length)) {
+      best = { key, prefix, value };
     }
   }
   return best;

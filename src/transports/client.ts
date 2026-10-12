@@ -1,13 +1,18 @@
 import { type Funcs } from "@isdk/tool-func";
 import { ActionName } from '../consts';
 import { IToolTransport, ToolTransport, ToolTransportOptions } from "./base";
-import { RPC_HEADERS, RPC_DEFAULTS } from "./models";
+import { RPC_HEADERS, RPC_DEFAULTS, RPC_APIS_TOOL_ID } from "./models";
 
 export type { Funcs }
 export interface ClientToolTransportOptions extends ToolTransportOptions {
 }
 
 export interface IClientToolTransport extends IToolTransport {
+  /**
+   * 拉取服务端的工具清单（打的是发现端点——框架自有的一个内置 API）。
+   * 服务端装了身份策略且要求它认证时，凭证从 `options.headers` 带（`ClientTools.loadFrom()`
+   * 会把类级 `fetchOptions` 合进来）；被拒时抛带 `code` / `status` 的 RPC 错误。
+   */
   loadApis(options?: any): Promise<Funcs>;
   fetch(name: string, args?: any, act?: ActionName | string, subName?: any, options?: any, toolTimeout?: any): any | Promise<any>;
   [name: string]: any;
@@ -30,6 +35,14 @@ export abstract class ClientToolTransport extends ToolTransport implements IClie
 
   /**
    * Mounts the transport to a tools class, setting the default apiUrl for that class.
+   *
+   * @deprecated 它现在只做一件事：把本 transport 的 `apiUrl` 写到类上。直接写就行：
+   *   `RpcClientTransportManager.instance.register(transport)`（按地址登记通道），
+   *   `MyClientTools.apiUrl = transport.apiUrl`（地址在类上）。
+   *   只有地址时连 register 都不用：`MyClientTools.apiUrl = apiUrl` 后，
+   *   `getClient(apiUrl)` 会按 scheme 自建 transport。
+   *   废弃理由同 `ClientTools.setTransport`：往类上挂 transport 会让多个后端互相覆盖。
+   *
    * @param toolsClass - The tools class (e.g., ClientTools) to mount to.
    */
   public mount(toolsClass: any) {
@@ -38,12 +51,25 @@ export abstract class ClientToolTransport extends ToolTransport implements IClie
     }
   }
 
+  /**
+   * 发现端点：调内置工具 `rpcApis`（与业务调用同一个寻址、同一条管道）。
+   * 认证需求由服务端的身份策略定，凭证走 `fetchOptions.headers`。
+   *
+   * 发不出保留 id 情（旧服务端把 `rpcApis` 当普通工具，报 404）就退到旧写法：
+   * 空工具名 = GET 前缀根。两边都能拉到清单，不需要服务端两边都改。
+   */
   public async loadApis(options?: any): Promise<Funcs> {
     const fetchOptions = {
       headers: { 'Content-Type': 'application/json' },
       ...options,
     };
-    return this.fetch('', undefined, 'get', undefined, fetchOptions);
+
+    try {
+      return await this.fetch(RPC_APIS_TOOL_ID, undefined, 'get', undefined, fetchOptions);
+    } catch (err: any) {
+      if (err?.code !== 404) {throw err;}
+      return this.fetch('', undefined, 'get', undefined, fetchOptions);
+    }
   }
 
   async fetch(name: string, args?: any, act?: ActionName | string, subName?: any, fetchOptions?: any, toolTimeout?: any) {

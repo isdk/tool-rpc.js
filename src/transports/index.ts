@@ -15,12 +15,29 @@ export {
   unixSocketPath,
   unixSocketUri,
 } from './socket-address';
+// 身份策略（设计见根目录 IDENTITY_POLICY_DESIGN.cn.md）：走**显式**导出，与 browser.ts 同一份名单
+// （那两个入口其余行是 export *，靠它带出的符号没人钉）。名单在 `test/browser-entry.test.ts`。
+export type {
+  RpcIdentity,
+  RpcIdentityContext,
+  RpcCredentialReader,
+  RpcCredentialSource,
+  RpcIdentityPolicy,
+  RpcCredentialRegistry,
+} from './identity';
+export { RpcSessionIdentityPolicy, RpcInProcessCredentialRegistry } from './identity-session';
+export type { RpcSessionIdentityOptions } from './identity-session';
+export { RpcBearerPolicy } from './identity-bearer';
+export type { RpcVerifiedCredentialOptions } from './identity-bearer';
 export * from './server';
 export * from './client';
 export * from './dispatcher';
 export * from './task-tracker';
 export * from './deadline-guard';
 export * from './rpc-task';
+// 内置发现工具（`rpcApis`）：与 rpcTask 同属系统保留工具，导出是为了下游能引用它
+// （换实现、断言 id），不是为了让他们手动注册。
+export * from './rpc-apis';
 // 传输层地址 helper 在上面（与 http-server.ts 分开：那边是 HTTP 自己的物理底座池——
 // 池/refCount/前缀分发；任何服务 HTTP 的 transport 都只要那几样纯函数）。
 // `normalizeHostAndPort` 也在对外面：Host 那种客户端可控的 `host[:port]` 字符串进

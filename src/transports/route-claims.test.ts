@@ -172,7 +172,10 @@ describe('remount semantics on the built-in server transports', () => {
 
       expect(() => t.addRpcHandler('http://localhost:3009/api', { registry: regB })).not.toThrow();
       expect((t as any).routeRegistry('/api')).toBe(regB);
-      expect(warn).toHaveBeenCalledTimes(1);
+      // 只数「替换」那条告警：`addDiscoveryHandler` 的迁移提示也走 console.warn，
+      // 断言总条数会把两件不相干的事绑在一起。
+      const replaceWarnings = warn.mock.calls.filter(c => String(c[0]).includes('is already claimed'));
+      expect(replaceWarnings.length).toBe(1);
 
       expect(() => t.addDiscoveryHandler('http://localhost:3009/api', () => 'second', { remount: 'throw' }))
          .toThrow(/Route already claimed: discovery route for "\/api"/);

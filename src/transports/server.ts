@@ -4,9 +4,24 @@ import { normalizeRoutePath, routeMatchKey } from './route-path';
 import { RpcServerDispatcher } from './dispatcher';
 import { RpcTransportManager } from './server-manager';
 import { ToolRpcRequest, ToolRpcResponse } from './models';
+import { readBearerCredential, type RpcCredentialReader, type RpcIdentityContext, type RpcIdentityPolicy } from './identity';
+import { RPC_APIS_TOOL_ID } from './rpc-apis';
 
 export interface ServerToolTransportOptions extends ToolTransportOptions {
   dispatcher?: RpcServerDispatcher;
+  /**
+   * 身份策略：凭证 → 身份。**不传就是 no-op**，基类不启用任何身份逻辑，
+   * 行为与今天逐字节一致。两个默认实现见 `identity-session.ts` / `identity-bearer.ts`。
+   *
+   * 装了它，业务调用与框架内置端点（当前只有发现端点）都走同一条判定；
+   * 「哪个 API 必须认证」在策略里判（`allowAnonymous` 可以是谓词），不在 transport 上。
+   */
+  identity?: RpcIdentityPolicy;
+  /**
+   * 凭证取法（从原生 req 取一个字符串）。缺省读标准字段 `authorization`（去 Bearer 前缀）；
+   * 私有 header 由部署写自己的 reader（契约 9）。
+   */
+  credentialReader?: RpcCredentialReader;
 }
 
 /**
@@ -76,6 +91,45 @@ export interface RouteClaim {
   discovery: boolean;
 }
 
+/**
+ * 路由表里的一条：**前缀内的一个路径（+ 命中条件）→ 一个工具寻址结果**。
+ *
+ * 它是「路由层」的映射，与「注册表层」（toolId → 工具实例）分开：
+ * - 路由表回答「这个请求算调哪个工具」
+ * - 注册表回答「那个工具是什么」
+ *
+ * 内置发现端点就是表里的一行（前缀根 + GET → `rpcApis`），所以它和业务 API 走同一条
+ * 流水线（`validateRpcRequest` / 身份判定 / `globalTimeout` / Tracker），没有旁路分支。
+ */
+export interface RouteEntry {
+  /**
+   * **前缀内**路径，归一化后（`normalizeRoutePath`）。前缀根本身是 `'/'`；
+   * `''` 与 `'/'` 同义（`normalizeRoutePath` 把空串当根），`/x` 与 `/x/` 默认同义。
+   */
+  path: string;
+  /** 命中条件。都不写就是「该路径上任何请求都算」。 */
+  when?: {
+    /** HTTP method（大写）。Mailbox 没有 method，这一项自然不命中。 */
+    method?: string;
+    /** 请求已带上的 act。 */
+    act?: string;
+  };
+  /** 命中后解析到的工具 id（在注册表里查，查不到由 dispatcher 报 404）。 */
+  toolId: string;
+  /** 命中后要赋的 act；不写就沿用请求里的。 */
+  act?: string;
+  /** 命中后要赋的 resId；不写就沿用请求里的。 */
+  resId?: string;
+}
+
+/** 查路由表时的输入（transport 从原生请求算出来）。 */
+export interface RouteMatchInput {
+  /** 前缀内的归一化路径（根为 '/'）。 */
+  path: string;
+  method?: string;
+  act?: string;
+}
+
 export interface IServerToolTransport extends IToolTransport {
   dispatcher: RpcServerDispatcher;
 
@@ -120,6 +174,11 @@ export abstract class ServerToolTransport extends ToolTransport implements IServ
   public dispatcher: RpcServerDispatcher;
   public canStream: boolean = false;
 
+  /** 身份策略；undefined = 未装，请求流水线不碰身份。 */
+  protected identity?: RpcIdentityPolicy;
+  /** 凭证取法；缺省读 `authorization`。 */
+  protected credentialReader?: RpcCredentialReader;
+
   constructor(options?: ServerToolTransportOptions) {
     super(options);
     // Ensure server-side transports use RpcTransportManager (full version with SSRF protection)
@@ -127,6 +186,8 @@ export abstract class ServerToolTransport extends ToolTransport implements IServ
       this.manager = RpcTransportManager.instance;
     }
     this.dispatcher = options?.dispatcher || RpcServerDispatcher.instance;
+    this.identity = options?.identity;
+    this.credentialReader = options?.credentialReader;
   }
 
   /**
@@ -188,10 +249,16 @@ export abstract class ServerToolTransport extends ToolTransport implements IServ
     try {
       const rpcReq = await this.toRpcRequest(rawReq, rawRes);
 
+      // 身份判定：插在 toRpcRequest 之后、validateRpcRequest 之前，
+      // 这样 Manager 的架构层校验（SSRF / 拦截钩子）能看到 request.identity。
+      await this.resolveRequestIdentity(rpcReq, rawReq, rawRes);
+
       // 架构层校验：调用所属 Manager 实例做策略校验 (SSRF 防御、白名单等)
       this.manager.validateRpcRequest(rpcReq);
 
-      const rpcRes = await this.dispatcher.dispatch(rpcReq, registry);
+      // 注册表按前缀分层解析（前缀 claim → transport → dispatcher → 系统）。
+      // 调用方显式传进来的 registry 优先级最高（适配器自己指定的场景）。
+      const rpcRes = await this.dispatcher.dispatch(rpcReq, registry ?? this.requestRegistry(rpcReq));
 
       // 能力预检：如果返回的是流，但传输层不支持流，应当报错
       if (!this.canStream && rpcRes.data && (rpcRes.data instanceof ReadableStream || typeof rpcRes.data.getReader === 'function')) {
@@ -206,31 +273,275 @@ export abstract class ServerToolTransport extends ToolTransport implements IServ
 
       await this.sendRpcResponse(rpcRes, rawRes);
     } catch (err: any) {
-      // 顶级异常防护 (Top-level pipeline guard)
-      // 提取错误码，优先使用数字类型的 status 或 code
-      let errCode = 500;
-      if (typeof err.code === 'number') {
-        errCode = err.code;
-      } else if (typeof err.status === 'number') {
-        errCode = err.status;
-      }
-
-      const errStatus = typeof err.status === 'string' ? err.status : 'error';
-
-      await this.sendRpcResponse({
-        status: (errCode >= 100 && errCode < 600) ? errCode : 500,
-        error: {
-          message: err.message || "Transport Pipeline Error",
-          code: errCode,
-          status: errStatus,
-          data: err.data
-        }
-      }, rawRes);
+      // 顶级异常防护 (Top-level pipeline guard)：策略抛的 401 与业务抛的都走这里
+      await this.sendPipelineError(err, rawRes);
     }
+  }
+
+  /**
+   * 框架侧的身份判定入点：取凭证 → `match` → 必要时 `assign` → 写 `request.identity`。
+   * 内置发现端点（`rpcApis`）也是普通工具，所以它与业务调用走的是同一次判定，没有第二条路。
+   *
+   * 没装策略就是 no-op（基类不启用任何身份逻辑）。每请求现算，不缓存策略的返回值；
+   * 三个钩子一律 await（`match`/`assign`/`revoke` 同步异步都可）。策略抛出的错误
+   * （如 401）由 `processIncomingCall` 的顶级防护映射成响应，不在这里吞。
+   *
+   * 分工边界（设计文档 §10）：框架侧只备料与调接口；状态、TTL、计数器、凭证的 wire
+   * 位置与交付通道全在策略内。
+   */
+  protected async resolveRequestIdentity(rpcReq: ToolRpcRequest, rawReq?: any, rawRes?: any): Promise<void> {
+    const policy = this.identity;
+    if (!policy) {return;}
+
+    const ctx: RpcIdentityContext = {
+      // req/res 是逃生口：框架侧不解析它们（交付凭证、取 socket 地址都归策略）
+      req: rawReq ?? rpcReq.raw?._req,
+      res: rawRes ?? rpcReq.raw?._res,
+      headers: rpcReq.headers,
+      prefix: this.matchedPrefix(rpcReq),
+      apiUrl: rpcReq.apiUrl,
+      // 寻址结果与注册表里的工具实例：策略要按 API 决定认不认（`allowAnonymous` 可以是谓词），
+      // 靠的就是这些只读备料。框架不读 `tool` 的任何字段，也不解释它的含义。
+      toolId: rpcReq.toolId,
+      act: rpcReq.act,
+      resId: rpcReq.resId,
+      tool: this.resolveRouteTool(rpcReq),
+    };
+
+    // 内置 reader 只读标准字段；拿不到原生 req 时退到已归一化的 headers（HTTP / Mailbox 都有）
+    const reader = this.credentialReader ?? readBearerCredential;
+    ctx.credential = reader(ctx.req ?? rpcReq);
+
+    const matched = await policy.match(ctx);
+    // match 返回 undefined = 另起新会话（不是拒绝）；拒绝由策略抛错，走顶级防护
+    const identity = matched ?? await policy.assign(ctx);
+
+    rpcReq.identity = identity;
+    // 装了策略 → clientId 由服务端判定值接管（契约 3）；采信什么由策略决定，
+    // 基类不把 header 值塞进 clientId（契约 4）
+    rpcReq.clientId = identity.id;
+  }
+
+  /**
+   * 顶级防护的出口：把流水线（身份判定、`validateRpcRequest`、dispatcher、业务工具）抛出的错误
+   * 映射成 RPC 错误封包并写回。取码规则统一（`err.code` 数字优先，其次 `err.status` 数字，否则 500），
+   * 所以内置发现端点被策略拒绝时，客户端拿到的错误形状与业务调用被拒绝时相同。
+   */
+  protected async sendPipelineError(err: any, rawRes: any): Promise<void> {
+    let errCode = 500;
+    if (typeof err?.code === 'number') {
+      errCode = err.code;
+    } else if (typeof err?.status === 'number') {
+      errCode = err.status;
+    }
+
+    await this.sendRpcResponse({
+      status: (errCode >= 100 && errCode < 600) ? errCode : 500,
+      error: {
+        message: err?.message || 'Transport Pipeline Error',
+        code: errCode,
+        status: typeof err?.status === 'string' ? err.status : 'error',
+        data: err?.data,
+      }
+    }, rawRes);
+  }
+
+  /**
+   * 取本次请求会解析到的工具实例，给策略当**只读备料**（策略可读注册时带的自定义字段）。
+   * 解析顺序与实际分发完全同一套（见 `requestRegistry`），所以策略看到的 `tool` 就是
+   * 待会儿真会被调的那个。解析不到就是 undefined，不抛错——工具不存在由 dispatcher 报 404，
+   * 不在身份这一步抢它的活。
+   */
+  protected resolveRouteTool(rpcReq: ToolRpcRequest): any {
+    if (!rpcReq.toolId) {return undefined;}
+    return this.requestRegistry(rpcReq).get(rpcReq.toolId);
+  }
+
+  /**
+   * 本次请求的**注册表视图**：把「前缀 claim 的 registry → transport 自己的 → dispatcher 的 →
+   * 系统保留」叠成一个 `get(toolId)` 视图，交给 dispatcher。
+   *
+   * 为什么要有它：`mount(RegB, '/v2')` 把注册表**按前缀**声明下来，但 dispatcher 只拿得到
+   * 一个全局 `registry`。不分层，多前缀就会共用最后一个注册表（`/api` 被 `/v2` 改掉）。
+   * 内置发现工具也从这里取清单（`ctx.registry`），所以它列的是**命中前缀**的工具，不是全局的。
+   *
+   * 系统保留层（`rpcTask` / `rpcApis`）排在最后：业务注册表里注册同名 id 就覆盖内置，
+   * 这是有意的扩展点。
+   */
+  protected requestRegistry(rpcReq: ToolRpcRequest): any {
+    const prefix = this.matchedPrefix(rpcReq);
+    const claim = prefix ? this.routeClaims.get(prefix) : undefined;
+
+    const layers: any[] = [];
+    for (const candidate of [claim?.registry, (this as any).registry, this.dispatcher?.registry]) {
+      if (candidate) {layers.push(candidate);}
+    }
+
+    const lookup = (toolId: string): any => {
+      // 该前缀声明过自定义发现处理器 → 它就是该前缀的 `rpcApis` 实现（兼容旧 API）
+      if (toolId === RPC_APIS_TOOL_ID && claim?.discoveryHandler) {
+        return this.discoveryTool(claim.discoveryHandler);
+      }
+      for (const registry of layers) {
+        const tool = typeof registry.get === 'function' ? registry.get(toolId) : registry[toolId];
+        if (tool) {return tool;}
+      }
+      return this.dispatcher?.getSystemTool?.(toolId);
+    };
+
+    return {
+      get: lookup,
+      // 发现工具列清单读的就是 `ctx.registry`，所以这个视图也要能 toJSON：按层退到第一个会 toJSON 的
+      toJSON: () => {
+        for (const registry of layers) {
+          if (typeof registry.toJSON === 'function') {return registry.toJSON();}
+        }
+        return undefined;
+      },
+    };
+  }
+
+  /**
+   * 把旧的 `addDiscoveryHandler` 处理器包成一个工具（`timeout: 0`，与内置 `rpcApis` 一致）。
+   * 返回值带 `toJSON()` 就调它（`mount` 传的就是 `() => serverTools.toJSON()`，
+   * Mailbox 旧行为也会做这一步归一）。
+   */
+  protected discoveryTool(handler: () => any): any {
+    return {
+      timeout: 0,
+      run: async () => {
+        const result = await handler();
+        return (result && typeof result.toJSON === 'function') ? result.toJSON() : result;
+      },
+    };
+  }
+
+  /**
+   * 本请求命中的逻辑前缀（最长匹配）。同一 transport 服务多个前缀时，
+   * 策略可按前缀分租户，注册表分层与路由表也按它解析。尚未声明任何路由时返回 undefined。
+   *
+   * 基类只能从 `apiUrl` 反推；已经做过物理分发的 transport（HTTP）应该覆写它，
+   * 直接取分发阶段算好的那个，避免两侧各算一次最长匹配。
+   */
+  protected matchedPrefix(rpcReq: ToolRpcRequest): string | undefined {
+    if (this.routeClaims.size === 0) {return undefined;}
+
+    const path = this.toPathname(rpcReq.apiUrl || '');
+    let best: string | undefined;
+    for (const prefix of this.routeClaims.keys()) {
+      if ((path === prefix || path.startsWith(this.toMatchPrefix(prefix)))
+        && (!best || prefix.length > best.length)) {
+        best = prefix;
+      }
+    }
+    return best;
   }
 
   /** prefix -> 逻辑路由声明。多前缀 / 多注册表共用同一份簿记。 */
   protected routeClaims = new Map<string, RouteClaim>();
+
+  /** prefix -> 该前缀的路由表条目（前缀内路径 → 工具寻址）。内置发现端点就在里面。 */
+  protected routeTable = new Map<string, RouteEntry[]>();
+
+  /**
+   * 每个被声明的前缀自带的内置路由行——发现端点。
+   *
+   * 三行而不是两行，是因为两种 transport 的「怎么算发现请求」不同，而它们互不命中：
+   * - HTTP：`GET <前缀根>`（`when.method`）；客户端 `loadApis()` 会带 `act: 'get'`，
+   *   所以 `when.act` 那两行也命中同一工具，只是赋的 act 不同（无 `resId` 时都是列全量）。
+   * - Mailbox：没有 method，只有 `act: 'list' | 'get'` 且无 `toolId` 才是发现请求。
+   *
+   * 它们不是特权开关，就是表里的普通行：第三方用同一个 `addRoute()` 写同一路径同条件就能换掉。
+   */
+  protected builtinRouteEntries(): RouteEntry[] {
+    return [
+      { path: '/', when: { method: 'GET' }, toolId: RPC_APIS_TOOL_ID, act: 'list' },
+      { path: '/', when: { act: 'list' }, toolId: RPC_APIS_TOOL_ID, act: 'list' },
+      { path: '/', when: { act: 'get' }, toolId: RPC_APIS_TOOL_ID, act: 'get' },
+    ];
+  }
+
+  /** 同一路径 + 同一命中条件算同一条声明（`addRoute` 重复声明时按这个 key 替换）。 */
+  private routeEntryKey(entry: RouteEntry): string {
+    return `${entry.path}|${entry.when?.method ?? '*'}|${entry.when?.act ?? '*'}`;
+  }
+
+  /** 前缀刚建立时铺上内置行（已存在的同 key 条目不覆盖，所以 transport 覆写过就保持覆写）。 */
+  private ensureBuiltinRoutes(prefix: string): void {
+    const rows = this.routeTable.get(prefix) ?? [];
+    for (const entry of this.builtinRouteEntries()) {
+      const key = this.routeEntryKey(entry);
+      if (rows.some(row => this.routeEntryKey(row) === key)) {continue;}
+      rows.push(entry);
+    }
+    this.routeTable.set(prefix, rows);
+  }
+
+  /**
+   * 声明一条路由：把前缀内的一个路径（可附 method / act 条件）映射到一个工具 id。
+   *
+   * 这是内置发现端点用的同一个入口（第三方没有特殊通道，也没有特殊限制）：
+   * `addRoute('/api', { path: '/', when: { method: 'GET' }, toolId: 'myRoot' })`
+   * 就把「GET /api」换到自己工具上。
+   *
+   * 路径写 `''` 与 `'/'` 同义（都归一为前缀根）；`/x` 与 `/x/` 默认同义
+   * （`strictTrailingSlash: true` 才分成两条）。命中条件不写就是该路径上任何请求都算。
+   */
+  public addRoute(apiUrl: string, entry: RouteEntry): void {
+    const prefix = this.toPathname(apiUrl);
+    if (!this.routeClaims.has(prefix)) {
+      // 路由表按前缀组织，前缀不存在就先建一个 claim（只带 apiUrl，不带 registry）。
+      // 不标 rpc / discovery，所以不会与后续 `addRpcHandler` 撞重复声明。
+      this.routeClaims.set(prefix, { prefix, apiUrl, rpc: false, discovery: false });
+    }
+    this.ensureBuiltinRoutes(prefix);
+
+    const rows = this.routeTable.get(prefix)!;
+    // 先归一再算 key：否则 `path: ''` 与 `path: '/'` 会当成两条声明（它们是同一个路由）。
+    const normalized: RouteEntry = {
+      ...entry,
+      path: normalizeRoutePath(entry.path, { mode: 'request', strictTrailingSlash: this.strictTrailingSlash }).path,
+    };
+    const key = this.routeEntryKey(normalized);
+    const existing = rows.findIndex(row => this.routeEntryKey(row) === key);
+    if (existing >= 0) {
+      rows[existing] = normalized;
+    } else {
+      rows.push(normalized);
+    }
+  }
+
+  /** 当前路由表（含内置行），按前缀展开。适配器可以拿它去自己框架里原生注册。 */
+  public getRouteTable(): Array<RouteEntry & { prefix: string }> {
+    const out: Array<RouteEntry & { prefix: string }> = [];
+    for (const [prefix, rows] of this.routeTable) {
+      for (const row of rows) {out.push({ prefix, ...row });}
+    }
+    return out;
+  }
+
+  /**
+   * 查路由表：本次请求在该前缀内命中哪条声明。
+   * 按声明顺序取第一条命中（内置行先铺，所以第三方同 key 的声明会替换它，而不是被它抢）。
+   *
+   * 入参路径先过一遍归一化再比：表里的行是**编码态**（`addRoute` 存的就是
+   * `normalizeRoutePath().path`），而 HTTP 递过来的是按段解码后的值（`/中/api`、`/a b`）。
+   * 不归一就会漏配：工具名里有空格 / 非 ASCII / 需要转义的字符时，声明在表里的路由永远命不中。
+   * 归一化幂等，所以已经归一过的入参（Mailbox 的 `'/'`）不受影响。
+   */
+  protected matchRouteEntry(prefix: string, input: RouteMatchInput): RouteEntry | undefined {
+    const rows = this.routeTable.get(prefix);
+    if (!rows) {return undefined;}
+
+    const matchPath = normalizeRoutePath(input.path, { mode: 'request', strictTrailingSlash: this.strictTrailingSlash }).path;
+    for (const row of rows) {
+      if (row.path !== matchPath) {continue;}
+      if (row.when?.method && row.when.method !== input.method) {continue;}
+      if (row.when?.act && row.when.act !== input.act) {continue;}
+      return row;
+    }
+    return undefined;
+  }
 
   /**
    * apiUrl（完整 URL，任何 scheme）或路径前缀 -> 归一化前缀（根为 '/'）。
@@ -276,6 +587,7 @@ export abstract class ServerToolTransport extends ToolTransport implements IServ
         discovery: kind === 'discovery',
       };
       this.routeClaims.set(prefix, claim);
+      this.ensureBuiltinRoutes(prefix);
       return claim;
     }
 
@@ -292,6 +604,7 @@ export abstract class ServerToolTransport extends ToolTransport implements IServ
     existing[kind] = true;
     if (options.registry !== undefined) {existing.registry = options.registry;}
     if (options.discoveryHandler !== undefined) {existing.discoveryHandler = options.discoveryHandler;}
+    this.ensureBuiltinRoutes(prefix);
     return existing;
   }
 
@@ -322,7 +635,38 @@ export abstract class ServerToolTransport extends ToolTransport implements IServ
   protected abstract toRpcRequest(rawReq: any, rawRes?: any): Promise<ToolRpcRequest>;
   protected abstract sendRpcResponse(rpcRes: ToolRpcResponse, rawRes: any): Promise<void>;
 
+  /**
+   * 声明该前缀的**发现处理器**（列工具清单的返回内容）。
+   *
+   * @deprecated 发现端点已由内置工具 `rpcApis` 接管（见 `addRoute` / `builtinRouteEntries`），
+   * 不传处理器也有清单。只有「要自定义这个前缀列什么」时才还需要它：清单内容以外的东西
+   * （认证、超时、`validateRpcRequest`、审计）已经不再由它接管，而是走内置工具那条流水线。
+   * 迁移：通常只需 `addRpcHandler(prefix)`（清单由内置 `rpcApis` 从该前缀的注册表出）；
+   * 要自定义清单内容，要么保留本方法，要么自己注册一个工具再
+   * `addRoute(prefix, { path: '/', when: { method: 'GET' }, toolId: 'myListing' })`。
+   *
+   * 它只换清单内容，不是一条独立路由：发现请求本身由路由表里那行内置声明解析到内置工具
+   * `rpcApis`，所以它和业务 API 走同一条流水线——`validateRpcRequest` 拦得到、
+   * 身份策略判定得到、`globalTimeout` 管得到。策略里要单独决定它认不认，用 `ctx.toolId === 'rpcApis'`。
+   *
+   * 不传处理器也有清单（内置工具从该前缀的注册表取 `toJSON()`）；传了就以它为准。
+   */
   public abstract addDiscoveryHandler(apiUrl: string, handler: () => any, options?: RouteClaimOptions): void;
+
+  /**
+   * `addDiscoveryHandler` 的迁移提示。进程级只打一次：它不是错误，刷屏会把真正的告警埋掉
+   * （每次请求都打一次尤其糟糕——发现调用往往在启动路径上）。
+   */
+  private static discoveryDeprecationWarned = false;
+  protected warnDiscoveryDeprecated(): void {
+    if (ServerToolTransport.discoveryDeprecationWarned) {return;}
+    ServerToolTransport.discoveryDeprecationWarned = true;
+    console.warn(
+      '[tool-rpc] addDiscoveryHandler() is deprecated: service discovery is now served by the ' +
+      'built-in `rpcApis` tool (addRpcHandler is enough). Keep it only to override the listing ' +
+      'content for this prefix.'
+    );
+  }
   public abstract addRpcHandler(apiUrl: string, options?: RouteClaimOptions): void;
   public abstract _start(options?: any): Promise<any>;
   public abstract stop(force?: boolean): Promise<void>;

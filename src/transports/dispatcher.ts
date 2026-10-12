@@ -15,6 +15,7 @@ import {
 import { RpcDeadlineGuard } from './deadline-guard';
 import { bridgeV2RequestToV1Params, elevateV1ParamsToV2Request, RpcCompatOptions, DEFAULT_COMPAT_OPTIONS } from './compat';
 import { RpcTaskResource } from './rpc-task';
+import { RpcApisResource, RPC_APIS_TOOL_ID } from './rpc-apis';
 
 /**
  * 集中式 RPC 请求分发器。
@@ -52,8 +53,29 @@ export class RpcServerDispatcher {
     if (options?.terminationGraceMs !== undefined) this.terminationGraceMs = options.terminationGraceMs;
     if (options?.maxTaskRuntimeMs !== undefined) this.maxTaskRuntimeMs = options.maxTaskRuntimeMs;
 
-    // 自动装载系统级工具
+    // 自动装载系统级工具。发现端点（`rpcApis`）也是这里的一个普通条目：
+    // 它和业务工具走同一条流水线（校验 / 身份 / 超时 / 跟踪），没有旁路分支。
     this.systemRegistry.set('rpcTask', new RpcTaskResource());
+    this.systemRegistry.set(RPC_APIS_TOOL_ID, new RpcApisResource());
+  }
+
+  /**
+   * 查框架保留工具（`rpcTask` / `rpcApis` 这类）。
+   * 注册表按「前缀 claim → transport → dispatcher → 系统」分层解析时用得到它，
+   * 所以系统层不能只留在私有 Map 里。
+   */
+  public getSystemTool(toolId: string): any {
+    return this.systemRegistry.get(toolId);
+  }
+
+  /**
+   * 注册/替换一个框架保留工具（对所有走这个 dispatcher 的服务生效）。
+   *
+   * 注意解析顺序：业务注册表**优先于**系统注册表，所以第三方在自己 registry 里
+   * 注册同名 id（含 `rpcApis`）就会覆盖内置实现——这是有意的扩展点，不是 bug。
+   */
+  public setSystemTool(toolId: string, tool: any): void {
+    this.systemRegistry.set(toolId, tool);
   }
 
   public static get instance() {
@@ -69,10 +91,10 @@ export class RpcServerDispatcher {
   public async dispatch(request: ToolRpcRequest, registry?: any): Promise<ToolRpcResponse> {
     try {
       // 1. [寻址阶段]：查找工具、预检能力、桥接参数
-      const { tool, params } = this.resolveTool(request, registry);
+      const { tool, params, targetRegistry } = this.resolveTool(request, registry);
 
       // 2. [准备阶段]：生成 Context、Aborter 和超时配置
-      const { context, abortController, timeoutConfig } = this.prepareContext(request, tool, params);
+      const { context, abortController, timeoutConfig } = this.prepareContext(request, tool, params, targetRegistry);
 
       // 3. [执行阶段]：调用工具函数获取 Promise
       const executionPromise = this.performExecution(tool, params, context);
@@ -147,13 +169,16 @@ export class RpcServerDispatcher {
       ? bridgeV2RequestToV1Params(request, { ...request.params })
       : (request.params || {});
 
-    return { tool, params };
+    // 把**本次实际用于解析的注册表**一并交出去：`ctx.registry` 是工具清单类端点
+    // （内置 `rpcApis`）唯一的清单来源——多前缀多注册表时，它必须跟着请求走，
+    // 不能回头去读 dispatcher 上那一个。
+    return { tool, params, targetRegistry };
   }
 
   /**
    * [准备阶段] 构建执行上下文与超时策略
    */
-  private prepareContext(request: ToolRpcRequest, tool: any, params: any) {
+  private prepareContext(request: ToolRpcRequest, tool: any, params: any, targetRegistry?: any) {
     const clientTimeout = request.headers[RPC_HEADERS.TIMEOUT] ? parseInt(request.headers[RPC_HEADERS.TIMEOUT] as string) : undefined;
     const toolTimeoutObj = typeof tool.timeout === 'object' ? tool.timeout : { value: tool.timeout };
     const finalTimeout = clientTimeout || toolTimeoutObj.value || this.globalTimeout;
@@ -168,6 +193,11 @@ export class RpcServerDispatcher {
       dispatcher: this,
       resId: request.resId,
       act: request.act,
+      // 身份只落 ctx.identity 一处（装了策略才有值，没装就是 undefined）
+      identity: request.identity,
+      // 本次解析工具用的注册表（分层解析后的那一层）。工具要自省「这个前缀服务哪些工具」
+      // 就读它，别去读 dispatcher 上的全局 registry。
+      registry: targetRegistry,
       req: request.raw?._req || request.raw,
       reply: request.raw?._res
     };
@@ -347,6 +377,7 @@ export class RpcServerDispatcher {
     if (!errStatusStr) {
       if (responseStatus === 404) errStatusStr = 'not_found';
       else if (responseStatus === 400) errStatusStr = 'bad_request';
+      else if (responseStatus === 401) errStatusStr = 'unauthenticated';
       else if (responseStatus === 409) errStatusStr = 'conflict';
     }
 

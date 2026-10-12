@@ -191,9 +191,17 @@ describe('HttpServerToolTransport', () => {
       expect(errorOutput.error.message).toBeTruthy();
    });
 
-   it('should invoke discovery handler when URL matches', async () => {
+   it('routes the discovery URL to the built-in rpcApis tool (no transport-side branch)', async () => {
       const discoveryFn = vi.fn().mockReturnValue(['tool1', 'tool2']);
       transport.addDiscoveryHandler('http://localhost/api/_discovery', discoveryFn);
+
+      let dispatchedReq: ToolRpcRequest | null = null;
+      let dispatchedRegistry: any;
+      dispatcher.dispatch = vi.fn().mockImplementation(async (req: ToolRpcRequest, registry: any) => {
+         dispatchedReq = req;
+         dispatchedRegistry = registry;
+         return { status: 200, data: { ok: true } };
+      });
 
       const mockReq = {
          url: '/api/_discovery',
@@ -209,9 +217,13 @@ describe('HttpServerToolTransport', () => {
       // Access private handleInternalRequest
       await (transport as any).handleInternalRequest(mockReq, mockRes);
 
+      // 寻址：GET 前缀根 → 内置工具 id。它走的是与业务调用同一条管道，所以上面那个
+      // 被 mock 的 dispatch 就是它的入口（以前这里直接回包，不经 dispatcher）。
+      expect(dispatchedReq).toMatchObject({ toolId: 'rpcApis', act: 'list' });
+
+      // 该前缀声明过自定义清单处理器 → 它就是 rpcApis 的实现
+      expect(await dispatchedRegistry.get('rpcApis').run()).toEqual(['tool1', 'tool2']);
       expect(discoveryFn).toHaveBeenCalled();
-      expect(mockRes.statusCode).toBe(200);
-      expect((mockRes.end as any).mock.calls[0][0]).toContain('["tool1","tool2"]');
    });
 
    it('should 404 on unknown paths', async () => {
