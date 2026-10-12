@@ -195,6 +195,11 @@ await manager.stopAll();
 | `RPC_HEADERS.TRACE_ID` | `trace-id` | 链路追踪 ID |
 | `RPC_HEADERS.TIMEOUT` | `rpc-timeout` | 业务执行超时声明 (ms) |
 | `RPC_HEADERS.REQUEST_ID` | `req-id` | 响应中必须回显的唯一请求 ID |
+| `RPC_HEADERS.RETRY_AFTER` | `rpc-retry-after` | 102 响应里的轮询退避间隔（默认 `RPC_DEFAULTS.RETRY_AFTER_MS` = 1000ms） |
+| `RPC_HEADERS.CLIENT_ID` | `rpc-client-id` | 客户端自报标识（装了身份策略后由服务端判定值接管） |
+| `RPC_HEADERS.FUNC` | `rpc-fn` | **@deprecated** 别名，用 `TOOL_ID` |
+
+> 没有 `rpc-priority` 这类头（优先级未实现）；`trace-id` / `req-id` 也没有 `rpc-` 前缀，拼 header 时直接用常量。
 
 ---
 
@@ -207,10 +212,13 @@ await manager.stopAll();
 | **200** | OK | 执行成功并返回结果。 |
 | **102** | Processing | 响应超时，任务已转入后台。建议客户端开始轮询。 |
 | **400** | Bad Request | 参数错误或能力协商失败。 |
+| **401** | Unauthenticated | 身份策略拒绝：凭证缺失或验不过（见 §9）。 |
 | **404** | Not Found | 找不到工具或任务 ID 已失效。 |
-| **408** | Terminated | 触及硬死线，业务已被服务端强制中止。 |
+| **408** | Terminated | 触及硬死线，业务已被服务端强制中止。**仅出现在轮询路径**（`rpcTask.get` 读到 `aborted` 任务）与账本内部的 `RpcError`；同步调用的硬死线会被 `handleError()` 映射为 504。 |
 | **409** | Conflict | 同样的 `requestId` 正在运行中，拒绝重复提交。 |
+| **413** | Payload Too Large | 请求体超过 `maxBodySize`（默认 1MB）。由 **HTTP 传输层**直接回，不在 `RpcStatusCode` 枚举里。 |
 | **500** | Error | 业务代码执行抛出异常。 |
+| **504** | Gateway Timeout | 响应超时（含客户端本地计时器到期，以及硬死线 `RpcError(408)` 的映射结果），`error.status` 为 `'timeout'`。 |
 
 > **注**：若 `RpcError.code` 在 100-599 范围内，系统将自动将其映射为顶层 `status`。
 
@@ -547,13 +555,21 @@ const rawRes = await transport.fetch('adder', { a: 1 });
 
 ### 14.2 推荐优化
 
-建议新编写的任务显式定义保留策略：
+建议新编写的任务显式定义保留策略，并重写 **`func`**（而不是 `run`——`ServerTools.run` 是 V2 标准入口，
+负责注入兼容层并调 `super.run`，自己重写它会绕过那套机制）：
 
 ```typescript
 class MyTool extends ServerTools {
-  retention = 'once'; // 获取后自动销毁，最节省内存
-  async run(params, context) {
-    const { signal } = context;
+  constructor() {
+    super({
+      name: 'my-tool',
+      isApi: true,
+      retention: 'once',  // 获取后自动销毁，最节省内存
+    })
+  }
+
+  async func(params: ServerFuncParams, context?: ToolRpcContext) {
+    const { signal } = context!
     // ... 使用 signal 控制异步逻辑 ...
   }
 }

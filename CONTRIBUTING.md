@@ -15,7 +15,7 @@ Please feel free to file GitHub Issues or propose Pull Requests. We're always ha
 | `AGENT.md` | 给 agent / 工具目录用 | 本包作为工具暴露的面 |
 | `CONTRIBUTING.md`（本文） | 贡献者 | 本地检查、测试写法、**命名判据**、改公开面的流程、发布 |
 | `docs/api/**` | 使用者 | **自动生成**（typedoc，由 `release` 重生成），不要手改 |
-| `CHANGELOG.md` | 使用者 | **自动生成**（`standard-version`），不要手改 |
+| `CHANGELOG.md` | 使用者 | **自动生成**（`commit-and-tag-version`），不要手改 |
 
 ### 本包的分层（新符号先归层，再起名）
 
@@ -58,13 +58,14 @@ Please feel free to file GitHub Issues or propose Pull Requests. We're always ha
 ## 本地检查（实际跑得通的那套）
 
 ```shell
-./node_modules/.bin/tsc --noEmit -p tsconfig.release.json   # 类型检查（含测试）
+./node_modules/.bin/tsc --noEmit -p tsconfig.json          # 类型检查（含 src 与 test）
+./node_modules/.bin/tsc --noEmit -p tsconfig.release.json   # 发布面那份（排除 test/ 与 *.test.ts）
 npx vitest run                                              # 全量测试
 npx tsup --dts --dts-resolve                                # 构建 dist（下游包只看到 dist）
 ```
 
 - **别用 `npx tsc`**：会命中 npm 上的占位包 `tsc`，报 “This is not the tsc command you are looking for”，与代码无关。用 `./node_modules/.bin/tsc`。
-- `pnpm typecheck` = `tsc -p tsconfig.json`（那份 config 已 `noEmit: true`，`include` 是 `src/**/*` 与 `test/**/*`）；`tsconfig.release.json` 是发布面那份，两份都要过。
+- `pnpm typecheck` = `tsc -p tsconfig.json`（那份 config 已 `noEmit: true`，`include` 是 `src/**/*` 与 `test/**/*`）；`tsconfig.release.json` 是发布面那份（`extends` 前者，但 `exclude` 掉 `test/` 与 `**/*.test.ts`），两份都要过。
 - `eslint .`（flat config 在 `eslint.config.mjs`，基于 @antfu 的 base）只管「正确性」：风格类层整体关闭——`stylistic`、`regexp`、`unicorn`、`test`、`imports`、`jsonc`、`yaml`、`toml`、`markdown` 写死 `false`，另有 `perfectionist/`、`jsdoc/`、`node/`、`import/` 四组按前缀关。代码风格交给 prettier。当前配置下 `eslint .` 干净（2026-10-12 实测：exit 0，0 条）。**不要打开那些层再跑 `lint:fix`**：@antfu 默认配置下历史实测报 10886 处，`lint:fix` 会把整个 `src` 重写，diff 不可读。想重新启用某一层，把对应的 `false` 改成 `true`。
 - `format` / `format:fix` 只覆盖 json/jsonc/yaml/yml（脚本里的 glob，不是配置文件）。markdown 与代码是 opt-in：`format:docs`（`**/*.md`）、`format:code`（`**/*.{ts,tsx,js,jsx}`）——prettier 的表格对齐与代码重排会让 diff 变噪音，所以不进默认路径。
 - 跨包行为要跑**真实包入口**（`dist` / `require('@isdk/tool-rpc')`），只跑测试桩会漏掉导出与 bundle 层的问题。

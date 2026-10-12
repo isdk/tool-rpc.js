@@ -2,6 +2,11 @@
 
 > 2026-10-11 逐项对着代码核过一遍：已实现的标 `[x]` 并附证据行号，未实现的标 `[ ]` 并写明当前实况。
 > 2026-10-12 新增「身份策略」一节（设计定稿见 `IDENTITY_POLICY_DESIGN.cn.md`，那一节的行号也是当日实测）。
+> 2026-10-12（第二轮）：新增「流式（streaming）」一节，`RpcStreamReassembler` 提案拆到 `RFC_STREAM_REASSEMBLY.cn.md`；
+> 本文件里的 `file.ts:NN` 引用逐个回核，修了 `client-tools.ts` 三处漂移（`98-110`→`118-131`、`118`→`140`、`109`/`175`→`127`/`190-193`）；
+> 跳仓引用（tool-event / tool-electron / tool-rpc-fastify）已标清所在仓。
+> 注：各 `[x]` 条目末尾的「检查」是**当时那一轮**的实测快照，不是当前值。最近一次全量复核（2026-10-12）：
+> `vitest run` **51 文件 / 670 通过**、`tsc -p tsconfig.json` exit 0。
 
 ## ClientTools 架构优化
 
@@ -15,7 +20,7 @@
   - **注意**: 共享 `items` 与现有「Scope isolation」是同一处代码的两个诉求，改动要说明隔离性怎么保（同名工具在不同 apiUrl 上的桩不能互相污染）。
 
 - [x] **增强 `loadFrom` 的灵活性**（已实现）
-  - `loadFrom(items?, options?)` 在传入 `items` 时**跳过网络 fetch**，直接走 `loadFromSync(items, apiUrl)`（`src/client-tools.ts:98-110`，`loadFromSync` 定义于 `:118`）；只有 `items` 缺省时才 `transport.loadApis()`。
+  - `loadFrom(items?, options?)` 在传入 `items` 时**跳过网络 fetch**，直接走 `loadFromSync(items, apiUrl)`（`src/client-tools.ts:118-131`，`loadFromSync` 定义于 `:140`）；只有 `items` 缺省时才 `transport.loadApis()`。
   - 「从已有的元数据（如父类的 `items`）同步定义」这条诉求已经满足，无需再实现。
 
 ## 传输层默认值
@@ -24,6 +29,15 @@
   - `src/transports/models.ts:49` 声明默认全局硬超时 30000，**生产代码零消费**：全仓除定义处外，唯一命中是 `src/transports/models.test.ts:20` 断言这个常量本身的值。
   - 实况：默认值散在各处各写各的——`mailbox-client.ts:51` 的 `options.timeout || 30000`、`mailbox-client.ts:99` 的 `timeoutValue()` 兜底 30000。
   - **目标**: 默认超时从 `RPC_DEFAULTS` 单点取，避免默认值漂移；顺带确认 HTTP 侧的默认超时是否同一来源。
+
+## 流式（streaming）
+
+- [ ] **分片流的顺序重组与 RPC 层背压（`RpcStreamReassembler`）**（未实现，未排期；提案见 `RFC_STREAM_REASSEMBLY.cn.md`）
+  - **实况**：流以单条物理通道直传——HTTP 侧 `Readable.fromWeb` 桥接（`src/transports/http-server.ts:648`），无分片、无序号、无重传。全仓 grep `RpcStreamReassembler` / `sequenceNumber` 除 RFC 本身外零命中，**不要当现状引用**。
+  - 能力判定是**后置**的：`processIncomingCall` 在 dispatch 之后查 `!this.canStream`，把流改写成 `400 bad_request`（`src/transports/server.ts:263-272`）；基类默认 `false`（`:175`），HTTP 置 `true`（`src/transports/http-server.ts:133`）。能力由服务端单方面声明，协议两侧无握手。
+  - 生命周期收尾只有一个钩子：`createCallbacksTransformer({ onClose })`，`status: 'final' | 'error' | 'cancel'`（`src/transports/dispatcher.ts:285-293`）；`TransformStream` 本身没有 cancel 钩子，客户端侧靠自建流的 `underlyingSource.cancel`（`src/transports/http-client.ts:11-18`）。
+  - **目标**：分片型协议（Mailbox 这类消息通道）上搬运 `ReadableStream` 时，按 `seq` 重排 + 去重 + 有界重排窗口，缺口超时即终止流；RPC 层要有流量反馈，而不是只靠 Web/Node 流自身队列。
+  - **先决**：RFC §4 六个开放问题先定（序号归属、能力协商、背压回传通道、内存上界与 `retention` 计时起点、错误分片传播、与 102 轮询的关系），再动 `ToolRpcResponse` 的流契约。
 
 ## 测试
 
@@ -72,7 +86,7 @@
   - 删了 `resolveBuiltinIdentity` 与 `ctx.builtin`（第二轮新加、未发布）；`sendPipelineError`（`src/transports/server.ts:330`）
     保留，但只作为顶级防护的出口。`addDiscoveryHandler` 降级为兼容外壳：它只把 handler 挂成该前缀的 `rpcApis` 实现。
   - 客户端：`loadApis()` 发 `toolId: 'rpcApis'`，旧服务端 404 时回退空 `toolId`（`src/transports/client.ts:53-64`）。
-    `ClientTools.loadFrom()` 仍把类级 `fetchOptions` 合进发现调用（`src/client-tools.ts:109`）。
+    `ClientTools.loadFrom()` 仍把类级 `fetchOptions` 合进发现调用（`src/client-tools.ts:127`）。
   - 测试：`src/transports/route-table.test.ts`（25 条：路由表归一/覆盖/最长前缀/内置行/注册表分层）、
     `test/discovery-e2e.test.ts`（15 条 e2e：HTTP 8 条 + Mailbox 7 条，发现走完整流水线：身份、校验、超时、
     多前缀各列各自清单、旧客户端回退、`addDiscoveryHandler` 兼容外壳）、
@@ -112,18 +126,21 @@
 
 - [ ] **客户端侧 `credentialSource` 只有类型，没接线**（未实现，不在 P0/P1 范围）
   - `RpcCredentialSource` 已导出（`src/transports/identity.ts`），但 `ClientToolTransportOptions` 没有这个选项：写进哪个 header 由部署的 transport 定（契约 11），所以上游没定 per-transport 的落点。
-  - 今天能用的写法：`someTool.run(params, { headers: { authorization: 'Bearer …' } })`（`fetchOptions.headers` 透传，`src/transports/client.ts:119-127`）；类级 `ClientTools.fetchOptions` 会被合进每次调用（含发现调用，`src/client-tools.ts:109`、`:175`）。
+  - 今天能用的写法：`someTool.run(params, { headers: { authorization: 'Bearer …' } })`（`fetchOptions.headers` 透传，`src/transports/client.ts:119-127`）；类级 `ClientTools.fetchOptions` 会被合进每次调用（含发现调用，`src/client-tools.ts:127`、`:190-193`）。
 
 - [ ] **下游收口：`@isdk/tool-event`**（未实现，排在本包发布之后）
+  - 下面 `src/...` 与 `sse-*.ts` 均在 **`@isdk/tool-event` 仓**，不在本仓，行号无法在本仓回核。
   - 它**已经**从 RPC header 取 clientId：`src/transports/pubsub/sse-server.ts:77` 的 `getSessionFromReq`；客户端把服务端发的 id 回写进 header（`src/event-client.ts:89-94` → 本包 `src/transports/client.ts:124-127`）。收口后 `getSessionFromReq` 改走 identity。
   - 原实现位置：`src/utils/sse-identity.ts`（172 行，`SSETokenIdentityPolicy` 在 :112）与 `src/utils/sse-channel.ts`（425 行，welcome 帧反查在 :359）。
   - **默认值不等价**：原实现 `maxUses` 默认 5（`sse-identity.ts:121`），框架侧默认不限 → 收口要显式传 `maxUses: 5` 才与今天同行为。
   - 它的三张表都以 clientId 为 key（`sse-channel.ts:44` / `:56`、`sse-server.ts:28`），所以 `id` 必须是连接级。
 
 - [ ] **`@isdk/tool-electron`：要在 IPC 上装策略，先给 payload 开凭证字段**（未实现，可选）
+  - 下面 `src/...` 均在 **`@isdk/tool-electron` 仓**，不在本仓。
   - 它的 transport 走共用流水线（`src/ipc-server.ts:60` `extends ServerToolTransport`、:192 `processIncomingCall`），不改也能跑；但 `src/ipc-server.ts:217` 的 `headers` 是空对象、`src/pubsub/electron-client.ts:140` 写 `clientId: ''`，凭证没有承载处。
 
 - [ ] **`@isdk/tool-rpc-fastify`：装配时传 `identity` + `credentialReader`**（未实现）
+  - `src/fastify-server.ts` 在 **`@isdk/tool-rpc-fastify` 仓**，不在本仓。
   - 不用改 `src/fastify-server.ts:340` 那行（未装策略时就是透传）。注意它的 `Req` 是 `FastifyRequest`，Node 对象在 `raw._req` / `raw._res`（:345）。
 
 - [x] **文档：身份策略单开一节**（已实现，2026-10-12）

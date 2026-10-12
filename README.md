@@ -14,7 +14,7 @@ This project is built on `@isdk/tool-func`. Before proceeding, please ensure you
 - **🌐 RESTful Interface:** Quickly create REST-style APIs using `ResServerTools`, which automatically handles standard operations like `get`, `list`, `post`, `put`, and `delete`.
 - **🔧 RPC Method Grouping:** Use `RpcMethodsServerTool` to bundle multiple related functions (methods) under a single tool, invoked via an `act` parameter.
 - **🔌 Automatic Client-Side Proxies:** The client (`ClientTools` and its subclasses) can automatically load tool definitions from the server and dynamically generate type-safe proxy functions, making remote calls as simple as local ones.
-- **🌐 Browser Compatible (`@isdk/tool-rpc/browser`):** A dedicated browser entry that includes client modules, abstract server-side classes (`ServerTools`, `RpcMethodsServerTool`, `ResServerTools`), and full transport infrastructure (`RpcServerDispatcher`, `RpcTransportManager`, `RpcActiveTaskTracker`, etc.). Only excludes Node.js-specific server transports (`HttpServerToolTransport`, `MailboxServerTransport`).
+- **🌐 Browser Compatible (`@isdk/tool-rpc/browser`):** A dedicated browser entry that includes client modules, abstract server-side classes (`ServerTools`, `RpcMethodsServerTool`, `ResServerTools`), and full transport infrastructure (`RpcServerDispatcher`, `RpcTransportManager`, `RpcActiveTaskTracker`, etc.). It excludes the transports that need a Node runtime or a native module: `HttpServerToolTransport`, `MailboxServerTransport` and `MailboxClientTransport`.
 - **🚀 Built-in HTTP & Mailbox Transport:** 
   - **HTTP**: Comes with `HttpServerToolTransport` (Node.js `http`) and `HttpClientToolTransport` (`fetch`, browser-compatible).
   - **Mailbox**: Native support for internal distributed mailbox protocols, ideal for cross-process or cross-thread communication.
@@ -174,15 +174,18 @@ The architecture of `@isdk/tool-rpc` is built on a core philosophy: **Static cla
 
 To ensure clients load accurate, protocol-matching tool definitions during the Discovery phase, the project implements a **hierarchical isolation mechanism**.
 
-* **Isolation Algorithm**: The `toJSON()` method performs triple validation during registry traversal:
-    1. **Type Check**: `item instanceof this` ensures the tool belongs to the current or a sub-level.
-    2. **Protocol Reference Check**: Validates `item.constructor.toJSON === this.toJSON`. This ensures that if a subclass (like `RpcMethodsServerTool`) overrides `toJSON` for a more complex protocol, its instances will **not** be exported by the parent class (like `ServerTools`), preventing basic clients from loading tools they cannot handle.
-    3. **Visibility Check**: `item.isApi !== false`.
+* **Isolation Algorithm**: `toJSON()` is defined **once**, on `ServerTools` (`src/server-tools.ts`); the subclasses inherit it, so what changes is which class `this` is. It walks `this.items` and keeps an entry when either branch matches:
+    1. **Type Check**: `item instanceof this && item.isApi !== false`. Because `instanceof` is satisfied downwards along the inheritance chain, this yields **upward isolation only**: calling it on a subclass excludes the parent's instances, calling it on a parent does *not* exclude the subclasses'.
+    2. **Base `ToolFunc` Check**: `item.isApi && !(item instanceof ServerTools) && this === ServerTools` — a raw `ToolFunc` (never registered through a `ServerTools` subclass) is listed only through `ServerTools` itself, and only when it opts in with `isApi: true`.
 
-* **Export Ranges by Level**:
-  * **`ServerTools.toJSON()`**: Exports only direct instances of `ServerTools` and raw `ToolFunc` items marked as `isApi: true`. It **never** exports RPC or Resource tools.
-  * **`RpcMethodsServerTool.toJSON()`**: Exports all RPC-style tools. Due to downward compatibility, it **includes** instances of subclasses like `ResServerTools`.
-  * **`ResServerTools.toJSON()`**: Implements upward isolation, exporting only Resource tools and excluding general RPC methods from its parent.
+  Entries whose tool does not set `allowExportFunc` are exported through their own `toJSON()` with `func` deleted.
+
+* **Export Ranges by Level** (measured: one registry holding `ping` (ServerTools), `userService` (RpcMethodsServerTool), `users` (ResServerTools)):
+  * **`ServerTools.toJSON()`** → `ping`, `userService`, `users`. `instanceof ServerTools` is true for the subclass instances too, so a parent listing **does** include RPC and Resource tools.
+  * **`RpcMethodsServerTool.toJSON()`** → `userService`, `users`. Excludes the plain `ServerTools` instance; keeps its own subclasses (downward compatibility).
+  * **`ResServerTools.toJSON()`** → `users` only. This is the upward isolation the mechanism actually provides.
+
+* **Which registry gets walked matters as much as which class you call**: `toJSON()` reads `this.items`, so a subclass that has called `isolateRegistry()` only sees its own layer. For the same reason, handing the dispatcher a raw `items` object (`new RpcServerDispatcher({ registry: ServerTools.items })`) instead of the container class skips this filter entirely — every entry in that object is listed (each still serialized through its own `toJSON()`). Use the container class when you want the level filter; use `items` when you want the whole registry regardless of level.
 
 * **Default Behavior for `isApi`**:
   * **For Derived Business Instances (Func)**: Since they are designed for remote exposure, they are **auto-exported** by default unless explicitly set to `isApi: false`.
@@ -295,6 +298,17 @@ To prevent accidental shadowing, use `allowOverride: false` during registration.
 
 `@isdk/tool-rpc` tunes timeout control for distributed AI-agent scenarios and follows the *smallest timeout wins* principle.
 
+Concretely, the deadline is negotiated in two stages:
+
+1. **Client** (`ClientToolTransport.fetch()`): if both a caller-supplied `timeout` and the tool's metadata
+   `timeout` exist, the smaller one wins; otherwise whichever exists is used. The result is sent to the
+   server in the `rpc-timeout` header.
+2. **Server** (`RpcServerDispatcher`): the header value takes precedence; otherwise the tool's own
+   `timeout`; otherwise the dispatcher's `globalTimeout` (default `30000` ms).
+
+With `keepAliveOnTimeout: true` that deadline becomes a *soft* deadline (the task is handed to the
+background and the client gets `102 Processing`); otherwise it is a *hard* deadline (abort + `408`).
+
 ### 1. Configuration Format
 
 The `timeout` property accepts a shorthand and a longhand form:
@@ -321,7 +335,8 @@ To keep concurrent calls safe while decoupling business logic from environment d
 Inside a tool, read environment details from `this.ctx` instead of mixing them into business `params`:
 
 - `this.ctx.signal`: the automatically injected `AbortSignal`.
-- `this.ctx._req` / `this.ctx._res`: the raw transport request/response objects.
+- `this.ctx.req` / `this.ctx.reply`: the raw transport request/response objects (only populated by the Node `http` transport; `undefined` for mailbox and in-memory transports).
+- `this.ctx.requestId` / `this.ctx.traceId` / `this.ctx.registry`: the call ID, the trace ID, and the registry this call's tool was resolved from.
 - Custom fields: such as `traceId` or `userId`.
 
 ### 2. Chaining with `.with(ctx)`
@@ -354,7 +369,7 @@ This is the most fundamental layer, representing a single, remotely callable fun
 
 - **`ClientTools`**:
   - **Concept**: The client-side proxy for a `ServerTools` instance on the server.
-  - **How it Works**: After `client.init()`, it creates a `ClientTools` instance named `ping`. When you call `ToolFunc.run('ping')`, it sends the request over the network to the server.
+  - **How it Works**: After `ClientTools.loadFrom(undefined, { apiUrl })` pulls the server's tool list, a `ClientTools` instance named `ping` exists in the client registry. When you call `ToolFunc.run('ping', params)` (or `ClientTools.get('ping').run(params)`), it sends the request over the network to the server.
 
 ### Layer 2: `RpcMethodsServerTool` / `RpcMethodsClientTool` - The Object-Oriented Service
 
@@ -470,10 +485,11 @@ const result = await greet.run({ name: 'Browser' })
 |--------|---------------------------|-------------------------------------|
 | Manager | `RpcTransportManager` (full version with server lifecycle) | `RpcTransportManager` + `RpcClientTransportManager` |
 | Server transports | `HttpServerToolTransport`, `MailboxServerTransport` | Not included ❌ |
+| Mailbox client | `MailboxClientTransport` | Not included ❌ (needs `@mboxlabs/mailbox`) |
 | Server-side abstractions | `ServerTools`, `RpcMethodsServerTool`, `ResServerTools` | All included ✅ |
 | Transport infrastructure | `RpcServerDispatcher`, `RpcActiveTaskTracker`, `RpcDeadlineGuard` | All included ✅ |
 | `uuid` generation | Via `@isdk/hash` (cross-platform) | Via `@isdk/hash` (cross-platform) |
-| Bundle size | Larger (includes Node.js server transports) | Smaller (omits Node-`http`/`mailbox` transports)
+| Bundle size | Larger (includes Node.js server transports) | Smaller (omits Node-`http`/`mailbox` transports) |
 
 ### Bundler auto-resolution
 
@@ -496,7 +512,7 @@ The core design philosophy of the transport layer is the **separation of concern
 
 The architecture is built around a few key interfaces:
 
-- **`IToolTransport`**: The common base interface for all transports, defining basic operations like `mount`.
+- **`IToolTransport`**: The common base interface for all transports (`src/transports/base.ts`): `apiUrl` (the addressing baseline), `options`, and the optional lifecycle hooks `start()` / `stop()` / `close()`. `mount()` is **not** part of it — it lives on `ClientToolTransport` and is `@deprecated` (it only copies `apiUrl` onto a tools class).
 - **`IServerToolTransport`**: The interface that a server-side transport must implement. Its core responsibilities are:
     1. **Exposing a Discovery Endpoint**: The route that lists the tools (typically `GET /api`) is served by the framework's built-in `rpcApis` tool, registered automatically for every claimed prefix. It is an ordinary tool: it goes through the same identity, validation and timeout pipeline as business calls, and it lists the registry bound to the **matched prefix**. `addDiscoveryHandler(apiUrl, handler)` is **deprecated** — it only overrides the listing content for that prefix, and the first call logs a one-time migration warning. Keep it only when the listing itself must be customized (or register your own tool with `addRoute(apiUrl, { path: '/', when: { method: 'GET' }, toolId: 'myListing' })`).
     2. **Handling RPC Calls**: Create a generic RPC route (e.g., `/api/:toolId`) that receives requests, finds the corresponding tool by `toolId`, executes it, and returns the result. This is handled by the `addRpcHandler` method.
@@ -520,9 +536,13 @@ The library provides plug-and-play transport implementations:
       [Identity Policy](#-identity-policy)); it is public by default, and a policy can require a credential for it.
     - Creates an RPC route that carries the tool name, resolving arguments from the request body or URL parameters.
 - **`HttpClientToolTransport` (HTTP client)**: Built on the cross-platform `fetch` API. The V2 version polls background-task status automatically.
-- **`Mailbox Transports`**: Native support for the internal distributed mailbox protocol.
+- **`Mailbox Transports`**: Native support for the internal distributed mailbox protocol (`MailboxClientTransport` / `MailboxServerTransport`).
     - **Characteristics**: suited to cross-process or cross-thread communication, with physical isolation built in.
     - **Advantage**: high-performance tool calls in scenarios that need no HTTP stack.
+    - **Caveats**: `@mboxlabs/mailbox` is a regular dependency but is only loaded when you use these transports, and
+      neither mailbox transport is part of the browser entry. The client requires `clientAddress` (its inbox) and cannot
+      be auto-constructed via `bindScheme` (its constructor takes a single options object) — build it with `new` and then
+      call `RpcClientTransportManager.instance.register(transport)`.
 
 ### Extending the Functionality: Creating Your Own Transport
 
@@ -531,7 +551,7 @@ The library provides plug-and-play transport implementations:
 **Idea for a Fastify Integration**:
 
 1. Create a `FastifyServerTransport` class that implements `IServerToolTransport`.
-2. In the `mount` method, instead of creating a new `http` server, you would accept an existing `FastifyInstance` as an option.
+2. In the constructor (and in `_start()`), instead of creating a new `http` server, accept an existing `FastifyInstance` as an option.
 3. Read `transport.getRouteTable()` and register each row natively (`fastify.get(prefix + path, ...)`) — the built-in discovery endpoint is one of those rows, so you do not hand-code a `ServerTools.toJSON()` handler.
 4. Use `fastify.all(apiPrefix + '/:toolId', ...)` to register the RPC route. The handler would extract parameters from `request.body` or `request.query`, call the appropriate tool, and use `reply` to send the response.
 5. The `start` and `stop` methods could delegate to the Fastify instance's `listen` and `close` methods.

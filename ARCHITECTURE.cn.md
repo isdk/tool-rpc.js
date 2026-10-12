@@ -48,26 +48,37 @@
 这是实现分层抽象（Server -> RPC -> Resource）的关键。其伪代码逻辑如下：
 
 ```typescript
+// src/server-tools.ts（与实现一致）
 static toJSON() {
-  return filter(this.items, (item) => {
-    // 1. 类型约束：必须是当前类或子类的实例
-    const isInstanceOf = item instanceof this;
+  const result = {};
+  for (const name in this.items) {
+    let item: any = this.items[name];
 
-    // 2. 协议边界检查：子类若重写了发现逻辑，则父类不再导出它
-    const isSameProtocol = item.constructor.toJSON === this.toJSON;
+    // 1. 精确类型：必须是当前类的实例，且没被显式隐藏
+    const isExactType = (item instanceof this) && item.isApi !== false;
 
-    // 3. 显式开关
-    const isNotHidden = item.isApi !== false;
+    // 2. 基类兜底：仅当从 `ServerTools` 本身调用时，把“不是 ServerTools 实例但标了 isApi”
+    //    的裸条目也带上（例如直接往 items 里注册的对象字面量）
+    const isBaseApi = item.isApi && !(item instanceof ServerTools) && (this === ServerTools);
 
-    return isInstanceOf && isSameProtocol && isNotHidden;
-  });
+    if (isExactType || isBaseApi) {
+      if (!item.allowExportFunc) {
+        item = item.toJSON();
+        delete item.func;   // 默认不导出函数体
+      }
+      result[name] = item;
+    }
+  }
+  return result;
 }
 ```
 
 **设计意图**：
 
-- **向上隔离**：调用 `ResServerTools.toJSON()` 时，`instanceof` 会自动过滤掉父级 `RpcMethodsServerTool` 的通用实例。
-- **向下隔离**：当子类为了支持更复杂的 REST 语义而演进出不同的 `toJSON` 逻辑时，父类 `ServerTools` 通过引用检查 (`=== this.toJSON`) 自动将其排除，防止基础客户端尝试调用它无法理解的复杂 API。
+- **向上隔离**：调用 `ResServerTools.toJSON()` 时，`instanceof this` 会自动过滤掉父级 `RpcMethodsServerTool` / `ServerTools` 的通用实例。
+- **作于基类的兜底**：`isBaseApi` 只在 `this === ServerTools` 时生效，目的是让“直接挂在 `ServerTools.items` 上的非实例条目”
+  仍能被发现；子类调用时它们会被排除，防止基础客户端尝试调用它无法理解的复杂 API。
+- **函数体默认不外泄**：除非工具声明 `allowExportFunc: true`，`func` 会在序列化前被删掉。
 
 ### 2.2 静态继承与物理隔离 (Property Shadowing)
 
@@ -121,11 +132,12 @@ static toJSON() {
 
 ### 3.2 影子实例与执行流
 
-在 `handleRpcRequest` 中，系统并不直接运行注册表中的原始实例，而是：
+在 `ServerToolTransport.processIncomingCall()` → `RpcServerDispatcher.performExecution()` 中，系统并不直接运行注册表中的原始实例，而是：
 
-1. 调用 `func.with(ctx)`。
-2. `with` 方法内部执行 `Object.create(this)`。
-3. 将请求特定的 `_req`, `_res`, `_signal` 注入到这个影子实例中。
+1. 调用 `tool.with(context)`（`context` 即 `ToolRpcContext`）。
+2. `with` 方法内部执行 `Object.create(this)` 生成影子实例，并把 `this.ctx` 指向本次调用的上下文。
+3. 底座原生对象落在 `ctx.req` / `ctx.reply`；**遗留兼容层**（`compat.ts` 的 `injectV1ContextToParams`，由
+   `ServerTools.enableLegacyCompat` 控制）才把 `_req` / `_res` / `_signal` 注入到 **params** 里。
 4. **意义**：这实现了“逻辑共享，状态隔离”，是支持高并发 RPC 调用的核心保证。
 
 ## 4. 安全性思考
@@ -198,7 +210,9 @@ const resCN = await chatTool.with({ apiUrl: 'https://cn.api/v1' }).run({ text: '
 
 `RpcTransportManager` 是整个 V2 架构的“交通枢纽”。它负责：
 
-- **二级寻址**：根据 `apiUrl` 的 Scheme 路由到具体协议类，再根据 Origin 复用物理连接。
+- **两级寻址**：`getClient(apiUrl)` 先查以**完整 apiUrl 为 key** 的实例缓存；未命中才按 URL 的 Scheme 从
+  `bindScheme` 注册表（或动态 resolver）取协议类并 `new TransportClass(apiUrl, options)`。注意 key 是整串 URL
+  而非 Origin：同 Origin 不同 path 不会自动复用客户端实例（服务端侧的多前缀共享靠的是 `getListenAddr()` 与路由表）。
 - **配置透传**：通过 `connect(url, options)` 传入的配置，最终会流转到 Transport 实例，支持超时、认证等连接级配置。
 - **物理底座共享**：支持多个逻辑 `apiUrl` 共享同一个物理端口（如 HTTP 的不同 Path 挂载）。
 

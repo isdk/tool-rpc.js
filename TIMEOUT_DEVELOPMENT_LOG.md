@@ -12,8 +12,15 @@
 
 ### 解决方案
 
-- **规范建议**: 客户端的本地物理计时器必须比它发送给服务端的 `rpc-timeout` (逻辑超时) 稍长。
-- **最佳实践**: 客户端本地超时 = `min(negotiated_timeout)` + `200ms` (Buffer)。这 200ms 专门预留给服务端产生 504 响应并通过网络传回客户端解析。
+- **规范建议**: 客户端的本地物理计时器应比它发送给服务端的 `rpc-timeout` (逻辑超时) 稍长。
+- **最佳实践**: 客户端本地超时 = `negotiated_timeout` + `200ms` (Buffer)。这 200ms 专门预留给服务端产生超时响应并通过网络传回客户端解析。
+- **实现现状（重要）**：两个内置客户端传输层做法不同：
+  - `HttpClientToolTransport` **没有**加 Buffer——本地计时器与 `rpc-timeout` 用完全相同的协商值
+    （`http-client.ts` 中 `setTimeout(..., Number(timeoutVal))`），所以上面的竞态仍然存在，
+    只是两边都归一化为 504（见 §6）而不会变成模糊的 AbortError。
+  - `MailboxClientTransport` **有** Buffer：`mailbox-client.ts:125` 的 `timeoutVal + 200`。
+
+  写新传输层时请参照 Mailbox 那一侧。
 
 ---
 
@@ -72,9 +79,19 @@
 
 - **后果**: 用户手动指定的 `{ timeout: 1000 }` 无效，系统回退到了默认的工具元数据超时。
 
-### 解决方案
+### 解决方案（当前实现）
 
-- **重写 `run`**: 在 `ClientTools` 中必须重写 `run` 方法，确保它调用 `this.func(params, options)`，并将 `options` 一路透传至 `transport.fetch`。
+不是重写 `run`。`ClientTools` 沿用 `tool-func` 的 `run(params, ctx)` 签名，选项通过 **context 合并**下传：
+
+```typescript
+// ClientTools.fetch() 内部：
+fetchOptions = defaultsDeep(fetchOptions, this.ctx, this.fetchOptions, classDefaults)
+// 再交给 transport：
+transport.fetch(this.name, objParam, act, subName, fetchOptions, this.timeout)
+```
+
+因此 `someTool.run({ ... }, { timeout: 1000 })` 里的第二个参数会被当作 `ctx` 合入 `fetchOptions`；
+类级默认值写 `ClientTools.fetchOptions`，单次调用用 `.with({ timeout })` 或 `run(params, ctx)`。
 
 ---
 
@@ -82,6 +99,12 @@
 
 ### 504 vs 20 (AbortError)
 
-- **504 (Gateway Timeout)**: 代表服务端执行超时，或者是客户端与服务端协商后的超时结果。这属于“预料之中”的业务超时。
-- **AbortError (code 20)**: 代表由于客户端主动取消、页面卸载或客户端本地物理计时器（含 Buffer）到期导致的“硬中断”。
-- **区分逻辑**: 开发者应优先处理 504 错误，它通常带有 `Execution Timeout` 的提示。
+- **504 (Gateway Timeout)**: 代表服务端执行超时，或客户端与服务端协商后的超时结果。这属于“预料之中”的业务超时。
+  服务端的硬死线（`RpcStatusCode.TERMINATED` / 408）在 `dispatcher.handleError()` 里也会被映射为 **504**
+  （`status: 'timeout'`）；408 只会出现在轮询路径（`rpcTask.get` 读到 `aborted` 任务）。
+- **客户端本地计时器到期**: `HttpClientToolTransport` 会 `controller.abort(err)`，而那个 err 已带 `code = 504`
+  （message `'Request Timeout'`），所以它通常**也**表现为 504，而不是裸 AbortError。
+- **AbortError**: 只有当调用方自带 `fetchOptions.signal` 并主动中止（页面卸载、用户取消）时才会以
+  AbortError 形态出现。
+- **区分逻辑**: 开发者应优先处理 504；要区分“服务端判超时”与“我自己取消”，看 `err.message` 与是否自己传过 signal，
+  而不是只看错误类型。

@@ -21,14 +21,14 @@
 | 组件 | 角色 | 关键方法/属性 |
 |------|------|---------------|
 | `RpcTransportManager` | 协议注册中心、路由归属登记、连接池管理 | `bindScheme()`, `registerServer()`, `startAll()`, `stopAll()`, `validateRpcRequest()` |
-| `RpcServerDispatcher` | 执行调度、能力协商、影子实例隔离、超时裁决 | `dispatch()`, `handleError()`, 自动注入 `this.ctx.tracker` |
-| `RpcActiveTaskTracker` | 任务注册、状态转换、硬死线、结果保留、物理中止联动 | `register()`, `get()`, 内部维护 `tasks` Map |
+| `RpcServerDispatcher` | 执行调度、能力协商、影子实例隔离、超时裁决 | `dispatch()`, `handleError()`；每次调用自动登记进 Tracker（`trackTask`），并把自身放进 `ctx.dispatcher`（**`ctx` 上没有 `tracker` 字段**） |
+| `RpcActiveTaskTracker` | 任务登记、状态转换、硬死线、结果保留、物理中止联动 | `add()`, `get()`, `remove()`, `stop()`；内部维护 `tasks` Map（每 60s 扫一次，`ttlMs` 默认 5 分钟未访问则中止） |
 
 ### 2.3 内置系统工具
 
 - **`rpcTask`**（`RpcTaskResource`）：由 `RpcServerDispatcher` 自动注册到 `systemRegistry`，提供标准任务轮询和取消端点。
-  - `GET /api/rpcTask/{resId}` — 查询任务状态（返回 102/200/404/408）
-  - `POST /api/rpcTask/{resId}?act=cancel` — 取消任务
+  - `GET /api/rpcTask/{resId}` — 查询任务状态（处理中 102 / 完成 200 / 不存在 404 / 出错 500 / 被中止 408）
+  - `POST /api/rpcTask/{resId}?act=$cancel` — 取消任务（注意 act 带 `$`；客户端代理会自动去 `$`，所以写 `rpcTask.cancel({ resId })`）
 - **`rpcApis`**（`RpcApisResource`，id 常量 `RPC_APIS_TOOL_ID`）：内置发现工具，同样自动注册到 `systemRegistry`。
   它从执行上下文里拿**本次命中前缀**的注册表（`ctx.registry`）列工具清单，`timeout: 0`。
   - `GET /api` — 列该前缀的全部工具（`act: 'get'` 带 `resId` 则只回那一个）
@@ -50,17 +50,19 @@
 | `identity` | `RpcIdentity` | 否 | 服务端判定的身份（`{ id, attributes?, credential? }`）；**未装策略时不存在** |
 | `requestId` | string | 是 | 唯一调用 ID（用于幂等、追踪） |
 | `params` | any | 是 | 业务参数 |
-| `headers` | object | 否 | 标准 Header（如 `rpc-timeout`, `rpc-act`, `rpc-client-id`） |
-| `signal` | AbortSignal | 否 | 取消信号 |
+| `headers` | object | 否 | 标准 Header（如 `rpc-timeout`, `rpc-act`, `rpc-client-id`，完整列表见 `RPC_HEADERS`） |
+| `traceId` | string | 否 | 链路追踪 ID（缺省时 dispatcher 从 `trace-id` header 取，再没有则生成 uuid） |
+| `raw` | any | 否 | 底座原生对象逃生口（HTTP 为 `{ _req, _res }`）；dispatcher 拆成 `ctx.req` / `ctx.reply` |
 
 #### ToolRpcResponse
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `status` | number | 状态码（200/102/400/401/404/408/413/504） |
+| `status` | number | 状态码（200/102/400/401/404/408/409/500/504；413 由 HTTP 传输层直接回） |
 | `data` | any \| ReadableStream | 业务结果或流 |
-| `error` | object | 结构化错误（`code`, `message`, `data`） |
+| `error` | object | 结构化错误（`code`, `status`, `message`, `data`, `stack`） |
 | `headers` | object | 元数据（如 `rpc-retry-after`） |
+| `raw` | any | 底座原生对象逃生口 |
 
 **常用状态码**：
 - 200：成功
@@ -69,8 +71,9 @@
 - 401：身份策略拒绝（凭证缺失或验不过，`RpcStatusCode.UNAUTHENTICATED`）
 - 404：工具或任务不存在
 - 408：硬死线终止
-- 409：requestId 冲突
-- 413：请求体超限
+- 409：requestId 冲突（同一 requestId 重复登记）
+- 413：请求体超过 `maxBodySize`（HTTP 传输层，默认 1MB）——由传输层直接回，不在 `RpcStatusCode` 枚举里
+- 500：执行错误
 
 ### 2.5 任务结果保留策略（`RpcTaskRetention`）
 
@@ -80,7 +83,7 @@
 | `Permanent` (-1) | 永久保留 |
 | `Once` ('once') | 第一次成功 `get` 后自动清除 |
 | `number` (ms) | 保留指定毫秒数 |
-| 对象 | `{ onceFallbackMs?, maxRetentionMs? }` |
+| 对象 `RpcTaskRetentionConfig` | `{ mode, onceFallbackMs?, maxRetentionMs? }`：`mode` 同上（枚举或毫秒数）；`onceFallbackMs` 是 `once` 模式的物理清理兜底（默认 1 小时）；`maxRetentionMs` 是任何模式下都必删的硬上限 |
 
 ## 三、快速入门（3 分钟）
 
@@ -205,37 +208,32 @@ console.log(plainResult); // "一次性结果"
 
 ### 4.2 后台任务 + 轮询（使用内置 `rpcTask`）
 
-**服务端**：只返回 `requestId`，任务结果通过 `handle.resolve/reject` 通知 Tracker。
+**服务端**：只需声明 `keepAliveOnTimeout`，Dispatcher 会自动把本次调用登记进 Tracker（`trackTask`）。
+业务侧**不需要也不应该**自己调 `tracker.add()`（`ctx` 上也没有 `tracker`）。
 
 ```typescript
 new ServerTools({
   name: 'long-task',
   isApi: true,
+  // 软死线 3s：到点服务端回 102，任务继续在后台跑
+  timeout: { value: 3000, keepAliveOnTimeout: true },
+  retention: 'once',        // 结果第一次被读走后自动清除
   func: async function (this: any, params: { data: number[] }) {
-    const requestId = this.ctx.requestId; // Dispatcher 自动生成
-    const handle = this.ctx.tracker.register(requestId, {
-      retention: 'once',        // 第一次查询后自动清除
-      maxRuntimeMs: 120_000,    // 硬死线 2 分钟
-    });
-    // 异步执行（不 await）
-    this.executeAsync(requestId, params.data, handle).catch(() => {});
-    return { requestId };       // 客户端据此轮询
-  },
-  async executeAsync(requestId: string, data: number[], handle: any) {
-    try {
-      let total = 0;
-      for (let i = 0; i < data.length; i++) {
-        await new Promise(r => setTimeout(r, 1000));
-        if (handle.signal.aborted) throw new Error('Task aborted');
-        total += data[i] * 2;
-      }
-      handle.resolve(total);
-    } catch (err: any) {
-      handle.reject(err);
+    let total = 0;
+    for (const v of params.data) {
+      await new Promise(r => setTimeout(r, 1000));
+      // 硬死线 / 客户端断开 / rpcTask.$cancel 都会反映到这个 signal
+      if (this.ctx.signal.aborted) throw new Error('Task aborted');
+      total += v * 2;
     }
+    return total;           // 后台完成后结果存入账本，客户端轮询取回
   },
 }).register();
 ```
+
+账本句柄 `RpcActiveTaskHandle` 由 Dispatcher 创建，字段/方法：`status`（`processing`/`completed`/`error`/`aborted`）、
+`result`、`error`、`fetchCount`、`aborter`（`aborter.signal.aborted` 判断中止）、`abort(reason)`、`touch()`、
+`shouldCleanup(now)`。后台任务另受 dispatcher 的 `maxTaskRuntimeMs`（默认 1 小时）硬死线约束。
 
 **客户端**：通过系统内置的 `rpcTask` 工具轮询。
 
@@ -315,7 +313,9 @@ const transport = new MailboxClientTransport({
   clientAddress: 'mem://client/inbox', // 客户端收件箱地址
 });
 
-RpcTransportManager.bindScheme('mem', () => transport); // 或直接使用实例
+await transport.start();
+// 按 apiUrl 精确登记实例，`getClient()` 直接命中缓存：
+RpcClientTransportManager.instance.register(transport);
 await ClientTools.loadFrom(undefined, { apiUrl: 'mem://bot@mailbox/api/v1' });
 
 const greet = ClientTools.get('greet');
@@ -324,7 +324,11 @@ console.log(result); // "Hello, World!"
 ```
 
 **注意**：
-- Mailbox 传输层**不支持流式响应**（`canStream` 为 `false`），如果工具返回流会收到 400 错误。
+- 信箱传输**不能走 `bindScheme` 自动构造**：scheme 注册表会执行 `new TransportClass(apiUrl, options)`，
+  而 `MailboxClientTransport` 的构造签名是**单个 options 对象**（且 `clientAddress` 必填），因此必须像上面
+  那样先 `new` 再 `register(transport)`。
+- Mailbox 传输层**不支持流式响应**（`canStream` 为 `false`；基类默认 false，只有 HTTP 传输会置 true），
+  如果工具返回流会收到 400 错误。
 - `clientAddress` 必须指定，用于服务端回调或状态通知。
 - 需要确保服务端和客户端使用同一个 `Mailbox` 实例或相同 Provider（如内存、Redis 等）。
 
@@ -346,7 +350,7 @@ const result = await someTool.run(
 
 业务代码可通过 `this.ctx.clientId`（若 `ToolRpcContext` 扩展）或 `this.ctx.headers['rpc-client-id']` 获取。
 
-> **自报值不是身份**。`clientId` 是客户端自己填的；要「连上之后不可冒充」就得装身份策略（见 §4.6）：
+> **自报值不是身份**。`clientId` 是客户端自己填的；要「连上之后不可冒充」就得装身份策略（见 §4.7）：
 > 装了策略后基类保证 `clientId === identity.id`，业务侧读 `this.ctx.identity`。
 
 ### 4.5 自定义传输层
@@ -368,7 +372,7 @@ class FastifyServerTransport extends ServerToolTransport {
 }
 ```
 
-### 4.5 多实例与测试隔离
+### 4.6 多实例与测试隔离
 
 ```typescript
 // 创建独立 Manager 实例（非全局单例）
@@ -379,7 +383,7 @@ manager.registerServer(transport);
 await manager.startAll();
 ```
 
-### 4.6 身份策略（Identity Policy）
+### 4.7 身份策略（Identity Policy）
 
 服务端回答「这个请求是谁」。三个文件：`identity.ts`（抽象）、`identity-session.ts`（服务端自签发会话凭证）、
 `identity-bearer.ts`（凭证外部签发、服务端只验）。完整规格见根目录 `IDENTITY_POLICY_DESIGN.cn.md`。
@@ -430,8 +434,10 @@ Dispatcher 在执行时为每个请求创建 `Object.create(tool)` 的影子实�
 ### 5.3 物理连接关闭自动清理
 传输层（如 `HttpServerToolTransport`）监听 `rawRes.close` 事件，自动调用 `handle.abort('Physical connection closed')`。这适用于流式响应和后台任务，无需手动处理。
 
-### 5.4 requestId 唯一性
-`requestId` 由 Dispatcher 自动生成（可通过 `this.ctx.requestId` 获取）。重复提交会收到 409 错误。
+### 5.4 requestId 来源与唯一性
+`requestId` 由**传输层**决定，不是 Dispatcher 生成的：HTTP 传输取 header `req-id`，缺失时回退到 `uuidv4()`；
+Mailbox 在严格模式下**必须**带 `req-id` header（否则 400），非严格模式回退到消息 id。业务侧只读
+`this.ctx.requestId`，不要自己生成。同一 `requestId` 重复登记会抛 409（`RpcStatusCode.CONFLICT`）。
 
 ### 5.5 能力协商
 - 工具声明 `stream: true` 才支持流式输出。

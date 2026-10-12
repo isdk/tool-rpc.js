@@ -23,8 +23,10 @@
 
 所有传输实现必须符合以下严密的接口继承规范，以确保多协议间的一致行为：
 
-- **`IToolTransport`** (顶层接口)：定义基础寻址 (`apiUrl`) 及连接管理。
-  - **`mount(tools: any)`**: `@deprecated` 临时保留的工具挂载方法。在 V2 中已由 `manager.registerServer` 与 `addRpcHandler` 体系取代。
+- **`IToolTransport`** (顶层接口，`src/transports/base.ts`)：`apiUrl`（寻址基准）、`options`、`manager` 引用，以及可选的
+  `start()` / `stop()` / `close()` 生命周期钩子（另有 `[name: string]: any` 逃生索引）。
+  - **`mount(tools: any)`**: `@deprecated` 工具挂载方法——注意它**不在** `IToolTransport` 上，而是 `ClientToolTransport`
+    的方法（仅把 `apiUrl` 复制到工具类）。在 V2 中已由 `manager.registerServer` 与 `addRpcHandler` 体系取代。
   - **`IServerToolTransport`** (服务端协议规范)：
     - **`getListenAddr()`**: 返回物理层面的监听地址标识（如 `:3000` 或 `localhost:8080`）。
       - **归一化要求**：实现类需将 `127.0.0.1`、`[::1]` 等回环地址归一化为 `localhost`，以确保物理底座池的精确命中。
@@ -40,14 +42,15 @@
     - **`addDiscoveryHandler(apiUrl, handler)`**（已标 `@deprecated`）：发现端点已由内置工具 `rpcApis` 回答，它降为兼容外壳：
       只把 handler 挂成该前缀的 `rpcApis` 清单实现，不再生成第二条物理路由；首次调用经 `warnDiscoveryDeprecated()` 打一次迁移提示。
     - **`HttpServerToolTransport`** (基于 Node.js 原生 http 模块，支持物理复用)。
-    - **`MailboxServerToolTransport`** (基于内部分布式信箱，天然物理独占)。
+    - **`MailboxServerTransport`** (基于内部分布式信箱，天然物理独占)。
   - **`IClientToolTransport`** (客户端协议规范)：
     - **`HttpClientToolTransport`** (基于 fetch/http client)。
-    - **`MailboxClientToolTransport`** (基于信箱投递协议)。
+    - **`MailboxClientTransport`** (基于信箱投递协议；构造签名是**单个 options 对象**且 `clientAddress` 必填，
+      因此不能走 `bindScheme` 的 `new Class(apiUrl, options)` 自动构造，需先 `new` 再 `instance.register(transport)`)。
   - **Client ID 统一注入机制**：
     - `ClientToolTransport.fetch()` 基类方法中，当 `fetchOptions.clientId` 存在时，自动将其注入到 `fetchOptions.headers[RPC_HEADERS.CLIENT_ID]`（即 `rpc-client-id`）。
     - 各协议客户端实现（HTTP、Mailbox）通过展开 `fetchOptions.headers` 自动继承 `clientId`，无需在每个传输层中重复处理。
-    - 服务端各协议在 `toRpcRequest()` 中从 header 提取 `rpc-client-id` 并赋值到 `ToolRpcRequest.clientId` 可选字段。 |
+    - 服务端各协议在 `toRpcRequest()` 中从 header 提取 `rpc-client-id` 并赋值到 `ToolRpcRequest.clientId` 可选字段。
 
 ---
 
@@ -65,8 +68,12 @@
 | `requestId` | `string` | 是 | 本次调用唯一 ID。用于任务句柄索引、状态查询及幂等校验。 |
 | `params` | `any` | 是 | 业务参数对象。包含 `stream: boolean` 意图标记。 |
 | `clientId` | `string` | 否 | 客户端标识，用于 session 识别。由客户端传输层基类从 `fetchOptions.clientId` 自动注入到头 `rpc-client-id` 中，服务端 `toRpcRequest()` 从 header 解析并赋值到此字段。 |
-| `headers` | `Record<string, any>` | 否 | **标准 Header**：`rpc-timeout` (限时), `rpc-act` (动作), `rpc-priority` (优先级), `rpc-client-id` (客户端标识)。 |
-| `signal` | `AbortSignal` | 否 | 归一化取消信号，用于同步物理链路的中断状态。 |
+| `headers` | `Record<string, any>` | 是 | **标准 Header**（完整定义见 `RPC_HEADERS`）：`rpc-fn` (工具 id), `rpc-act` (动作), `rpc-res-id` (资源 id), `rpc-timeout` (限时), `req-id` (调用 id), `trace-id` (追踪), `rpc-retry-after` (轮询间隔), `rpc-client-id` (客户端标识)。**无 `rpc-priority` 头**（优先级未实现）。 |
+| `identity` | `RpcIdentity` | 否 | 服务端判定的身份（装了 `RpcIdentityPolicy` 才有）；业务侧只从 `ctx.identity` 读。 |
+| `raw` | `any` | 否 | 底座原生对象逃生口（HTTP 为 `{ _req, _res }`），调度器拆成 `ctx.req` / `ctx.reply`。 |
+
+> **取消信号不在 `ToolRpcRequest` 上**：`AbortSignal` 属于执行侧——`prepareContext()` 为每次调用新建
+> `AbortController`，把它的 `signal` 放进 `ToolRpcContext.signal`（兼容层再镜像成 `params._signal`）。
 
 ### 3.2 ToolRpcResponse (RPC 响应对象)
 
@@ -84,11 +91,13 @@
 | **200** | OK | 任务同步执行成功，或流式输出已成功启动。 |
 | **102** | Processing | 触发响应超时，且开启 `keepAliveOnTimeout`，任务转入后台继续执行。 |
 | **400** | Bad Request | **能力冲突**：请求流但工具不支持；或参数校验失败、协议格式非法。 |
+| **401** | Unauthenticated | 身份策略拒绝：凭证缺失或验不过（`RpcStatusCode.UNAUTHENTICATED`）。 |
 | **404** | Not Found | 找不到目标工具或请求的任务 ID 已失效/过期。 |
 | **408** | Terminated | **强制终止**：触及服务端硬死线（Hard Deadline），任务被强制中止。 |
 | **409** | Conflict | **ID 冲突**：`requestId` 已在账本中激活且尚未回收，拒绝重复提交。 |
 | **413** | Too Large | **实体过大**：请求体（Body）超过传输层设定的 `maxBodySize` 限制。 |
-| **504** | Gateway Timeout | **响应超时**：触及限时，且任务不具备后台维持能力。 |
+| **500** | Internal Error | 工具执行抛错（`RpcStatusCode.INTERNAL_ERROR`）。 |
+| **504** | Gateway Timeout | **响应超时**：触及限时，且任务不具备后台维持能力。注意硬死线的 `408 RpcError` 会被 `handleError()` 映射为 **504**（`status: 'timeout'`）；408 只出现在轮询路径。 |
 
 ### 3.3 RpcTaskRetention (结果保留策略)
 
@@ -98,7 +107,8 @@
 * **`Permanent` (-1)**: 永久保留，直到进程结束或手动删除。
 * **`Once` ('once')**: 保留至第一次成功的 `rpcTask.get` 后清理。
 * **`number` (ms)**: 任务完成后保留指定的毫秒数。
-* **配置对象**: 支持 `onceFallbackMs`（'once' 模式下的清理兜底，默认 1 小时）和 `maxRetentionMs`（全模式硬上限）。
+* **配置对象 `RpcTaskRetentionConfig`**: `{ mode, onceFallbackMs?, maxRetentionMs? }`——`mode` 必填（上面四种形式之一），
+  `onceFallbackMs` 是 'once' 模式下的清理兜底（默认 1 小时），`maxRetentionMs` 是全模式硬上限。
 
 ### 3.4 RpcError (标准错误类)
 
@@ -107,8 +117,8 @@
 * **构造函数**: `new RpcError(message, code: number = 500, status?: string, data?: any)`
 * **职责分工 (Status vs. Code)**：
   - **`code` (number)**: 唯一的数字错误码。若在 100-599 范围内，`Dispatcher` 会自动将其映射为响应顶层的 `status`。
-  - **`status` (string)**: 可选的语义化标识字符串（方案一）。如 `'teapot'`, `'missing_field'`。
-* **映射逻辑**：`Dispatcher.handleError` 会根据 `err.code` 自动推导响应的物理状态码，并透传 `err.status` (string) 和 `err.data` (方案三)。 |
+  - **`status` (string)**: 可选的语义化标识字符串。如 `'teapot'`, `'missing_field'`。
+* **映射逻辑**：`Dispatcher.handleError` 会根据 `err.code` 自动推导响应的物理状态码，并透传 `err.status` (string) 与 `err.data`。
 
 ---
 
@@ -125,7 +135,8 @@
 - **二级映射寻址算法**：
   1. **协议层注册 (Static)**：Scheme（如 `mailbox`）映射到具体类。支持多 Scheme 映射到单类。提供 `clearSchemes(scheme?)` 用于清空注册表，解决测试交叉污染。
   2. **动态解析器 (Resolvers)**：支持注册函数式解析器，在静态表未命中时动态返回实现类。
-  3. **实例层缓存 (Instance)**：按 `apiUrl` 的 Origin 路径缓存 Transport 物理实例，确保连接池隔离。
+  3. **实例层缓存 (Instance)**：以**完整 apiUrl 字符串**为 key 缓存 Transport 实例（`transports.set(apiUrl, inst)`）。
+     同 Origin 不同 path 不会自动复用客户端实例；物理底座共享是**服务端**侧靠 `getListenAddr()` + 路由表实现的。
 - **架构级策略校验 (`validateRpcRequest`)**：在调度前进行最终策略校验。包括 **SSRF 防御**（通过 `restrictedPatterns` 正则或字符串匹配）、协议白名单、工具访问权限控制。
 
 ### 4.2 RpcServerDispatcher (逻辑执行引擎)
@@ -166,9 +177,9 @@
 - **两级裁决逻辑**：
     1. **响应超时 (Soft Deadline)**：触发 `102`。
     2. **硬死线 (Hard Deadline)**：触及资源保护阈值。触发后立即调用 `AbortSignal.abort()`。
-- **延迟中止 (Termination Grace Period)**：支持 `terminationGracePeriod` 配置（默认 500ms）。
+- **延迟中止 (Termination Grace Period)**：支持 `dispatcher.terminationGraceMs` 配置（默认 `RPC_DEFAULTS.TERMINATION_GRACE_MS` = 500ms）。
   - 硬死线触发后，Guard 先触发信号中止以通知业务代码进行清理，并**延迟抛出 408 异常**，确保资源回收的平滑性。
-  - 在宽限期结束后，若任务仍未自行退出，调度层正式返回 `408 Terminated` 响应。 |
+  - 在宽限期结束后，若任务仍未自行退出，调度层正式返回 `408 Terminated` 响应（同步路径下会被 `handleError()` 映射为 504）。
 
 ### 4.5 物理复用与生命周期管理 (Lifecycle Management)
 
@@ -179,7 +190,6 @@ V2 架构通过 `IServerToolTransport` 的扩展接口实现了对底层物理�
   - **分发器重构**：物理请求入口 `handleIncomingHttpRequest` 统一采用静态方法实现，通过归一化物理地址 (`ListenAddr`) 检索 `Binding` 记录，消除实例绑定的不确定性。
 - **HTTP 物理复用与精准路由策略**：
   - `HttpServerToolTransport` 内部维护静态 `sharedServers` 池，键值映射通过归一化的物理监听地址 (`getListenAddr`) 实现。
-...
   - **地址归一化 (Normalization)**：自动将 `localhost` 等回环地址统一处理，确保同一物理端口仅开启一个 `http.Server`，最大限度实现资源共享。
   - **引用计数 (Ref Counting)**：通过计数器追踪物理 Server 的逻辑持有者数量。当最后一个逻辑 Transport 实例调用 `stop()` 时，物理底座自动回收并安全关闭监听端口。
   - **路由分发逻辑 (Routing)**：物理端口接收到请求后，采用 **“最长前缀匹配” (Longest Prefix Match)** 算法扫描逻辑实例。
@@ -204,14 +214,14 @@ V2 架构通过 `IServerToolTransport` 的扩展接口实现了对底层物理�
 
 ### 5.2 流式观测器与生命周期闭环 (Streaming Lifecycle)
 
-- **传输层能力预检 (Transport Capability Check)**：
-  - `IServerToolTransport` 接口新增 `canStream` 属性。
+- **传输层能力判定 (Transport Capability Check)**：
+  - `IServerToolTransport` 接口新增 `canStream` 属性（基类默认 `false`，HTTP 服务端置 `true`）。
   - **拦截规则**：在 `processIncomingCall` 管线中，若工具返回 `ReadableStream` 但当前传输协议不支持流式搬运（如 Mailbox），系统将自动降级响应为 `400 Bad Request`，并提示协议能力冲突，防止非法序列化操作。
-- **全生命周期监控**：利用 **`TransformStream`** (Web Standard) 在 `Dispatcher` 层包装返回流。
-...
-  - **`flush` 钩子**：流正常结束时，调用 `handle.markStreamFinished()`。
-  - **`cancel` 钩子**：流被下游取消时，自动触发任务状态的终结与资源清理。
-- **重组技术规范**：`RpcStreamReassembler` 必须具备基于 **`sequenceNumber` 的顺序重排能力**，并实现基于流量反馈的 **背压 (Backpressure)** 控制。
+  - 注意这是 **dispatch 之后的后置判定**（`server.ts` 在拿到 `rpcRes` 后才查 `canStream`）：工具已经执行、流已经产生，只是不外发。能力也是服务端单方面声明，协议两侧没有握手。
+- **全生命周期监控**：利用 **`TransformStream`** (Web Standard) 在 `Dispatcher` 层包装返回流（`pipeThrough`）。
+  - **只有一个收尾钩子 `onClose(status, reason)`**（由 `@isdk/tool-func` 的 `createCallbacksTransformer` 提供），`status` 取 `'final' | 'error' | 'cancel'`：三种收尾路径全部汇到同一处，里面调 `handle.markStreamFinished()` 并按 `retention` 判定是否从 Tracker 除名。
+  - **没有独立的 `flush` / `cancel` 钩子**：`TransformStream` 本身无 cancel 钩子，第三个参数按规范只读 `highWaterMark`/`size`，且 `flush` 在 cancel 时不跑。客户端侧的取消感知靠自建 `ReadableStream` 的 `underlyingSource.cancel`（`http-client.ts` 的 `cancelAware`）；HTTP 服务端侧靠物理连接的 `close`。
+- **分片与重组（未实现，已拆出）**：分片序号重排与 RPC 层背压反馈属于 `RpcStreamReassembler` 的提案范围，**代码里不存在**（流以单条物理通道直传，无分片序号，背压只靠 Web/Node 流自身队列）。规格与开放问题见 `RFC_STREAM_REASSEMBLY.cn.md`，追踪条目见 `TODO.md`「流式（streaming）」。本节其余条目均为已落地实现。
 
 ---
 
@@ -246,25 +256,18 @@ export abstract class ServerToolTransport extends ToolTransport {
 
 ### 6.2 客户端：中间态轮询 (RpcInterimHandler)
 
+实际实现（`ClientToolTransport.executeWithPolling()` / `pollTaskStatus()`）不是递归 `handleInterim`，而是循环 + 轮询内置工具：
+
 ```typescript
-async handleInterim(response: ToolRpcResponse, originalRequest: ToolRpcRequest) {
-  if (response.status === 102) {
-    // 按照服务端建议的 retry-after 间隔进行退避
-    const waitTime = response.headers['rpc-retry-after'] || 5000;
-    await sleep(waitTime);
-
-    // 构造显式的状态查询请求 (rpc-act: status)，保证非幂等安全
-    const pollRequest = {
-      ...originalRequest,
-      headers: { ...originalRequest.headers, 'rpc-act': 'status' }
-    };
-
-    // 通过物理传输层发送查询，并递归处理后续状态
-    const nextResponse = await this.poll(pollRequest);
-    return this.handleInterim(nextResponse, originalRequest);
-  }
-  return response;
-}
+// 1) 首次调用拿到 102 后，按 rpc-retry-after 退避（默认 RPC_DEFAULTS.RETRY_AFTER_MS = 1000ms）
+// 2) 轮询不是给原工具发 `rpc-act: status`，而是**改寻址到内置 `rpcTask` 工具**：
+pollHeaders[RPC_HEADERS.TOOL_ID] = 'rpcTask';
+pollHeaders[RPC_HEADERS.ACT]     = parentFetchOptions.act || 'get';   // 取消时是 '$cancel'
+pollHeaders[RPC_HEADERS.RES_ID]  = taskId;                            // 原调用的 requestId
+pollHeaders[RPC_HEADERS.REQUEST_ID] = 'poll-' + ...;                  // 每次轮询用全新 req-id
+pollHeaders 删除 RPC_HEADERS.TIMEOUT;                                 // 轮询不受原死线约束
+// 3) 本地 signal 触发时，fire-and-forget 发一次 act: '$cancel' 通知服务端注销后台任务
+// 4) 循环直到状态不再是 102（完成返回结果，失败则抛错）
 ```
 
 ---

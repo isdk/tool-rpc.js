@@ -69,24 +69,32 @@ export interface RemoteFuncItem extends BaseFuncItem {
 
 ## 4. 执行与优先级逻辑 (Execution & Priority)
 
-### 4.1 优先级协商
+### 4.1 优先级协商（实现现状）
 
-当发起一个 RPC 调用时，最终生效的超时时间取以下各方的**最小值**：
+死线分**两段**协商，不是四方取 min：
 
-1. **客户端全局默认值** (Client Global Default)
-2. **工具元数据建议值** (Tool Metadata / Discovery)
-3. **调用时手动指定的参数** (Manual Call Options)
-4. **服务端硬性限制** (Server Hard Limit)
+1. **客户端**（`ClientToolTransport.fetch()`）：在“调用时手动指定的 `timeout`”与“工具元数据 `timeout`”之间取**较小值**；
+   只有一个存在就用那一个。`streamIdleTimeout` 同理。结果通过 `rpc-timeout` 头发出。
+2. **服务端**（`RpcServerDispatcher.prepareContext()`）：`header 值 || 工具元数据 timeout || dispatcher.globalTimeout`（默认 30000ms）。
+   注意这里是**优先级回退**而非取小：header 一旦存在就直接采用（它已经是客户端算好的 min）。
+
+另有两个与工具元数据无关的全局护栏：`dispatcher.globalTimeout`（兵底硬超时）与
+`dispatcher.maxTaskRuntimeMs`（默认 1 小时，后台任务的绝对运行上限）。
 
 ### 4.2 传输层协议约定 (Transport Headers)
 
-- **标准 Header (V2)**:
+- **标准 Header (V2)**（完整定义见 `src/transports/models.ts` 的 `RPC_HEADERS`）:
   - `rpc-timeout`: 客户端告知其最终确定的等待时长 (单位: ms)。
-  - `rpc-request-id`: 本次调用的唯一标识。在触发 102 状态后，用于后续的状态轮询。
-  - `rpc-trace-id`: 全链路追踪 ID，用于跨服务日志关联。
+  - `req-id`: 本次调用的唯一标识（**不是** `rpc-request-id`）。在触发 102 状态后用于后续状态轮询；响应必须回显。
+  - `trace-id`: 全链路追踪 ID（**不是** `rpc-trace-id`），用于跨服务日志关联。
+  - `rpc-fn` / `rpc-act` / `rpc-res-id`: 工具 id / 动作 / 资源 id。
+  - `rpc-retry-after`: 102 响应里的轮询退避间隔（默认 `RPC_DEFAULTS.RETRY_AFTER_MS` = 1000ms）。
+  - `rpc-client-id`: 客户端自报标识。
 - **状态码 (V2)**:
   - **102 Processing**: **软死线 (Soft Deadline) 触发**。服务端响应超时，但任务已转入后台继续运行。客户端应根据 `Retry-After` 头进行轮询。
   - **408 Terminated**: **硬死线 (Hard Deadline) 触发**。任务运行时间超过服务端设定的物理上限（如 `maxTaskRuntimeMs`），被强制终止。
+    **注意区分两条路径**：同步调用里硬死线会被 `handleError()` 再映射为 **504**（`status: 'timeout'`）；
+    408 只出现在**轮询路径**（`rpcTask.get` 读到 `aborted` 任务）和账本内部的 `RpcError` 上。
   - **409 Conflict**: `requestId` 冲突。表示该 ID 的任务已在账本中激活。
   - **504 Gateway Timeout**: 客户端等待超时，且任务不具备后台维持能力。
   - **错误负载**: 返回标准响应对象 `{ status: 504, error: { code: 504, message: 'TIMEOUT', ... } }`。
@@ -102,7 +110,9 @@ export interface RemoteFuncItem extends BaseFuncItem {
 
 ### 5.2 物理与逻辑中止联动 (V2)
 
-- **物理中止**: 当物理链路断开（如 TCP Reset）时，服务端的 `HttpServerToolTransport` 应感知此事件并调用 `context.abort()`，从而中止关联的本地任务。
+- **物理中止**: 当物理链路断开（如 TCP Reset）时，服务端的 `HttpServerToolTransport` 监听 `rawRes` 的 `close` 事件，
+  通过 `dispatcher.tracker.get(requestId)` 拿到账本句柄并调 `handle.abort('Physical connection closed')`（内部即
+  `aborter.abort(reason)`，会反映到 `ctx.signal`），从而中止关联的本地任务。
 - **逻辑中止**:
   - **客户端取消**: 当用户在客户端触发 `AbortSignal` 时：
     1. 传输层立即尝试物理切断当前连接。
@@ -123,13 +133,17 @@ export interface RemoteFuncItem extends BaseFuncItem {
 
 ### 6.1 传输层接入要求（适用于所有传输层）
 
-超时与流语义由 `RpcServerDispatcher` 统一实现，因此**任何服务端传输层必须把入站请求交给 `manager.processIncomingCall()`**，而不是自己调 `dispatcher.dispatch()`。这一层差异不是风格问题：
+超时与流语义由 `RpcServerDispatcher` 统一实现，因此**自定义服务端传输层应继承 `ServerToolTransport` 并复用它的 `processIncomingCall(rawReq, rawRes, registry?)`**（`src/transports/server.ts`，`protected`），而不是自己直接调 `dispatcher.dispatch()`。这一层差异不是风格问题：
 
 | 经由 `processIncomingCall` | 自己 `dispatch` 会跳过 |
 | --- | --- |
-| `manager.validateRpcRequest()`（SSRF / 协议白名单 / 工具访问权限） | 架构级策略校验全部失效 |
-| `dispatcher.canStream()` 预检 | 流式意图与工具 `stream` 能力冲突时不会返回 `400`，而是进入 dispatch 后报 `500` |
-| 错误归一化为 `ToolRpcResponse` | 需自行实现错误体映射，容易不一致 |
+| 身份策略判定（`identity`）与 `manager.validateRpcRequest()`（SSRF / 协议白名单） | 架构级策略校验全部失效 |
+| `requestRegistry()` 分层注册表视图（前缀 claim → transport → dispatcher → 系统） | 多前缀多注册表时工具解错、串注册表 |
+| 传输层 `canStream` 能力后置检查（返回 400） | 不支持流的传输把流当普通对象序列化 |
+| 错误归一化为 `ToolRpcResponse`（顶级防护） | 需自行实现错误体映射，容易不一致 |
+
+> 流式意图与工具 `stream` 能力的冲突预检在 **dispatcher** 里（`resolveTool()` 中 `params.stream && !tool.stream` → 400），
+> 与传输层的 `canStream` 后置检查（`server.ts`，工具返回流但协议不支持 → 400）是两个不同的关卡。
 
 流式传输层还需在 `start()` 里挂上 `streamIdleTimeout`（首字节与相邻 chunk 间隔），并在 `stop()` 里销毁尚未结束的流（否则空闲流会泄漏）。参考实现：`HttpServerToolTransport`（`src/transports/http-server.ts`）。
 

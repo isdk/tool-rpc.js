@@ -14,7 +14,7 @@
 - **🌐 RESTful 接口:** 使用 `ResServerTools` 快速创建符合 REST 风格的 API，自动处理 `get`, `list`, `post`, `put`, `delete` 等标准操作。
 - **🔧 RPC 方法分组:** 使用 `RpcMethodsServerTool` 将多个相关函数（方法）捆绑在单个工具下，通过 `act` 参数进行调用。
 - **🔌 客户端自动代理:** 客户端 (`ClientTools` 及其子类) 能从服务器自动加载工具定义，并动态生成类型安全的代理函数。
-- **🌐 浏览器兼容 (`@isdk/tool-rpc/browser`):** 独立的浏览器入口，包含客户端模块、抽象服务端类（`ServerTools`、`RpcMethodsServerTool`、`ResServerTools`）和完整的传输基础设施（`RpcServerDispatcher`、`RpcTransportManager`、`RpcActiveTaskTracker` 等）。仅排除 Node.js 特有的服务端传输层（`HttpServerToolTransport`、`MailboxServerTransport`）。
+- **🌐 浏览器兼容 (`@isdk/tool-rpc/browser`):** 独立的浏览器入口，包含客户端模块、抽象服务端类（`ServerTools`、`RpcMethodsServerTool`、`ResServerTools`）和完整的传输基础设施（`RpcServerDispatcher`、`RpcTransportManager`、`RpcActiveTaskTracker` 等）。它排除需要 Node 运行时或原生模块的传输层：`HttpServerToolTransport`、`MailboxServerTransport` 与 `MailboxClientTransport`。
 - **🚀 多实例并行隔离:** 支持在单个进程中运行多个具有不同 `apiUrl` 的传输实例，彻底消除全局状态冲突。
 - **🛡️ 执行死线守卫:** 集成两级超时管理（软/硬死线）以及物理链路与逻辑执行的中止联动。
 - **🚀 内置 HTTP & Mailbox 传输:**
@@ -173,15 +173,18 @@ main();
 
 为了确保客户端在自动发现（Discovery）阶段加载到的是精准且协议匹配的工具定义，项目实现了一套**基于层级的发现隔离机制**。
 
-* **隔离算法**：`toJSON()` 方法在遍历注册表时，会执行三重校验：
-    1. **类型检查**：`item instanceof this` 确保工具属于当前层级或其子层级。
-    2. **协议引用检查**：校验 `item.constructor.toJSON === this.toJSON`。这确保了如果一个子类（如 `RpcMethodsServerTool`）为了实现更复杂的协议而重写了 `toJSON`，那么它的实例将不会被父类（如 `ServerTools`）导出，从而避免基础客户端加载到无法处理的复杂工具。
-    3. **显示标记检查**：`item.isApi !== false`。
+* **隔离算法**：`toJSON()` **只定义一处**——`ServerTools`（`src/server-tools.ts`）；子类不重写，继承过去，变的只是 `this` 是哪个类。它遍历 `this.items`，两个分支任一命中就保留该条目：
+    1. **类型检查**：`item instanceof this && item.isApi !== false`。`instanceof` 只沿继承链向下成立，所以这条只产生**向上隔离**：在子类上调它，会排除父类的实例；在父类上调它，**不会**排除子类的实例。
+    2. **基础 `ToolFunc` 检查**：`item.isApi && !(item instanceof ServerTools) && this === ServerTools`——没经由 `ServerTools` 子类注册的裸 `ToolFunc`，只有从 `ServerTools` 本身才列得出来，且必须自己标 `isApi: true` 才 opt-in。
 
-* **各层级导出范围**：
-  * **`ServerTools.toJSON()`**：仅导出直接属于 `ServerTools` 的实例，以及标记为 `isApi: true` 的基础 `ToolFunc`。它**绝对不会**导出 RPC 或 Resource 类型的工具。
-  * **`RpcMethodsServerTool.toJSON()`**：导出所有 RPC 类型的工具。由于层级向下兼容，它**包含**其子类 `ResServerTools` 的实例。
-  * **`ResServerTools.toJSON()`**：实现向上隔离，仅导出 Resource 类型的工具，不包含父类 `RpcMethodsServerTool` 的通用 RPC 方法。
+  未设 `allowExportFunc` 的条目走工具自己的 `toJSON()`，并删掉 `func`。
+
+* **各层级导出范围**（实测：同一份注册表里有 `ping`（ServerTools）、`userService`（RpcMethodsServerTool）、`users`（ResServerTools））：
+  * **`ServerTools.toJSON()`** → `ping`、`userService`、`users`。子类实例同样 `instanceof ServerTools`，所以父类清单**会**包含 RPC 与 Resource 工具。
+  * **`RpcMethodsServerTool.toJSON()`** → `userService`、`users`。排除了裸 `ServerTools` 实例，保留自己的子类（向下兼容）。
+  * **`ResServerTools.toJSON()`** → 只有 `users`。这才是该机制真正提供的向上隔离。
+
+* **调哪个类之外，遍历哪份注册表同样重要**：`toJSON()` 读的是 `this.items`，所以调过 `isolateRegistry()` 的子类只看得到自己那一层。同理，把裸 `items` 对象交给 dispatcher（`new RpcServerDispatcher({ registry: ServerTools.items })`）而不是容器类，这层过滤就整个跳过——对象里每个条目都会列出（各自仍走自己的 `toJSON()`）。要按层级过滤就传容器类，要不分层级全量列出就传 `items`。
 
 * **`isApi` 的默认行为准则**：
   * **对于派生自 `ServerTools` 的业务类实例**：由于其设计初衷就是为了远程暴露，因此默认**自动导出**。除非开发者显式设置 `isApi: false` 来实现“包内可见”逻辑。
@@ -295,6 +298,16 @@ V2 架构引入了**影子实例**机制，彻底解决了异步环境下的 `th
 
 `@isdk/tool-rpc` 特别针对分布式 AI 代理场景优化了超时控制，遵循“最小超时原则”。
 
+“最小超时原则”具体分两段：
+
+1. **客户端**（`ClientToolTransport.fetch()`）：若调用方传了 `timeout` 且工具元数据也有 `timeout`，取两者中较小值；
+   只有一个存在就用那一个。结果通过 `rpc-timeout` 头发给服务端。
+2. **服务端**（`RpcServerDispatcher`）：优先用 header 里的值；没有则用工具自身的 `timeout`；都没有则用
+   dispatcher 的 `globalTimeout`（默认 `30000` ms）。
+
+开了 `keepAliveOnTimeout: true` 时，这个死线是**软死线**（任务转后台，客户端收到 `102 Processing`）；
+否则是**硬死线**（中止任务并返回 `408`）。
+
 ### 1. 配置格式
 
 `timeout` 属性支持简写和详写：
@@ -321,7 +334,8 @@ V2 架构引入了**影子实例**机制，彻底解决了异步环境下的 `th
 在工具内部，请通过 `this.ctx` 访问执行环境信息，而不是将环境参数混入业务 `params`：
 
 - `this.ctx.signal`: 自动注入的 `AbortSignal`。
-- `this.ctx._req` / `this.ctx._res`: 原始传输层请求/响应对象。
+- `this.ctx.req` / `this.ctx.reply`: 原始传输层请求/响应对象（仅 Node `http` 传输会填充；信箱与内存传输下为 `undefined`）。
+- `this.ctx.requestId` / `this.ctx.traceId` / `this.ctx.registry`: 本次调用 ID、链路追踪 ID，以及本次工具解析所用的注册表。
 - 自定义字段: 如 `traceId` 或 `userId`。
 
 ### 2. .with(ctx) 链式调用
@@ -354,7 +368,7 @@ await runner.run(params);
 
 - **`ClientTools`**:
   - **概念**: 服务器上 `ServerTools` 的客户端代理。
-  - **工作原理**: `client.init()` 后，它会创建一个名为 `ping` 的 `ClientTools` 实例。当您调用 `ToolFunc.run('ping')` 时，它会通过网络将请求发送到服务器。
+  - **工作原理**: `ClientTools.loadFrom(undefined, { apiUrl })` 拉回服务端工具清单后，客户端注册表里就有了一个名为 `ping` 的 `ClientTools` 实例。当您调用 `ToolFunc.run('ping', params)`（或 `ClientTools.get('ping').run(params)`）时，它会通过网络将请求发送到服务器。
 
 ### 第 2 层：`RpcMethodsServerTool` / `RpcMethodsClientTool` - 面向对象的服务
 
@@ -470,10 +484,11 @@ const result = await greet.run({ name: '浏览器' })
 |------|----------------------------|-----------------------------------|
 | 管理器 | `RpcTransportManager` (完整版，含服务端生命周期) | `RpcTransportManager` + `RpcClientTransportManager` |
 | 服务端传输 | `HttpServerToolTransport`, `MailboxServerTransport` | 不包含 ❌ |
+| 信箱客户端 | `MailboxClientTransport` | 不包含 ❌（依赖 `@mboxlabs/mailbox`） |
 | 抽象服务端类 | `ServerTools`, `RpcMethodsServerTool`, `ResServerTools` | 全部包含 ✅ |
 | 传输基础设施 | `RpcServerDispatcher`, `RpcActiveTaskTracker`, `RpcDeadlineGuard` | 全部包含 ✅ |
 | UUID 生成 | 通过 `@isdk/hash` (跨平台) | 通过 `@isdk/hash` (跨平台) |
-| 包体积 | 较大 (包含 Node.js 服务端传输) | 更小 (排除 Node-`http`/`mailbox` 传输)
+| 包体积 | 较大 (包含 Node.js 服务端传输) | 更小 (排除 Node-`http`/`mailbox` 传输) |
 
 ### 打包工具自动解析
 
@@ -496,7 +511,7 @@ import { ClientTools } from '@isdk/tool-rpc'
 
 该架构围绕几个关键接口构建：
 
-- **`IToolTransport`**: 所有传输的通用基础接口，定义了 `mount`（挂载）等基本操作。
+- **`IToolTransport`**: 所有传输的通用基础接口（`src/transports/base.ts`）：`apiUrl`（寻址基准）、`options`，以及可选生命周期钩子 `start()` / `stop()` / `close()`。`mount()` **不在**该接口中——它属于 `ClientToolTransport`，且已标 `@deprecated`（仅用于把 `apiUrl` 复制到工具类上）。
 - **`IServerToolTransport`**: 服务器端传输必须实现的接口。其核心职责是：
     1. **暴露发现端点**: 列出工具的路由（通常为 `GET /api`）由框架内置的 `rpcApis` 工具回答，每个被声明的前缀会自动登记它。它是一个普通工具：与业务调用走同一条身份/校验/超时流水线，且列的是**命中前缀**所绑定的注册表。`addDiscoveryHandler(apiUrl, handler)` 已标 **@deprecated**——它只覆盖该前缀的清单内容，首次调用会打一次迁移提示（进程级，不刷屏）。只有需要自定义清单时才保留它（或自己注册一个工具再 `addRoute(apiUrl, { path: '/', when: { method: 'GET' }, toolId: 'myListing' })`）。
     2. **处理 RPC 调用**: 创建一个通用的 RPC 路由（例如 `/api/:toolId`），它接收请求，根据 `toolId` 查找对应的工具，执行它，然后返回结果。这是通过 `addRpcHandler` 方法实现的。
@@ -521,7 +536,10 @@ import { ClientTools } from '@isdk/tool-rpc'
 
 - **`HttpClientToolTransport` (HTTP 客户端)**: 基于跨平台 `fetch` API。V2 版本支持对后台任务的自动状态轮询。
 
-- **`Mailbox Transports` (信箱传输)**: 原生支持内部分布式信箱协议。
+- **`Mailbox Transports` (信箱传输)**: 原生支持内部分布式信箱协议（`MailboxClientTransport` / `MailboxServerTransport`）。
+  `@mboxlabs/mailbox` 是本包的普通 dependency（会随安装带入），但只有用到信箱传输时才会真正加载；
+  两个信箱传输均**不在浏览器入口**中。客户端必须传 `clientAddress`（收件箱），且不能走 `bindScheme` 自动构造
+  （它的构造签名是单个 options 对象），需先 `new` 再 `RpcClientTransportManager.instance.register(transport)`。
   - **特点**: 适用于跨进程或跨线程通信，天然具备物理隔离性。
   - **优势**: 在无需 HTTP Stack 的场景下提供高性能的工具调用能力。
 
@@ -532,7 +550,7 @@ import { ClientTools } from '@isdk/tool-rpc'
 **集成 Fastify 框架的思路**：
 
 1. 创建一个 `FastifyServerTransport` 类并实现 `IServerToolTransport`。
-2. 在 `mount` 方法中，您不再创建新的 `http` 服务器，而是接收一个现有的 `FastifyInstance` 作为选项。
+2. 在构造函数（以及 `_start()`）中，您不再创建新的 `http` 服务器，而是接收一个现有的 `FastifyInstance` 作为选项。
 3. 读 `transport.getRouteTable()` 并逐条原生注册（`fastify.get(prefix + path, ...)`）——内置发现端点就是其中一行，所以不需要手写 `ServerTools.toJSON()` 的处理器。
 4. 使用 `fastify.all(apiPrefix + '/:toolId', ...)` 来注册 RPC 路由，其处理器从 `request.body` 或 `request.query` 中提取参数，调用相应的工具，然后使用 `reply` 发送响应。
 5. `start` 和 `stop` 方法可以委托给 Fastify 实例的 `listen` 和 `close`。

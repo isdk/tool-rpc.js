@@ -84,7 +84,8 @@ export interface RpcIdentityContext<Req = any, Res = any> {
   apiUrl?: string;
   /**
    * 本次调用的寻址结果（transport 已解析）：工具 id / 动作 / 资源 id。
-   * 内置发现端点也有工具 id（`rpcApis`，见 §17），所以这里不会是 undefined。
+   * 内置发现端点也有工具 id（`rpcApis`，见 §17），所以不需要为它开例外。
+   * 但它是**可选字段**：路由未命中任何条目时就是 `undefined`（工具不存在由 dispatcher 报 404）。
    */
   toolId?: string;
   act?: string;
