@@ -210,9 +210,11 @@ await manager.stopAll();
 
 ## 8. 传输层实现细节
 
-### 8.0 传输层基座 API：只有两个文件
+### 8.0 传输层 helper：只有两个文件
 
-本节说的「基座」是**传输层的监听底座**（与 `ServerTools` / `RpcMethodsServerTool` 那些工具基类无关）。写一个新 transport 时，可复用的传输层基座 API 只有两个文件，各回答一个问题：
+本节说的是**传输层 helper**：写 transport 时可复用的纯函数规则库（与 `ServerTools` / `RpcMethodsServerTool` 那些工具基类无关，也与**监听底座本身**无关——那是下一节的事）。写一个新 transport 时，可复用的传输层 helper 只有两个文件，各回答一个问题：
+
+> 本节旧称「传输层基座 API」，已改称 **helper**；分层与用词见 `CONTRIBUTING.md` 的「本包的分层」。
 
 | 文件 | 回答 | 适用于 |
 |---|---|---|
@@ -221,13 +223,13 @@ await manager.stopAll();
 
 - **名字里的 socket 指「监听底座」**（TCP socket 或 unix socket 文件），不是「只能 unix」：HTTP 只是同一个底座的其中一个写法家族。
 - **监听前后两个时刻不可合并**：`socketAddressFromBind()` 在 listen **前**推声明地址（`port: 0` 时端口是假的）；listen **后**要把内核观测值过 `socketAddressFromListen()`（本包的 HTTP 拿的是 Node `server.address()`；外部包 `@isdk/tool-rpc-fastify` 拿的是 Fastify `listen()` 的返回值，形状不同，由同一个函数区分）。两边必须算出同一个字符串，否则同一个 socket 在池里会有两个 key。
-- **物理底座不在基座 API 里**：`sharedServers` 池 / refCount / 最长前缀分发表属于 `http-server.ts`。基座 API 只处理字符串与参数，不碰监听对象。
-- **L0 不读 bind**：`ServerToolTransport.start(options?)` 只 `return this._start(options)`，基类从不读任何字段，`getListenAddr()` 是不透明字符串。所以基座 API 是**可选规则库**：mailbox transport 读 `options?.address`（总线名）、electron 的 `_start()` 无参，两者都不碰 `socket-address.ts`。`defaultBindOptions()` 也不在基类，只有监听 TCP/unix 的 transport 各自定义。
+- **物理底座不在 helper 里**：`sharedServers` 池 / refCount / 最长前缀分发表属于 `http-server.ts`。helper 只处理字符串与参数，不碰监听对象。
+- **L0 不读 bind**：`ServerToolTransport.start(options?)`（`src/transports/server.ts:149`）只做三件事：把 `this.options` 深合并进参数、按当前地址 `registerRoutes()`、`return this._start(options)`。基类从不读 bind 字段去算地址，`getListenAddr()` 对它只是个不透明值。所以 helper 是**可选规则库**：mailbox transport 读 `options?.address`（总线名）、electron 的 `_start()` 无参，两者都不碰 `socket-address.ts`。`defaultBindOptions()` 也不在基类，只有监听 TCP/unix 的 transport 各自定义。
 - **为什么 `BindOptions` 不单独成文件**：`BindOptions`（调用方声明这一轮怎么监听）与 `socket-address.ts`（这一轮落在哪个地址）是同一件事的两半，`socketAddressFromBind()` 就是从前者算后者。拆开就会两边各读一遍 bind，声明地址与真实监听就会错开。
 
 #### 参考实现：本库自带的 transport
 
-本包自带的物理 transport 都是最基础的那几个，它们就是 transport 开发者的**参考实现**：同一个规则只写一处、地址只从基座 API 算、物理底座自己拥有。
+本包自带的物理 transport 都是最基础的那几个，它们就是 transport 开发者的**参考实现**：同一个规则只写一处、地址只从 helper 算、物理底座自己拥有。
 
 | transport | 底座 | 参考什么 |
 |---|---|---|
@@ -249,7 +251,7 @@ await manager.stopAll();
 | `stop()` 必须注销路由归属（`unregisterRoutes()`） | mailbox 侧 stop 后地址永久占位，下一个实例 `registerServer` 必报 `Routing Conflict` | `mailbox-server.test.ts`、`routing-regressions.test.ts` P12 |
 | 路由前缀归一化只从 `route-path.ts`（基类 `toPathname`）走，不在子类里另写一份 | mailbox 自写 `extractPath`，`new URL` 失败就退回 `'/'`：裸前缀声明全塌成根，`/y` 与 `/z` 被当成重复声明拒掉 | `mailbox-transport.test.ts`、`mailbox-server.test.ts` |
 
-> **Fastify 不在本包里。** `FastifyServerToolTransport` 属于**另一个仓库、另一个包** `@isdk/tool-rpc-fastify`（不是本库内置插件）。本包文档不描述它的实现细节，只保证基座 API 两边共用同一份；fastify 侧的约定（自己的观测形状、`defaultBindOptions()`、共享同一个 fastify 实例）写在 `tool-rpc-fastify` 自己的 README 里。
+> **Fastify 不在本包里。** `FastifyServerToolTransport` 属于**另一个仓库、另一个包** `@isdk/tool-rpc-fastify`（不是本库内置插件）。本包文档不描述它的实现细节，只保证 helper 两边共用同一份；fastify 侧的约定（自己的观测形状、`defaultBindOptions()`、共享同一个 fastify 实例）写在 `tool-rpc-fastify` 自己的 README 里。
 
 #### 公开面判据：下游在用，或插件契约
 
@@ -292,9 +294,9 @@ grep -rn '\b符号名\b' ../tool-rpc-fastify/src ../tool-electron/src ../ai-tool
 *   **元数据注入**：自动在 context 中注入 `x-mailbox-from/to` 等追踪头信息，增强全链路观测性。
 *   **信号联动**：支持 `push` (订阅) 和 `pull` (轮询) 两种模式，适配不同的信箱底座。一个地址上两者**只能选一种**：memory provider 的 `publish()` 以前既投递给监听器又入队，而 push 消费者从不 dequeue —— 队列按调用次数永久堆积，重新 `start()` 时 `drainBacklog()` 还会把已处理过的请求再执行一遍（副作用重复）。现在 provider 侧有 push 订阅者就只走 push；契约钉在 `mailbox/src/mailbox.test.ts` 与 `mailbox-transport.test.ts`（「push 模式不重复记账」）。注意 `MemoryEventBus` 是进程内单例，topic 跨 `Mailbox` 实例共享，测试里地址必须唯一。
 
-### 8.3 基座地址不变量（写 transport 要守的规则）
+### 8.3 监听地址不变量（写 transport 要守的规则）
 
-服务端 transport 只有一个地址概念：`getListenAddr()` —— 别人访问本服务用的地址。框架把它当**不透明字符串**：只用作底座池 key、路由归属表 key、分发 key 与日志，不解析、不校验、不预测 bind 冲突。
+服务端 transport 只有一个地址概念：`getListenAddr()` —— 别人访问本服务用的地址。框架把它当**不透明字符串**：只用作底座池 key、路由归属表 key、分发 key 与日志，不解析、不校验、不预测 bind 冲突。签名是 `string | string[]`（`src/transports/server.ts:106`）：一个实例同时监听多个地址就报多个，Manager 在 `src/transports/server-manager.ts:99-100` 摊平成逐地址登记，仍然一个字符串一个 key。
 
 - 地址语义（host/port/socket、回环写法、默认端口、监听之后补真实端口）归按 scheme 分派到的那个 transport 自己管；HTTP 家族那套在 `socket-address.ts`。插件只需覆写 `getListenAddr()` 返回一个字符串（`unix:/run/ai.sock`、`mem://bus-a`）。
 - 基类默认返回 `apiUrl` 原值。覆写后报什么就是什么：两个 transport 报的字符串**相等就复用同一个底座**，**不相等就各自 `listen()`**，真撞了由内核报 `EADDRINUSE`（fail fast，不误报也不漏报）。**不做包含关系预测**（不把 `0.0.0.0:3000` 视为覆盖 `localhost:3000`）：那种关系非传递（会漏报），又会把不同 host 同端口塌成一个底座（误报、vhost 判死）。

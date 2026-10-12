@@ -90,7 +90,7 @@ const EXPECTED_SERVER_TYPES = [
 ]
 
 // 地址工具对外只导出两类：实测有下游消费者的（grep 得到），以及第三方 transport
-// 写插件时要用的契约（grep 不到，但文档承诺了）。判据见 CONTRIBUTING.md 的
+// 写插件时要用的契约（grep 不到，但文档承诺了）。判据见 `src/transports/README.cn.md` 的
 // 「公开面判据」；名单在 transports/index.ts 与 transports/browser.ts 里是显式的。
 // 下游消费者只有 tool-rpc-fastify：它用 socketAddressFromBind / socketAddressFromListen /
 // normalizeListenBind / BindOptions。

@@ -10,15 +10,50 @@ Please feel free to file GitHub Issues or propose Pull Requests. We're always ha
 |---|---|---|
 | `README.md` / `README.cn.md` | 使用者 | 安装、快速开始、工具注册与隔离模型、超时策略、常见误区 |
 | `ARCHITECTURE.cn.md` | 想理解整体设计的人 | 容器 / 业务 / 隔离的分层抽象与为什么这样设计 |
-| `src/transports/README.cn.md` | **transport 开发者** | 传输层全部细节：请求归一化、调度、任务保留、**传输层基座 API（`route-path.ts` / `socket-address.ts`）**、地址不变量、自带 transport 作为参考实现、transport 测试坑 |
+| `src/transports/README.cn.md` | **transport 开发者** | 传输层全部细节：请求归一化、调度、任务保留、**传输层 helper（`route-path.ts` / `socket-address.ts`）**、地址不变量、自带 transport 作为参考实现、transport 测试坑 |
 | `mailbox-tool-rpc-integration.md` | 信箱底座相关 | mailbox 协议与其和 RPC 的集成 |
 | `AGENT.md` | 给 agent / 工具目录用 | 本包作为工具暴露的面 |
+| `CONTRIBUTING.md`（本文） | 贡献者 | 本地检查、测试写法、**命名判据**、改公开面的流程、发布 |
 | `docs/api/**` | 使用者 | **自动生成**（typedoc，由 `release` 重生成），不要手改 |
 | `CHANGELOG.md` | 使用者 | **自动生成**（`standard-version`），不要手改 |
 
-「基座 API」这个词只用在**传输层监听底座**上（`src/transports/`）。工具基类（`ServerTools`、`RpcMethodsServerTool`、`ResServerTools`）是另一套东西，不要混称——它们的内容在 `src/transports/README.cn.md` 的工具类继承体系一节与顶层 README。
+### 本包的分层（新符号先归层，再起名）
+
+本包的公开面按**它回答什么问题**分五层。归层先于命名：层定错了，名字再准也会把人引到错的目录。
+
+| 层 | 回答 | 公开符号 |
+|---|---|---|
+| **服务类**（工具容器，业务侧） | 一个工具 / 一组工具怎么定义 | `ServerTools` / `ClientTools`、`RpcMethodsServerTool` / `RpcMethodsClientTool`、`ResServerTools` / `ResClientTools` |
+| **服务端运行时**（调度与生命周期） | 一次调用怎么被找到、计时、取消、记账 | `RpcServerDispatcher`、`RpcActiveTaskTracker` / `RpcActiveTaskHandle`、`RpcDeadlineGuard`、`RpcTransportManager` / `RpcClientTransportManager` |
+| **身份策略**（服务端运行时侧） | 这个请求是谁 | **待实现**：11 个符号（`RpcIdentity` / `RpcIdentityPolicy` / `RpcCredentialRegistry` 等），落在 `identity.ts` / `identity-session.ts` / `identity-bearer.ts`；设计见根目录 `IDENTITY_POLICY_DESIGN.cn.md` |
+| **传输层**（协议侧） | 一次调用怎么进出某个协议 | `ToolTransport`、`ServerToolTransport` / `ClientToolTransport`、HTTP / Mailbox 各实现 |
+| **传输层 helper**（纯函数规则库） | 路由字符串与监听地址字符串怎么写 | `route-path.ts`、`socket-address.ts` |
+
+定层只问一件事：**这个符号回答哪个问题**。helper 的判据：纯函数、只处理字符串与参数、不碰监听对象、
+协议无关。
+
+**「基座」这个词的用法**：它原本只指**传输层监听底座**（TCP socket / unix socket 文件）。这个词太宽，容易被读成
+「框架底座」，所以：指那套纯函数时写**传输层 helper**；指 tool-rpc 内置代码与外部策略的对比时写**框架侧**；
+指监听底座本身（`sharedServers` 池 / refCount）时写**物理底座**，它属于 `http-server.ts`，不在任何 API 表里。
 
 **引用其他包时用完整包名**，不要写 `../mailbox/...` 这类同级仓库目录：文档会被发布出去，读者手上只有 `node_modules`，没有你的工作区布局。写 `@mboxlabs/mailbox/src/interfaces.ts:120-162`，读者能对着已安装的包核行号。本包自己的文件写仓库内相对路径（`src/transports/mailbox-server.ts:123`）。
+
+例外：跑下游仓库的 shell 命令（`grep -rn ... ../tool-event/src`）照旧写工作区路径——那是给在本仓库开发的人跑的，不是给读者的引用。
+
+## 命名判据（新公开符号一律照这六条）
+
+1. **见名知意**：不看注释也知道它是什么。
+2. **名词带领域限定**：名字说清它属于哪一类东西。
+3. **动词带宾语**：做什么、对什么做，都写在名字里。
+4. **一个概念一个名**：同一动作在各侧同名；不与包内已有词撞义（起名前先 grep）。
+5. **不承诺做不到的事**：名字不许暗示实现没有的能力。
+6. **抽象层用协议无关词，实现层用具体标准词**：抽象符号不带协议名；实现按它实现的那个标准命名。
+   太抽象没有信息量，太具体装不下别的协议。
+
+落点：新增公开符号时在 PR 里写明它过哪几条；违反第 4/5/6 条直接拒。
+推演过程见根目录 `IDENTITY_POLICY_DESIGN.cn.md`：§2 是抽象 API 的形状，§13 逐条解释名字为什么这样取。
+
+---
 
 ## 本地检查（实际跑得通的那套）
 
@@ -29,8 +64,9 @@ npx tsup --dts --dts-resolve                                # 构建 dist（下�
 ```
 
 - **别用 `npx tsc`**：会命中 npm 上的占位包 `tsc`，报 “This is not the tsc command you are looking for”，与代码无关。用 `./node_modules/.bin/tsc`。
-- `eslint .` 的 flat config 里 `eslint.config.mjs`（@antfu 的 base）：ESLint 只负责「正确性」，风格类层（`stylistic`、`perfectionist/*`、`unicorn` …）整体关闭，代码风格交给 prettier。`lint:fix` 对现有 code 的 0 line 的 changed——那's the point: 用 @antfu 的默认配置会报 10886 处问题，`lint:fix` 会把整个 src 重写，diff 里不可读。想重新启用某层，把对应的 `false` 改成 `true` 即可。
-- `format` 的 default 只 checks json/jsonc/yaml/yml（config 里 files）；markdown 和 code 的 opt-in 的 `format:docs` / `format:code`——prettier 的 table padding 和 code reformat 的 diff 里 noisy，不 in the default path.
+- `pnpm typecheck` = `tsc -p tsconfig.json`（那份 config 已 `noEmit: true`，`include` 是 `src/**/*` 与 `test/**/*`）；`tsconfig.release.json` 是发布面那份，两份都要过。
+- `eslint .`（flat config 在 `eslint.config.mjs`，基于 @antfu 的 base）只管「正确性」：风格类层整体关闭——`stylistic`、`regexp`、`unicorn`、`test`、`imports`、`jsonc`、`yaml`、`toml`、`markdown` 写死 `false`，另有 `perfectionist/`、`jsdoc/`、`node/`、`import/` 四组按前缀关。代码风格交给 prettier。当前配置下 `eslint .` 干净（2026-10-12 实测：exit 0，0 条）。**不要打开那些层再跑 `lint:fix`**：@antfu 默认配置下历史实测报 10886 处，`lint:fix` 会把整个 `src` 重写，diff 不可读。想重新启用某一层，把对应的 `false` 改成 `true`。
+- `format` / `format:fix` 只覆盖 json/jsonc/yaml/yml（脚本里的 glob，不是配置文件）。markdown 与代码是 opt-in：`format:docs`（`**/*.md`）、`format:code`（`**/*.{ts,tsx,js,jsx}`）——prettier 的表格对齐与代码重排会让 diff 变噪音，所以不进默认路径。
 - 跨包行为要跑**真实包入口**（`dist` / `require('@isdk/tool-rpc')`），只跑测试桩会漏掉导出与 bundle 层的问题。
 
 ## 测试
@@ -48,20 +84,20 @@ pnpm test
 
 1. `test/browser-entry.test.ts` 里钉着 Node 入口与 browser 入口的导出名单（以及 `dist/*.d.ts` 的对应断言）。
 2. 改公开面时**先改那份名单**（它会红），再动代码。它是唯一能表达「这个符号不该公开」的机制——测试钉得住行为，钉不住公开面。
-3. 两个入口（`src/transports/index.ts` / `src/transports/browser.ts`）的名单必须一致，且都是**显式**名单，不用 `export *`。
+3. 两个入口（`src/transports/index.ts` / `src/transports/browser.ts`）的名单必须一致。入口现在大部分是 `export * from './xxx'`，**只有要钉公开面的那组用显式名单**（`socket-address.ts` 的七个 helper、`HttpServerToolTransport`）：新增公开符号要走显式名单导出，并在 `test/browser-entry.test.ts` 加对应名单（照 `EXPORTED_ADDRESS_HELPERS` / `INTERNAL_ADDRESS_HELPERS` 的写法），否则它只是被 `export *` 顺带带出去的，没人钉。
 4. 该公开还是包内的判据，见 `src/transports/README.cn.md` 的「公开面判据」。
 5. 公开面变化是 breaking：走 `release`，让 `CHANGELOG.md` 与 `docs/api/**` 一起重生成。
 
 ## 跨包影响
 
-依赖本包的包（`package.json` 实测）：`tool-rpc-fastify`、`tool-electron`、`ai-tool`、`tool-event`。它们是**各自独立的仓库**（本仓库只是 pnpm workspace 里的一个包），所以：
+依赖本包的包（全 workspace 的 `package.json` 实测，2026-10-12：恰好四个）：`@isdk/tool-rpc-fastify`、`@isdk/tool-electron`、`@isdk/ai-tool`、`@isdk/tool-event`。它们是**各自独立的仓库**（本仓库只是 pnpm workspace 里的一个包），所以：
 
 - 改公开面要同时跑下游包的测试，且下游只看到 `dist`——先重建本包 dist。
-- 属于下游的实现细节不要写进本包文档（例如 `FastifyServerToolTransport` 的行为归 `tool-rpc-fastify` 自己的 README，本包只说明两边共用同一份基座 API）。
+- 属于下游的实现细节不要写进本包文档（例如 `FastifyServerToolTransport` 的行为归 `tool-rpc-fastify` 自己的 README，本包只说明两边共用同一份传输层 helper）。
 
 ## Releasing
 
-Releases are supposed to be done from master, version bumping is automated through [`standard-version`](https://github.com/absolute-version/commit-and-tag-version):
+发布从 `main` 分支做（本仓库的默认分支）。版本号由 [`commit-and-tag-version`](https://github.com/absolute-version/commit-and-tag-version) 自动 bump（`release` 脚本里是 `pnpm dlx commit-and-tag-version -s`，它还会先 `clean` + `build` + 把 `docs/api` 提交一次）：
 
 ```shell
 pnpm run release -- --dry-run  # verify output manually
