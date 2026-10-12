@@ -9,6 +9,7 @@ import { ResClientTools } from '../res-client-tools';
 import { ToolRpcContext, RpcStatusCode } from './models';
 import { MailboxServerTransport as V2MailboxServerTransport } from './mailbox-server';
 import { MailboxClientTransport as V2MailboxClientTransport } from './mailbox-client';
+import { RpcClientTransportManager } from './client-manager';
 
 describe('MailboxServerTransport / MailboxClientTransport V2 Test', () => {
   let mailbox: Mailbox;
@@ -56,15 +57,11 @@ describe('MailboxServerTransport / MailboxClientTransport V2 Test', () => {
 
     // 4. Setup server transports
     serverTransport = new V2MailboxServerTransport({ mailbox, apiUrl: serverAddress });
-    serverTransport.dispatcher.registry = ServerTools;
-    serverTransport.addDiscoveryHandler(serverAddress, () => ServerTools);
-    serverTransport.addRpcHandler(serverAddress);
+    serverTransport.addRpcHandler(serverAddress, { registry: ServerTools });
     await serverTransport.start();
 
     resServerTransport = new V2MailboxServerTransport({ mailbox, apiUrl: resServerAddress });
-    resServerTransport.dispatcher.registry = ResServerTools;
-    resServerTransport.addDiscoveryHandler(resServerAddress, () => ResServerTools);
-    resServerTransport.addRpcHandler(resServerAddress);
+    resServerTransport.addRpcHandler(resServerAddress, { registry: ResServerTools });
     await resServerTransport.start();
 
     // 5. Setup client transports
@@ -74,7 +71,8 @@ describe('MailboxServerTransport / MailboxClientTransport V2 Test', () => {
       clientAddress: clientAddress,
       timeout: 1000,
     });
-    ClientTools.setTransport(clientTransport);
+    RpcClientTransportManager.instance.register(clientTransport);
+    ClientTools.apiUrl = clientTransport.apiUrl;
     await clientTransport.start();
 
     resClientTransport = new V2MailboxClientTransport({
@@ -83,7 +81,8 @@ describe('MailboxServerTransport / MailboxClientTransport V2 Test', () => {
       clientAddress: resClientAddress,
       timeout: 2000,
     });
-    ResClientTools.setTransport(resClientTransport);
+    RpcClientTransportManager.instance.register(resClientTransport);
+    ResClientTools.apiUrl = resClientTransport.apiUrl;
     await resClientTransport.start();
   });
 
@@ -181,9 +180,7 @@ describe('MailboxServerTransport / MailboxClientTransport V2 Test', () => {
       func: () => 'pull-success',
     }).register();
 
-    pullServer.dispatcher.registry = ServerTools;
-    pullServer.addDiscoveryHandler(pullServerAddress, () => ServerTools);
-    pullServer.addRpcHandler(pullServerAddress);
+    pullServer.addRpcHandler(pullServerAddress, { registry: ServerTools });
     await pullServer.start();
 
     const pullClient = new V2MailboxClientTransport({
@@ -195,7 +192,8 @@ describe('MailboxServerTransport / MailboxClientTransport V2 Test', () => {
 
     const pullClientItems = {};
     const pullClientToolsClass = class extends ClientTools { static items = pullClientItems } as any;
-    pullClientToolsClass.setTransport(pullClient);
+    RpcClientTransportManager.instance.register(pullClient);
+    pullClientToolsClass.apiUrl = pullClient.apiUrl;
     await pullClient.start();
 
     const result = await pullClient.fetch('pullTester');
@@ -255,9 +253,7 @@ describe('MailboxServerTransport / MailboxClientTransport V2 Test', () => {
       mode: 'pull',
       pullInterval: 5
     });
-    pullServer.dispatcher.registry = ServerTools;
-    pullServer.addDiscoveryHandler(backlogAddress, () => ServerTools);
-    pullServer.addRpcHandler(backlogAddress);
+    pullServer.addRpcHandler(backlogAddress, { registry: ServerTools });
     await pullServer.start();
 
     await new Promise(resolve => setTimeout(resolve, 200));

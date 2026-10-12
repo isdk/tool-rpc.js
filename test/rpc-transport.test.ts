@@ -13,6 +13,7 @@ import { RpcMethodsClientTool } from '../src/rpc-methods-client-tool';
 import { HttpServerToolTransport } from '../src/transports/http-server';
 import { HttpClientToolTransport } from '../src/transports/http-client';
 import { RpcServerDispatcher } from '../src/transports/dispatcher';
+import { RpcClientTransportManager } from '../src/transports/client-manager';
 
 // Server-side implementation of a resource tool for testing
 class TestResTool extends ResServerTools {
@@ -107,14 +108,14 @@ describe('FastifyRestfulToolTransport', () => {
       apiRoot = `http://localhost:${port}/api`;
       serverTransport = new HttpServerToolTransport({ port, apiUrl: apiRoot });
       serverTransport.addRpcHandler(apiRoot);
-      serverTransport.addDiscoveryHandler(apiRoot, () => ServerTools.toJSON());
 
       await serverTransport.start({ port, host: 'localhost' });
     }, 'localhost');
 
     // 3. Setup the client transport and load tools
     const clientTransport = new HttpClientToolTransport(apiRoot);
-    ClientTools.setTransport(clientTransport);
+    RpcClientTransportManager.instance.register(clientTransport);
+    ClientTools.apiUrl = clientTransport.apiUrl;
 
     // Pre-register client stubs to ensure correct types
     new ResClientTools('resTest').register();

@@ -8,6 +8,7 @@ import { startOnKernelPort } from './helpers/ports'
 import { HttpServerToolTransport } from '../src/transports/http-server'
 import { HttpClientToolTransport } from '../src/transports/http-client'
 import { RpcServerDispatcher } from '../src/transports/dispatcher'
+import { RpcClientTransportManager } from '../src/transports/client-manager'
 
 describe('ServerTools', () => {
   beforeEach(() => {
@@ -177,13 +178,13 @@ describe('server api', () => {
     // 裸 path 前缀声明路由 + 内核分配端口：避开 findPort 探测与 bind 之间的 TOCTOU
     server = new HttpServerToolTransport()
     server.addRpcHandler('/api')
-    server.addDiscoveryHandler('/api', () => ServerTools.toJSON())
 
     const port = await startOnKernelPort(server)
     apiRoot = `http://localhost:${port}/api`
 
     const clientTransport = new HttpClientToolTransport(apiRoot);
-    ClientTools.setTransport(clientTransport);
+    RpcClientTransportManager.instance.register(clientTransport);
+    ClientTools.apiUrl = clientTransport.apiUrl;
 
     await ClientTools.loadFrom()
   })

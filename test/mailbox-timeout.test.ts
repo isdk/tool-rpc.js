@@ -7,6 +7,7 @@ import { ClientTools } from '../src/client-tools';
 import { MailboxServerTransport } from '../src/transports/mailbox-server';
 import { MailboxClientTransport } from '../src/transports/mailbox-client';
 import { RpcServerDispatcher } from '../src/transports/dispatcher';
+import { RpcClientTransportManager } from '../src/transports/client-manager';
 
 
 describe('Mailbox Timeout and ExpectedDuration', () => {
@@ -84,8 +85,8 @@ describe('Mailbox Timeout and ExpectedDuration', () => {
 
     // 2. Setup server transport
     serverTransport = new MailboxServerTransport({ mailbox, apiUrl: serverAddress });
-    // Manually add discovery handler for V2
-    serverTransport.addDiscoveryHandler(serverAddress, () => ServerTools.toJSON());
+    // 发现端点内置（`rpcApis` 从该前缀的注册表出清单），不必再挂 handler
+    serverTransport.addRpcHandler(serverAddress);
     await serverTransport.start();
 
     // 3. Setup client transport
@@ -98,7 +99,8 @@ describe('Mailbox Timeout and ExpectedDuration', () => {
 
     await clientTransport.start();
 
-    ClientTools.setTransport(clientTransport);
+    RpcClientTransportManager.instance.register(clientTransport);
+    ClientTools.apiUrl = clientTransport.apiUrl;
     await ClientTools.loadFrom();
   });
 
@@ -207,12 +209,15 @@ describe('Mailbox Timeout and ExpectedDuration', () => {
   });
 
   it('should support timeout during API discovery (loadFrom)', async () => {
-    // Simulate a slow discovery by temporarily replacing the handler
-    const originalHandler = (serverTransport as any).discoveryHandlerInfo.handler;
-    (serverTransport as any).discoveryHandlerInfo.handler = async () => {
+    // 慢发现：用公开 API 换掉该前缀的清单处理器（以前这里直接改 transport 的内部字段）。
+    // 发现端点现在走 dispatcher，所以服务端侧的超时也管得到它。
+    // 内置清单就是该前缀注册表的 toJSON（`rpcApis`），所「原来的」就是 ServerTools.toJSON()。
+    const originalListing = () => ServerTools.toJSON();
+
+    serverTransport.addDiscoveryHandler(serverAddress, async () => {
       await new Promise(resolve => setTimeout(resolve, 500));
-      return originalHandler();
-    };
+      return originalListing();
+    });
 
     // Attempt to load APIs with a shorter timeout
     try {
@@ -221,10 +226,10 @@ describe('Mailbox Timeout and ExpectedDuration', () => {
     } catch (err: any) {
       // In MailboxClientTransport, loadApis uses fetch, which now respects timeout
       expect(err.message).toMatch(/timeout/i);
+    } finally {
+      // Restore the listing for subsequent tests
+      serverTransport.addDiscoveryHandler(serverAddress, originalListing);
     }
-
-    // Restore original handler for subsequent tests
-    (serverTransport as any).discoveryHandlerInfo.handler = originalHandler;
   });
 
   it('should respect keepAliveOnTimeout over mailbox', async () => {

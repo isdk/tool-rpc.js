@@ -69,8 +69,23 @@ export class ClientTools extends ToolFunc {
   }
 
   /**
-   * Injects the client-side transport implementation.    * @deprecated Use RpcClientTransportManager.instance.register(transport) or manager.getClient(apiUrl)
-   * @param {IClientToolTransport} transport - The transport instance to use.
+   * Injects the client-side transport implementation.
+   *
+   * @deprecated V2 按 `apiUrl` 寻址，不必再往工具类上注入 transport。现在怎么写：
+   *
+   *   1）常规（只有地址）——transport 由 `RpcClientTransportManager` 按 scheme 自己建：
+   *      `const Srv = MyClientTools.connect('http://localhost:3000/api')`（或直接 `MyClientTools.apiUrl = '…'`），
+   *      再 `await Srv.loadFrom()`。自定义协议先 `RpcClientTransportManager.bindScheme('wechat', WechatClientTransport)`。
+   *
+   *   2）已经自己构造好了一个 transport（mailbox 要 `clientAddress`、自定义协议要带选项）：
+   *      `RpcClientTransportManager.instance.register(clientTransport)`，再 `MyClientTools.apiUrl = clientTransport.apiUrl`。
+   *
+   * 本方法就是上面第 2 组（`register(transport)` + 把 `transport.apiUrl` 写进类的 `apiUrl`），
+   * 只是它还会顺带调同样已废弃的 `transport.mount(Class)`（那个 mount 现在也只干一件事：把 apiUrl 写到类上）。
+   * 区别只在绑定方式：旧写法把一个 transport
+   * 全局绑到一个类上，多个后端就得互相覆盖；新写法里地址在类（或 `connect()` 出的子类）上，多个后端互不干扰。
+   *
+   * @param transport - The transport instance to use.
    */
   static setTransport(transport: IClientToolTransport) {
     if (transport) {
@@ -81,7 +96,10 @@ export class ClientTools extends ToolFunc {
     }
   }
 
-  /**    * @deprecated Use RpcClientTransportManager.instance.getClient(apiUrl)
+  /**
+   * @deprecated 类上不存 transport——同一个类可以对着多个后端。要拿本次调用实际用的 transport：
+   * `RpcClientTransportManager.instance.getClient(apiUrl)`（`apiUrl` 就是 `ClientTools.apiUrl` 或实例上的）；
+   * 实例上直接用 `someTool.transport`。
    */
   static get transport() {
     // This is problematic for multiple transports, returning a guess or throwing

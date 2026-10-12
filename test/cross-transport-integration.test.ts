@@ -106,7 +106,6 @@ describe('Cross-Transport Integration (HTTP + Mailbox)', () => {
     mailbox.registerProvider(new MemoryProvider())
 
     mailboxServer = new MailboxServerTransport({ mailbox, apiUrl: serverAddress })
-    mailboxServer.addDiscoveryHandler(serverAddress, () => ServerTools.toJSON())
     mailboxServer.addRpcHandler(serverAddress)
     await mailboxServer.start()
 
@@ -126,7 +125,6 @@ describe('Cross-Transport Integration (HTTP + Mailbox)', () => {
 
       httpServer = new HttpServerToolTransport({ port: p, apiUrl: apiRoot })
       httpServer.addRpcHandler(apiRoot)
-      httpServer.addDiscoveryHandler(apiRoot, () => ServerTools.toJSON())
       await httpServer.start({ port: p, host: 'localhost' })
     }, 'localhost')
 
@@ -476,7 +474,6 @@ describe('Cross-Transport Integration (HTTP + Mailbox)', () => {
 
       // Restart mailbox for other tests
       mailboxServer = new MailboxServerTransport({ mailbox, apiUrl: serverAddress })
-      mailboxServer.addDiscoveryHandler(serverAddress, () => ServerTools.toJSON())
       mailboxServer.addRpcHandler(serverAddress)
       await mailboxServer.start()
 
@@ -500,7 +497,6 @@ describe('Cross-Transport Integration (HTTP + Mailbox)', () => {
       // Restart HTTP for cleanup
       httpServer = new HttpServerToolTransport({ port, apiUrl: apiRoot })
       httpServer.addRpcHandler(apiRoot)
-      httpServer.addDiscoveryHandler(apiRoot, () => ServerTools.toJSON())
       await httpServer.start({ port, host: 'localhost' })
     })
 

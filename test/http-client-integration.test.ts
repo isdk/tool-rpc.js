@@ -181,7 +181,6 @@ describe('HttpClientToolTransport Integration', () => {
 
       server = new HttpServerToolTransport({ port: p, apiUrl: apiRoot })
       server.addRpcHandler(apiRoot)
-      server.addDiscoveryHandler(apiRoot, () => ServerTools.toJSON())
       await server.start({ port: p, host: 'localhost' })
     }, 'localhost')
   })
@@ -407,7 +406,8 @@ describe('HttpClientToolTransport Integration', () => {
   describe('End-to-End via ClientTools', () => {
     beforeAll(async () => {
       const client = new HttpClientToolTransport(apiRoot)
-      ClientTools.setTransport(client)
+      RpcClientTransportManager.instance.register(client)
+      ClientTools.apiUrl = client.apiUrl
       await ClientTools.loadFrom()
     })
 
@@ -563,7 +563,7 @@ describe('HttpClientToolTransport Integration', () => {
     })
 
     it('should stream via full ClientTools path with { stream: true }', async () => {
-      // Go through ClientTools (via setTransport from earlier section)
+      // Go through ClientTools (transport registered by apiUrl in the earlier section)
       const streamTool = ClientTools.get('stream-tool')!
       const res = await streamTool.run({ stream: true })
 
@@ -700,7 +700,7 @@ describe('HttpClientToolTransport Integration', () => {
       })
 
       it('should throw on unsupported URL scheme', async () => {
-        // The transport was pre-registered via setTransport() from earlier section.
+        // The transport was pre-registered by apiUrl in the earlier section.
         // To test the scheme lookup path, we need a URL not in the transport cache.
         const savedScheme = (RpcClientTransportManager as any).schemeRegistry?.get('http')
         RpcClientTransportManager.clearSchemes()

@@ -4,6 +4,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { ClientTools as ToolFunc } from "../src/client-tools"
 import { RpcClientTransportManager } from "../src/transports/client-manager"
+import { HttpClientToolTransport } from '../src/transports/http-client'
 
 describe('ClientTools', () => {
   beforeEach(() => {
@@ -281,6 +282,36 @@ describe('ClientTools', () => {
       expect(result).toBe('mock');
 
       getClientSpy.mockRestore();
+    });
+  });
+
+  describe('setTransport（@deprecated 兼容外壳）', () => {
+    // 它没有消失，只是等价于「按 apiUrl 登记 + 把地址写到类上」。锁住这个等价性，
+    // 新写法（register + apiUrl）与它行为一致就是被测过的，而不是靠文档承诺。
+    it('等价于 register(transport) + 把 transport.apiUrl 写到类上', async () => {
+      const apiUrl = 'http://localhost:3451/api';
+      const transport = new HttpClientToolTransport(apiUrl);
+
+      class LegacyService extends ToolFunc { }
+      (LegacyService as any).items = {};
+
+      LegacyService.setTransport(transport);
+
+      expect(LegacyService.apiUrl).toBe(apiUrl);
+      // 同一个 transport 现在按地址解析得到——与新写法走的是同一条路
+      expect(RpcClientTransportManager.instance.getClient(apiUrl)).toBe(transport);
+
+      // 新写法：同样的结果，只是不往类上注入 transport
+      class ModernService extends ToolFunc { }
+      (ModernService as any).items = {};
+      const other = new HttpClientToolTransport(apiUrl);
+      RpcClientTransportManager.instance.register(other);
+      ModernService.apiUrl = other.apiUrl;
+      expect(ModernService.apiUrl).toBe(apiUrl);
+      // 通道由地址解析得出：谁按这个地址登记，调用就走谁
+      expect(RpcClientTransportManager.instance.getClient(apiUrl)).toBe(other);
+
+      // 这个 apiUrl 只在本用例里用（不发请求），所以留在管理器里不影响别的用例。
     });
   });
 })

@@ -12,6 +12,7 @@ import { HttpClientToolTransport } from '../src/transports/http-client'
 import { RpcServerDispatcher } from '../src/transports/dispatcher'
 import { sleep } from "@isdk/util"
 import { startOnKernelPort } from './helpers/ports'
+import { RpcClientTransportManager } from '../src/transports/client-manager'
 
 class TestResTool extends ResServerTools {
   items: any = {}
@@ -100,7 +101,6 @@ describe('res server api', () => {
     // 先 findPort 再 bind 在并行 worker 之间有 TOCTOU 窗口，会随机 EADDRINUSE。
     server = new HttpServerToolTransport()
     server.addRpcHandler('/api')
-    server.addDiscoveryHandler('/api', () => ServerTools.toJSON())
 
     const port = await startOnKernelPort(server)
     apiRoot = `http://localhost:${port}/api`
@@ -108,7 +108,8 @@ describe('res server api', () => {
     const res = new TestResTool('res')
     res.register()
     const clientTransport = new HttpClientToolTransport(apiRoot);
-    ResClientTools.setTransport(clientTransport);
+    RpcClientTransportManager.instance.register(clientTransport);
+    ResClientTools.apiUrl = clientTransport.apiUrl;
 
     // ResClientTools.setApiRoot(apiRoot)
     await ResClientTools.loadFrom()

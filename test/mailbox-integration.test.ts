@@ -7,6 +7,7 @@ import { ClientTools } from '../src/client-tools'
 import { MailboxServerTransport } from '../src/transports/mailbox-server'
 import { MailboxClientTransport } from '../src/transports/mailbox-client'
 import { RpcServerDispatcher } from '../src/transports/dispatcher'
+import { RpcClientTransportManager } from '../src/transports/client-manager'
 
 describe('Mailbox Transport Integration', () => {
   let mailbox: Mailbox
@@ -67,7 +68,6 @@ describe('Mailbox Transport Integration', () => {
     mailbox.registerProvider(new MemoryProvider())
 
     server = new MailboxServerTransport({ mailbox, apiUrl: serverAddress })
-    server.addDiscoveryHandler(serverAddress, () => ServerTools.toJSON())
     server.addRpcHandler(serverAddress)
     await server.start()
 
@@ -78,7 +78,8 @@ describe('Mailbox Transport Integration', () => {
       timeout: 2000,
     })
 
-    ClientTools.setTransport(client)
+    RpcClientTransportManager.instance.register(client)
+    ClientTools.apiUrl = client.apiUrl
     await client.start()
     await ClientTools.loadFrom()
   })
