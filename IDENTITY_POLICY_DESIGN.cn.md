@@ -82,7 +82,26 @@ export interface RpcIdentityContext<Req = any, Res = any> {
   /** 命中的逻辑前缀与 apiUrl：同一 transport 服务多个前缀时，策略可按前缀分租户。 */
   prefix?: string;
   apiUrl?: string;
+  /**
+   * 本次调用的寻址结果（transport 已解析）：工具 id / 动作 / 资源 id。
+   * 内置发现端点也有工具 id（`rpcApis`，见 §17），所以这里不会是 undefined。
+   */
+  toolId?: string;
+  act?: string;
+  resId?: string;
+  /**
+   * 注册表里解析到的工具实例（`ServerTools` 那种），解析顺序与 dispatcher 一致：
+   * 前缀 claim 的 registry → transport 自己的 → dispatcher 的 → 系统保留层；都取不到就 undefined
+   * （框架保留工具如 `rpcTask` 不在业务注册表里，要单独判定它用 `toolId`）。
+   *
+   * 它是**只读备料**：策略可读注册时自带的字段（继承 `ServerTools` 加的字段、`isApi` / `stream` /
+   * `timeout` / `description` 等）来做「这个 API 要不要认证」的判定。框架不读它的任何字段、不解释语义。
+   */
+  tool?: any;
 }
+
+// 注：第二轮曾加过 `builtin?: string`（内置端点名）。第三轮把发现端点做成内置工具 `rpcApis` 后
+// 它就没有存在理由了——内置端点也是普通工具，要区分就比 `toolId === 'rpcApis'`（§17）。
 
 /** 身份策略：凭证 → 身份。外部认证协议通过替换策略接入。 */
 export interface RpcIdentityPolicy<Req = any> {
@@ -123,7 +142,7 @@ export interface RpcCredentialRegistry {
 实现方与使用者都要守，逐条进单测。
 
 1. `match` 返回 `undefined` = **另起新会话**，不是拒绝。拒绝必须抛
-   `new RpcError('Unauthenticated', 401, 'unauthenticated')`。
+   `new RpcError('Unauthenticated', RpcStatusCode.UNAUTHENTICATED, 'unauthenticated')`（401，枚举在 `models.ts`）。
 2. `match` 与 `assign` 是两条判定，不可合并成一个 `authenticate()`。
 3. 装了策略 → `request.clientId === identity.id`（基类保证）。未装策略 → header 透传照今天，`clientId` 就是客户端自报值。
    `clientId` 的类型**保持 `string`**，不扩成 `string | RpcIdentity`：它在 wire 上（`rpc-client-id`），且下游拿它当
@@ -141,8 +160,8 @@ export interface RpcCredentialRegistry {
 9. 内置 reader 只读标准字段：bearer 默认 reader 读 `authorization`（去 Bearer 前缀）；私有 header 由部署
    写自己的 reader。`RPC_HEADERS.CLIENT_ID`（`rpc-client-id`）保留，语义是「客户端自报标识」，不是身份。
 10. **钩子可同步可异步，框架侧一律 `await`**（`match`/`assign`/`revoke` 三个都是）。落点已核：
-    `ServerToolTransport.processIncomingCall`（`src/transports/server.ts:187`）已 `await this.toRpcRequest(...)`（:189）
-    再 `validateRpcRequest`（:192）与 `dispatch`（:194），身份判定插在 :189 与 :192 之间，零结构改动（插入位置见 §10）。
+    `ServerToolTransport.processIncomingCall`（`src/transports/server.ts:248`）已 `await this.toRpcRequest(...)`（:250）
+    再 `validateRpcRequest`（:256）与 `dispatch`（:261），身份判定插在 :250 与 :256 之间（现已落在 :254），零结构改动（插入位置见 §10）。
 11. **凭证在 wire 上的位置归策略/协议，框架侧不定义**：bearer 用 `authorization`（RFC 7235 定的，服务端不签发，
     没有下发需求）；服务端自签发的策略自己定下发处（tool-event 的原始实现就是 `rpc-session-token` header +
     `session_token` query + welcome 帧的 `sessionToken` 键，因为 EventSource 不能设 header）。框架侧只保证策略拿得到
@@ -224,8 +243,12 @@ export class RpcInProcessCredentialRegistry implements RpcCredentialRegistry {
 export interface RpcVerifiedCredentialOptions {
   /** 凭证 → 身份。返回 undefined 表示不认。可以是 async。验不验、怎么验（签名 / HMAC / 查库）全在这里。 */
   verify: (credential: string, ctx: RpcIdentityContext) => RpcIdentity | undefined | Promise<RpcIdentity | undefined>;
-  /** 无凭证 / verify 返回 undefined 时的行为。默认 true（走 `assign`）；false 则抛 401。 */
-  allowAnonymous?: boolean;
+  /**
+   * 无凭证 / verify 返回 undefined 时的行为。默认 true（走 `assign`）；false 则抛 401。
+   * **可以是谓词**，粒度到单个 API：`allowAnonymous: (ctx) => ctx.toolId !== 'admin'`（§16）。
+   * 仍是**认证**（要不要凭证）；「谁能调哪个工具」的授权归 `validateRpcRequest` 与业务。
+   */
+  allowAnonymous?: boolean | ((ctx: RpcIdentityContext) => boolean);
   /**
    * 没有效凭证时给这条连接什么身份。默认 uuid。就是 `RpcIdentityPolicy.assign` 的实现——
    * 无凭证连接的 `assign` 产物就是所谓匿名身份，不再单开一个名字。
@@ -243,8 +266,9 @@ export class RpcBearerPolicy<Req = any> implements RpcIdentityPolicy<Req> {
   match(ctx: RpcIdentityContext<Req>): RpcIdentity | undefined | Promise<RpcIdentity | undefined>;
   assign(ctx: RpcIdentityContext<Req>): RpcIdentity | Promise<RpcIdentity>;   // 返回体不带 credential
   protected verify(credential: string, ctx: RpcIdentityContext<Req>): RpcIdentity | undefined | Promise<RpcIdentity | undefined>;
-  protected reject(credential: string | undefined, ctx: RpcIdentityContext<Req>): never;   // 默认抛 401
+  protected reject(credential: string | undefined, ctx: RpcIdentityContext<Req>): never;   // 默认抛 RpcStatusCode.UNAUTHENTICATED（401）
   protected assignIdentity(ctx: RpcIdentityContext<Req>): RpcIdentity;   // `assign` 钩子的默认实现
+  protected allowAnonymous(ctx: RpcIdentityContext<Req>): boolean;       // 选项是布尔就一刀切，是谓词就逐 API
 }
 ```
 
@@ -391,8 +415,7 @@ const scopes = ctx.identity?.attributes?.scopes;
   会话表会爆炸；身份本体只走 `ctx.identity`。
 - 凭证在 wire 上的位置不在这一节定（契约 11）：bearer 用 `authorization`；自签发策略自己定下发处，
   交付句柄是 `ctx.res`。客户端侧 `credentialSource` 只给值，写进哪个 header 由部署的 transport 定
-  （`ClientTools.connect(apiUrl, options)` 的 options 落 `fetchOptions`，`src/client-tools.ts:63-68`；
-  现有写法参考 `src/transports/client.ts:118-121` 写 `rpc-client-id` 的那一段）。
+  （`ClientTools.connect(apiUrl, options)` 的 options 落 `fetchOptions`，`src/client-tools.ts:63-68`；   现有写法参考 `src/transports/client.ts:124-127` 写 `rpc-client-id` 的那一段）。
 - 会话活性（`resumeWindow` 那类「会话还活着吗」）归通道，不进 `RpcIdentityPolicy`。已有实现可对照：
   `@isdk/tool-event` 的 `resumable: Map<string, { events?, expiresAt }>`（`src/utils/sse-channel.ts:56`，
   `resumeWindow` 默认 30000，同文件 :133）。P2 可选件：`RpcSessionRegistry`（`id → { state, expiresAt }` +
@@ -403,8 +426,8 @@ const scopes = ctx.identity?.attributes?.scopes;
 框架侧只有一个调用点，没有第二个入口：策略从构造参数传入（§9），**没传就是 no-op**，基类不启用任何身份逻辑。
 基类里那段「取凭证 → `match` → 必要时 `assign` → 写 `request.identity`」的代码需要一个名字，建议
 `resolveRequestIdentity`（命名判据第 2/3 条：名词带领域限定、动词带宾语），位置在
-`processIncomingCall` 里 `toRpcRequest`（`src/transports/server.ts:189`）之后、`validateRpcRequest`（:192）之前
-——插在这里，Manager 的架构层校验才能看到 `request.identity`；`dispatch` 在 :194。`protected` 可覆写。
+`processIncomingCall` 里 `toRpcRequest`（`src/transports/server.ts:250`）之后、`validateRpcRequest`（:256）之前
+——插在这里，Manager 的架构层校验才能看到 `request.identity`；`dispatch` 在 :261。`protected` 可覆写。
 
 | 框架侧提供 | 策略自己负责 |
 |---|---|
@@ -426,7 +449,7 @@ const scopes = ctx.identity?.attributes?.scopes;
 | 期 | 范围 | 对下游的影响 |
 |---|---|---|
 | **P0** | 三个文件 + 单测 + 名单 | 纯新增，零行为变化 |
-| **P1a** | 只加载体：`ToolRpcRequest.identity` / `ToolRpcContext.identity` + `dispatcher.prepareContext`（`private`，`src/transports/dispatcher.ts:156`）透传 | 零行为变化（基线 44 文件 / 539 测试可直接对照） |
+| **P1a** | 只加载体：`ToolRpcRequest.identity` / `ToolRpcContext.identity` + `dispatcher.prepareContext`（`private`，`src/transports/dispatcher.ts:181`，透传在 :197） | 零行为变化（基线 44 文件 / 539 测试可直接对照） |
 | **P1b** | 装调用点：`ServerToolTransport.identity` + `credentialReader` + `resolveRequestIdentity`；HTTP 与 Mailbox 提供 reader；§3 第 3/4 条 | 装了策略才改变行为；未装策略逐字节不变 |
 | **发布** | `release`（11 个新公开符号 = 公开面变化，`CHANGELOG.md` 与 `docs/api/**` 重生成） | 下游只看到 dist |
 | **之后** | `tool-event` 收口（§12）+ `tool-rpc-fastify` 装配 `identity` 与它的 `credentialReader`（它已走 `processIncomingCall`，`fastify-server.ts:154`） | 在下游仓库，各自单独发布 |
@@ -446,7 +469,7 @@ const scopes = ctx.identity?.attributes?.scopes;
 |---|---|---|
 | `ai-tool` | `src/index.ts:30` = `export * from '@isdk/tool-rpc'`；自身 src 零 `clientId` / `.identity` 命中 | 不用。重建 dist + 版本 bump |
 | `tool-electron` | `src/pubsub/electron-server.ts:130` = `clientId: sessionId.toString()`，自己生成；它的 transport 走共用流水线（`src/ipc-server.ts:60` `extends ServerToolTransport`、:192 `processIncomingCall`） | 不用。跑测试确认。要在 IPC 上装策略得先给 payload 开一个凭证字段：`src/ipc-server.ts:217` 的 `headers` 是空对象，`src/pubsub/electron-client.ts:140` 写 `clientId: ''`（契约 11 的落点） |
-| `tool-event` | 它**确实**从 RPC header 取 clientId：`src/transports/pubsub/sse-server.ts:77` 的 `getSessionFromReq`；客户端侧把服务端发的 id 回写进 header（`src/event-client.ts:89-94` → 本包 `src/transports/client.ts:118-121`）。不 forward 本包 | 要：§12.1 收口 |
+| `tool-event` | 它**确实**从 RPC header 取 clientId：`src/transports/pubsub/sse-server.ts:77` 的 `getSessionFromReq`；客户端侧把服务端发的 id 回写进 header（`src/event-client.ts:89-94` → 本包 `src/transports/client.ts:124-127`）。不 forward 本包 | 要：§12.1 收口 |
 | `tool-rpc-fastify` | `src/fastify-server.ts:340` = `clientId: headers[RPC_HEADERS.CLIENT_ID]`；但它走共用流水线（:65 `extends ServerToolTransport`、:154 `processIncomingCall`） | 不用改那行（未装策略时透传）；要的是装配时传 `identity` + `credentialReader`。它的 `Req` 是 `FastifyRequest`（不是 `IncomingMessage`），Node 对象在 `raw._req` / `raw._res`（:345） |
 
 ### 12.1 tool-event 收口（保留它的公开面）
@@ -492,7 +515,7 @@ export const createSSEIdentity = (o?: SSETokenIdentityOptions) =>
 正文不展开，逐条说明在对话里：
 
 1. 为什么 A 叫 `session`：它与 `bearer` 同为**机制名**（`bearer` 是 RFC 7235 的方案名），且本包与 tool-event 已用
-   `session` 指「服务端认出来的那段连接生命周期」（`src/transports/models.ts:21` 的 `CLIENT_ID` 注释、tool-event 的
+   `session` 指「服务端认出来的那段连接生命周期」（`src/transports/models.ts:23` 的 `CLIENT_ID` 注释、tool-event 的
    `rpc-session-token` / `sessions` 表）。它的边界：只管凭证的签发与识别这一段；「会话还活着吗」（resume window /
    在线表）在通道（§9 的 P2 `RpcSessionRegistry`），不进这个类——所以 `session` 不会长成「会话族基类」。
    扩展它不是只有继承一条路（§7：继承与替换策略并列）。
@@ -523,7 +546,7 @@ export const createSSEIdentity = (o?: SSETokenIdentityOptions) =>
 3. 单测要钉住：§3 十一条契约、§4 登记表四条契约、§7 两个继承例子、§8 自定义策略例子（能编译且行为对）。
    P1b 另加两条回归：**未装策略时 header 透传与今天逐字节一致**（照 `src/transports/http-server-regressions.test.ts` 的写法）、
    **装了策略后 401 的响应形状**（`RpcError('Unauthenticated', 401, 'unauthenticated')` → `code: 401` +
-   `status: 'unauthenticated'`，见 `src/transports/models.ts:150-164`（构造签名在 :157）；经 `server.ts:208-228` 的顶级防护
+   `status: 'unauthenticated'`，见 `src/transports/models.ts:182`（`RpcError` 类，构造签名在 :189）；经 `server.ts:275-277` 的顶级防护
    映射成响应 `status: 401` + `error.status: 'unauthenticated'`）。登记表加一条内存有界（大量闲置身份后条目数有界）。
 4. 检查：`./node_modules/.bin/tsc --noEmit -p tsconfig.release.json`、`./node_modules/.bin/tsc --noEmit -p tsconfig.json`、
    `npx vitest run`、`npx tsup --dts --dts-resolve`。
@@ -532,3 +555,111 @@ export const createSSEIdentity = (o?: SSETokenIdentityOptions) =>
    （先写两个默认实现与 §6 差异表，再写策略接口）；`AGENT.md` 同步。不写 tool-event 的事件协议细节。
 6. 基线（2026-10-12 实测）：`tsc -p tsconfig.release.json` exit 0；`tsc -p tsconfig.json` exit 0；
    `vitest run` 44 文件 / 539 测试通过。
+
+---
+
+## 15. 补钉（2026-10-12 复盘：401 进枚举 + bearer 单测 + 端到端）
+
+三条缺口，按同一顺序补（先钉名单/测试，再动代码）：
+
+1. **401 进枚举**：`RpcStatusCode.UNAUTHENTICATED = 401`（`src/transports/models.ts:92`）。
+   之前 `reject` 里是裸数字 401，`dispatcher.handleError` 的自动状态串补全也只到 400/404/409。
+   现在 `identity-bearer.ts:114` 用枚举，`dispatcher.ts:352` 对 401 自动补 `unauthenticated`。
+   枚举只是常见码语义对照表、不是闭集：策略要 403 就直接写 403（见 `identity-bearer.test.ts` 的 HmacPolicy 例子）。
+2. **`src/transports/identity-bearer.test.ts`**（15 条）：默认实现 B 自身的契约——`allowAnonymous` 两态、
+   「verify 不认」与「无凭证」同形状、verify 可 async、verify 抛错不被吞成 undefined、
+   `ctx.credential` 与策略 reader 的优先级、`assign` 返回体不带 credential、三个 `protected` 覆写点、
+   策略无状态可复用。
+3. **`test/identity-e2e.test.ts`**（16 条）：真 socket / 真消息总线的端到端，钉客户端能观察到的东西：
+   401 到手上是 `RPC Error [401]` + `code: 401` + `status: 'unauthenticated'`，且业务工具零调用；
+   合法 Bearer 下业务侧 `ctx.identity` 就是 `verify` 的产物；`ClientTools.loadFrom()` + `run()` 全栈走通；
+   会话凭证经响应头下发后——**下发与取回必须成对配**（只写 `res.setHeader` 不配 `credentialReader`，
+   默认 reader 读不到私有 header，每次都是新身份）；Mailbox 的 `MailMessage.headers` 共用同一个默认 reader。
+   当时还钉了一条边界：**发现端点不经身份管道**（`addDiscoveryHandler` 的 GET 根路径由物理路由直接回），
+   `allowAnonymous: false` 也拦不到「列工具」。该边界已在 §16 收口（那一轮先钉住当时的行为，下一轮改行为）。
+
+新基线（2026-10-12 实测）：`tsc -p tsconfig.release.json` exit 0；`tsc -p tsconfig.json` exit 0；`eslint .` exit 0；
+`tsup --dts --dts-resolve` exit 0（`UNAUTHENTICATED = 401` 进 dist 的 d.ts，运行时 `RpcStatusCode[401] === 'UNAUTHENTICATED'`）；
+`vitest run` 48 文件 / 605 测试通过。
+
+---
+
+## 16. 逐 API 的认证判定与内置端点（2026-10-12 第二轮）
+
+上一轮的 `allowAnonymous` 是策略实例上的一个静态布尔，**全 transport 一刀切**：要么所有 API 都允许匿名，
+要么连「列工具」都得先认证。两个问题：
+
+1. 粒度不够——没有「这个 API 必须认证、那个可以匿名」的写法。
+2. 发现端点不在管道内——想统一认证时它是个洞。
+
+**定下的机制（不在 transport 上开逐 API 开关）**：
+
+- 策略要能**看到当前请求在调哪个 API**，才能自己判。所以 `RpcIdentityContext` 加寻址结果与备料：
+  `toolId` / `act` / `resId` / `prefix` / `apiUrl` / `tool` / `builtin`（§2）。`tool` 是注册表里那个实例，
+  按 dispatcher 的解析顺序取（前缀 claim 的 registry → transport 自己的 → dispatcher 的）；取不到就是
+  `undefined`，**不在身份这一步报 404**（那是 dispatcher 的活）。框架不读 `tool` 的任何字段。
+- 判定入口复用已有的那个选项：`allowAnonymous: boolean | ((ctx) => boolean)`（§5）。布尔 = 一刀切（旧行为不变），
+  谓词 = 逐请求/逐 API。工具注册级元数据直接读 `ctx.tool` 上自带的字段（继承 `ServerTools` 加字段即可），
+  字段名是部署与业务的私有约定。
+- **不加 `requireIdentity` 这类字段**（路由声明上、工具注册上都不加）：它僵硬，且与策略谓词重复——
+  开关一旦落在 transport 或注册表上，就等于框架开始解释业务元数据。要「这条前缀必须认证」，
+  策略读 `ctx.prefix` 自己判。
+- 这是**认证**（要不要凭证），不是**授权**（谁能调哪个工具）。§10 的分工不变：授权仍在 `validateRpcRequest` 与业务。
+
+**发现端点：它是框架自有的一个内置 API，走同一条判定**（本轮的实现方式已被 §17 取代，结论不变）：
+
+- 当时响应仍由物理路由直接回（不经 `dispatcher`），只是在回之前多一步 `resolveBuiltinIdentity('discovery', …)`。
+  **第三轮删了这类内置端点专用入口**：发现端点现在就是普通工具，走 `processIncomingCall` 同一条路（§17）。
+- 判定与业务侧同一条：`match` → 必要时 `assign`，**只有策略抛错才是 401**（与契约 1 一致：拒绝必须抛）。
+  错误封包走 `sendPipelineError`（`src/transports/server.ts:289`），取码规则与顶级防护同一套，
+  所以客户端 `loadApis()` 拿到的是带 `code` / `status` 的 RPC 错误，不是裸 500。
+- **默认仍公开**：不装策略逐字节不变；装了策略，要不要认由谓词定（当时是 `ctx.builtin === 'discovery'`，
+  现在是 `ctx.toolId === 'rpcApis'`）。全局 `allowAnonymous: false` 会连发现一起拦——那是部署显式选了「一刀切」的结果，不是框架偷偷改默认。
+- 客户端侧配套：`ClientTools.loadFrom()` 把类级 `fetchOptions`（凭证就在那）合进发现调用
+  （`src/client-tools.ts:109`），否则发现端点一开认证就取不到工具清单。
+
+测试：`test/identity-e2e.test.ts` 的「逐 API 的认证判定」（同一策略实例下未标记的 API 匿名可进、带 `authScope`
+的必须凭证、发现端点在谓词里单独放行）与「策略看到的备料」（`toolId` / `act` / `resId` / `tool` 字段）。
+
+---
+
+## 17. 发现端点收进流水线：内置工具 `rpcApis` + 路由表（2026-10-12 第三轮）
+
+§16 把发现端点接上了身份判定，但它是靠两个专用入口接的（`resolveBuiltinIdentity` + `sendPipelineError`），
+而且响应仍由物理路由直接回。后果：它不过 `validateRpcRequest`、不吃超时、不进 tracker，
+`ctx.tool` 对它是 `undefined`，`ctx.builtin` 也就需要一个自己的字段。本质上是「内置端点有特权通道」。
+
+**定下的机制：内置端点没有特权通道，它就是普通工具 + 普通路由行**：
+
+- **内置工具 `rpcApis`**（`src/transports/rpc-apis.ts`，`RpcApisResource extends ServerTools`，`timeout: 0`）：
+  与 `rpcTask` 同在一个 `systemRegistry`，由 `RpcServerDispatcher` 自动装载。它不持有清单，
+  只从 `ctx.registry` 拿**本次命中前缀**的注册表，所以多前缀多注册表时各列各自的。
+  id 常量 `RPC_APIS_TOOL_ID` 在 `models.ts`（客户端要用它但不能把服务端工具类带进浏览器包）。
+- **路由表**（`ServerToolTransport.addRoute()` / `getRouteTable()` / `matchRouteEntry()`）：每个前缀自带三行内置声明——
+  `GET 前缀根`、`act: 'list'`、`act: 'get'`（前两者 HTTP 与 Mailbox 各自命中，互不抢）。它们不是特权开关：
+  第三方用同一个 `addRoute()` 写同一路径同条件就能换掉。`path: ''` 与 `'/'` 同义；`/x` 与 `/x/` 默认同义
+  （`strictTrailingSlash: true` 才分两条）。
+- **注册表分层真正参与 dispatch**：`requestRegistry(rpcReq)` 把「前缀 claim 的 registry → transport 自己的 →
+  dispatcher 的 → 系统保留」叠成一个 `get(toolId)` 视图交给 dispatcher。修了之前的半成品：`mount(RegB, '/v2')`
+  会把 `/api` 也改指向 RegB。解析顺序与 `resolveRouteTool` 同一套，所以策略看到的 `tool` 就是真会被调的那个。
+- **旧 API 降级为兼容外壳（已标 @deprecated）**：`addDiscoveryHandler(apiUrl, handler)` 仍可用，它只把 handler 挂成该前缀的
+  `rpcApis` 实现（`requestRegistry` 里那一步），不再生成第二条物理路由；首次调用会经 `warnDiscoveryDeprecated()`
+  打一次迁移提示（进程级 flag，不刷屏）。`resolveBuiltinIdentity` /
+  `ctx.builtin` 删除；`sendPipelineError` 保留但只作为顶级防护的出口（不再是内置端点专用）。
+- **客户端**：`loadApis()` 发 `toolId: 'rpcApis'`；对不支持它的旧服务端（404）回退到空 `toolId`，
+  旧行为不变。
+
+**对策略的影响**：`ctx.toolId === 'rpcApis'` 就是以前的 `ctx.builtin === 'discovery'`；`ctx.tool` 现在对发现
+请求也能解析到实例。`allowAnonymous` 默认值不变（公开），所以不写谓词的部署逐字节不变。
+
+测试：`src/transports/route-table.test.ts`（25 条：路由表归一/覆盖/最长前缀/内置行/注册表分层）、
+`test/discovery-e2e.test.ts`（15 条：HTTP 8 条 + Mailbox 7 条，发现走完整流水线——身份、`validateRpcRequest`、
+`globalTimeout`、多前缀各列各自清单、旧客户端 404 回退、`addDiscoveryHandler` 兼容外壳）、
+`test/identity-e2e.test.ts`（谓词里 `ctx.toolId === 'rpcApis'`）。
+
+顺带修的一处丌齐：`MailboxServerTransport.addRpcHandler` 以前丢掉 `options.registry`（基类的
+`RouteClaimOptions` 有它），现在转给 `claimRoute`，所以 mailbox 也能按前缀挂注册表。
+
+新基线（2026-10-12 实测）：`tsc -p tsconfig.json` 与 `tsc -p tsconfig.release.json` exit 0；`eslint .` exit 0；
+`vitest run` 50 文件 / 652 测试通过；`tsup`（含 `--dts --dts-resolve`）exit 0；
+`typedoc --plugin typedoc-plugin-markdown` 0 errors（16 条外部符号链接 warning，与本轮无关）。

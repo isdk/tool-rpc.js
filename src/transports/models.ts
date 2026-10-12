@@ -1,4 +1,5 @@
 import { type ToolFuncContext } from "@isdk/tool-func";
+import { type RpcIdentity } from "./identity";
 
 /**
  * 标准 Header 定义。
@@ -25,6 +26,18 @@ export const RPC_HEADERS = {
   /** @deprecated use TOOL_ID instead */
   FUNC: 'rpc-fn',
 };
+
+/**
+ * 内置发现端点的**保留工具 id**。
+ *
+ * 它就是一个注册在 `systemRegistry` 里的普通工具（实现见 `rpc-apis.ts`），所以列工具清单
+ * 这件事和业务调用走同一条流水线：`validateRpcRequest` 拦得到、身份策略判定得到、
+ * `globalTimeout` 管得到、Tracker 记得到。客户端 `loadApis()` 默认就发这个 id。
+ *
+ * 常量放在这里（而不是 `rpc-apis.ts`）是因为客户端侧也要用它，而那边不能把服务端工具类
+ * 带进浏览器包。
+ */
+export const RPC_APIS_TOOL_ID = 'rpcApis';
 
 /**
  * RPC 协议默认配置值
@@ -76,6 +89,7 @@ export enum RpcStatusCode {
   OK = 200,               // 成功
   PROCESSING = 102,       // 任务挂起，仍在后台处理
   BAD_REQUEST = 400,      // 参数/协议能力错误
+  UNAUTHENTICATED = 401,  // 身份策略拒绝：凭证缺失或验不过（见 identity-bearer.ts 的 reject）
   NOT_FOUND = 404,        // 找不到工具或资源
   CONFLICT = 409,         // 请求 ID 冲突
   TERMINATED = 408,       // 硬超时终止
@@ -99,6 +113,12 @@ export interface ToolRpcRequest {
   traceId?: string;
   /** 客户端标识 (可选，用于 session 识别) */
   clientId?: string;
+  /**
+   * 服务端判定的身份（装了 `RpcIdentityPolicy` 才有）。未装策略时是 undefined，
+   * `clientId` 就是客户端自报值（透传）。装策略时基类保证 `clientId === identity.id`。
+   * 身份本体只走这一处，业务侧从 `ctx.identity` 读（设计文档 §9）。
+   */
+  identity?: RpcIdentity;
   /** 本次请求唯一标识 */
   requestId: string;
   /** 已解构的业务参数负载 */
@@ -141,6 +161,18 @@ export interface ToolRpcContext extends ToolFuncContext {
   resId?: string;
   /** 操作名称 */
   act?: string;
+  /**
+   * 业务侧读身份的唯一入口：`ctx.identity?.id` / `ctx.identity?.attributes?.scopes`。
+   * 没装策略时是 undefined。不平铺 `ctx.tenantId` / `ctx.userId`（设计文档 §9）。
+   */
+  identity?: RpcIdentity;
+
+  /**
+   * 本次解析工具所用的注册表（分层解析后的那一层：前缀 claim → transport → dispatcher）。
+   * 内置发现工具 `rpcApis` 靠它列「这个前缀服务哪些工具」；业务工具要自省同一件事也读它，
+   * 不读 `ctx.dispatcher.registry`（那是全局的那一个，多前缀时会串）。
+   */
+  registry?: any;
 
   /** 下方为协议底座元数据透传 */
   req?: any;
