@@ -765,7 +765,7 @@ new RpcBearerPolicy({
 
 `ctx.credential === undefined` 以前分不开两种情况：「transport 的 reader 读了，这个请求没带我要的凭证」
 与「没人读过（策略单独用 / 测试里直接 `match`）」。`RpcBearerPolicy` 因此写成了
-`ctx.credential ?? this.readerOf()(ctx.req)`——reader 拒读后它回头自己读 `authorization`。
+`ctx.credential ?? this.readerOf()(ctx.req)`（当时的写法，`readerOf()` 已随下面的选项一起删）——reader 拒读后它回头自己读 `authorization`。
 
 后果：部署的 `credentialReader` 不是权威。鉴权代理拓扑（只认代理注入的 `x-proxy-token`）下，
 一个绕过代理、直接递 `Authorization: Bearer <valid>` 的请求能拿到身份——部署明确选择不信的
@@ -774,8 +774,8 @@ new RpcBearerPolicy({
 **定下的机制**：
 
 - `resolveRequestIdentity` 备 `ctx.credential` 的同时标 `ctx.credentialRead = true`，两种情况从此可分。
-- `RpcBearerPolicy.readCredential()` 三段：取到了就用；`credentialRead` 且没取到→默认不自己读；
-  没人读过→默认读**写死的**标准 `authorization`（策略单独用这条路保留）。
+- `RpcBearerPolicy.readCredential()` 三种情况（**两条分支**：第三段已跟 `fallback` 那次读合流成同一个写死调用）：
+  取到了就用；`credentialRead` 且没取到→默认不自己读；没人读过→默认读**写死的**标准 `authorization`（策略单独用这条路保留）。
 - 策略级 `credentialReader` 选项已删（未发布，无兼容包被）。定下的分界：**任意凭证读取函数只有一个
   注入点，在构造 ctx 的那一层**；消费 ctx 的一方（策略）只能在框架实现的**封闭枚举**里选来路
   （`fallback: 'none' | 'authorization'`）。枚举成员的可入性判据：框架能在**不认识部署私有名字**
@@ -788,5 +788,8 @@ new RpcBearerPolicy({
 - 默认 `'none'` 不带兼容包被：`identity` 在 1.1.0 后才引入、尚未发布。
 
 测试：`src/transports/identity-bearer.test.ts`（reader 已读且无凭证 → 401，`verify` 零调用；
-`fallback: 'authorization'`  opt-in 生效）、`test/identity-e2e.test.ts`（`authorization` 里放**能过 verify**
-的值，这样 401 只能来自 reader 权威——旧断言用了一个无效 token，钉不住契约）。
+`fallback: 'authorization'` opt-in 生效；单独用时只备 `ctx.headers`（没有 `req`）也读标准字段，
+同形状只放私有 header 则无凭证）、`src/transports/identity-server.test.ts`（transport **没配**
+`credentialReader` 时内置 bearer reader 就是权威：私有 header → 401 且 `verify` 零调用，同一个
+transport 换成标准字段就能过——证明跑的就是内置 reader）、`test/identity-e2e.test.ts`
+（`authorization` 里放**能过 verify** 的值，这样 401 只能来自 reader 权威——旧断言用了一个无效 token，钉不住契约）。
