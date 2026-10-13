@@ -721,6 +721,9 @@ new HttpServerToolTransport({
 - transport 的 `credentialReader` 是**权威**：它返回 `undefined` 时，`RpcBearerPolicy` 把这条请求当未认证，
   不会回头再读 `authorization`。「只认代理注入的那个 header」因此是真的成立。要反过来那种拓扑
   （只认客户端自带的标准 header）就显式写：`new RpcBearerPolicy({ fallback: 'authorization' })`。
+- 被拒的请求不经过 `validateRpcRequest`（身份判定故意在前），所以拿这个钩子当日志的部署对认证失败
+  什么都记不到。改在 `RpcTransportManager` 子类上覆写 `onRequestRejected(request, err)`：流水线每一次拒绝
+  （401 / 403 / 寻址失败）都进这里，且流水线错误响应也回显 `req-id`，客户端能对上自己那次调用。
 
 ## 高级用法
 

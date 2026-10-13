@@ -3,7 +3,7 @@ import { ToolTransport, type IToolTransport, type ToolTransportOptions } from '.
 import { normalizeRoutePath, routeMatchKey } from './route-path';
 import { RpcServerDispatcher } from './dispatcher';
 import { RpcTransportManager } from './server-manager';
-import { ToolRpcRequest, ToolRpcResponse } from './models';
+import { RPC_HEADERS, ToolRpcRequest, ToolRpcResponse } from './models';
 import { readBearerCredential, type RpcCredentialReader, type RpcIdentityContext, type RpcIdentityPolicy } from './identity';
 import { RPC_APIS_TOOL_ID, manifestItem, manifestItems, registryEntries } from './rpc-apis';
 
@@ -249,8 +249,11 @@ export abstract class ServerToolTransport extends ToolTransport implements IServ
    * 下层具体协议收到请求后，将其转化为内部结构，送入 Dispatcher 并写回。
    */
   protected async processIncomingCall(rawReq: any, rawRes: any, registry?: any): Promise<void> {
+    // 寻址结果要在 try 外拿着：顶级防护要拿它回显 req-id 并叫审计钩子（issue #10）。
+    // `toRpcRequest` 自己报错时它就是 `undefined`（连寻址都没成，只能不给 req-id）。
+    let rpcReq: ToolRpcRequest | undefined;
     try {
-      const rpcReq = await this.toRpcRequest(rawReq, rawRes);
+      rpcReq = await this.toRpcRequest(rawReq, rawRes);
 
       // 身份判定：插在 toRpcRequest 之后、validateRpcRequest 之前，
       // 这样 Manager 的架构层校验（SSRF / 拦截钩子）能看到 request.identity。
@@ -277,7 +280,7 @@ export abstract class ServerToolTransport extends ToolTransport implements IServ
       await this.sendRpcResponse(rpcRes, rawRes);
     } catch (err: any) {
       // 顶级异常防护 (Top-level pipeline guard)：策略抛的 401 与业务抛的都走这里
-      await this.sendPipelineError(err, rawRes);
+      await this.sendPipelineError(err, rawRes, rpcReq);
     }
   }
 
@@ -332,8 +335,23 @@ export abstract class ServerToolTransport extends ToolTransport implements IServ
    * 顶级防护的出口：把流水线（身份判定、`validateRpcRequest`、dispatcher、业务工具）抛出的错误
    * 映射成 RPC 错误封包并写回。取码规则统一（`err.code` 数字优先，其次 `err.status` 数字，否则 500），
    * 所以内置发现端点被策略拒绝时，客户端拿到的错误形状与业务调用被拒绝时相同。
+   *
+   * 两件事与正常响应路径对齐（issue #10）：回显 `req-id`，并把这条请求交给
+   * `manager.onRequestRejected`（审计钩子，默认 no-op）。
    */
-  protected async sendPipelineError(err: any, rawRes: any): Promise<void> {
+  protected async sendPipelineError(err: any, rawRes: any, rpcReq?: ToolRpcRequest): Promise<void> {
+    // 审计钩子（issue #10）：身份判定与 `validateRpcRequest` 拒掉的请求到不了后者的正常调用点
+    // （判定在前、校验在后），所以拿钩子当日志的部署恰好看不到「最想进日志的那批尝试」。
+    // 钩子自己报错不能掉响应：审计失败不该把 401 变成 500。
+    const manager: any = this.manager;
+    if (manager && typeof manager.onRequestRejected === 'function') {
+      try {
+        manager.onRequestRejected(rpcReq, err);
+      } catch (hookErr) {
+        console.warn('[tool-rpc] manager.onRequestRejected threw:', hookErr);
+      }
+    }
+
     let errCode = 500;
     if (typeof err?.code === 'number') {
       errCode = err.code;
@@ -343,6 +361,9 @@ export abstract class ServerToolTransport extends ToolTransport implements IServ
 
     await this.sendRpcResponse({
       status: (errCode >= 100 && errCode < 600) ? errCode : 500,
+      // 回显 req-id（issue #10）：正常路径由 `dispatcher.echoRequestId` 做，流水线错误以前没有。
+      // 客户端对不上自己那次调用的，恰恰就是失败的那些——日志关联最难的那批。
+      headers: rpcReq?.requestId ? { [RPC_HEADERS.REQUEST_ID]: rpcReq.requestId } : undefined,
       error: {
         message: err?.message || 'Transport Pipeline Error',
         code: errCode,

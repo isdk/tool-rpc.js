@@ -218,6 +218,21 @@ export class RpcTransportManager extends RpcClientTransportManager {
     // 可以在此处添加更多默认的安全审计逻辑
   }
 
+  /**
+   * 审计钩子：被流水线拒掉的请求（身份策略 401、`validateRpcRequest` 的 SSRF/白名单 403、
+   * 寻址失败）都会到这里，默认 no-op，继承覆写（与 `validateRpcRequest` 同一套扩展方式）。
+   *
+   * 为什么单开一个钩子（issue #10）：`validateRpcRequest` 跑在身份判定**之后**，所以被 401
+   * 拒掉的请求根本走不到它——而拿 Manager 钩子当日志的部署，最想记的恰恰是这批失败尝试。
+   * 两者是不同的层：`validateRpcRequest` 是架构层策略（谁能调哪个 API），认证在身份策略。
+   *
+   * `request` 可能是 `undefined`：连 `toRpcRequest` 都没成时没有归一化请求可交。
+   * 钩子自己报错不会掉响应（审计失败不该把 401 变成 500）。
+   */
+  public onRequestRejected(request: ToolRpcRequest | undefined, err: any) {
+    // Base implementation: no-op. Subclasses can log / metric / alert here.
+  }
+
   private isServer(transport: any): transport is IServerToolTransport {
     return typeof transport.start === 'function' && typeof transport.stop === 'function';
   }

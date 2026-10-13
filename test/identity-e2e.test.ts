@@ -15,6 +15,7 @@ import { RpcBearerPolicy } from '../src/transports/identity-bearer'
 import { RpcSessionIdentityPolicy } from '../src/transports/identity-session'
 import { RPC_HEADERS, RpcStatusCode } from '../src/transports/models'
 import { RpcClientTransportManager } from '../src/transports/client-manager'
+import { RpcTransportManager } from '../src/transports/server-manager'
 
 /**
  * 身份策略的端到端验证：真 socket / 真消息总线，走完整流水线
@@ -560,5 +561,83 @@ describe('identity end-to-end over Mailbox', () => {
     }
     expect(thrown?.code ?? thrown?.error?.code).toBe(RpcStatusCode.UNAUTHENTICATED)
     expect(String(thrown?.message ?? thrown?.error?.message)).toMatch(/Unauthenticated/)
+  })
+})
+
+describe('identity end-to-end over HTTP: 被拒的请求也要能审计（issue #10）', () => {
+  /**
+   * 审计探针：`validateRpcRequest` 是架构层策略，它跑在身份判定之后——被 401 拒掉的请求
+   * 根本走不到它。所以拿钩子当日志的部署，对「最想进日志的那批尝试」什么都看不到。
+   * `onRequestRejected` 就是补这个：流水线（身份判定 / `validateRpcRequest`）拒掉的请求都进这里。
+   */
+  class AuditManager extends RpcTransportManager {
+    public rejected: Array<{ toolId?: string, code?: number }> = []
+    public onRequestRejected(request: any, err: any) {
+      this.rejected.push({ toolId: request?.toolId, code: err?.code })
+    }
+  }
+
+  let server: HttpServerToolTransport
+  let client: HttpClientToolTransport
+  let apiRoot: string
+  let manager: AuditManager
+
+  beforeAll(async () => {
+    resetRegistries()
+    manager = new AuditManager()
+
+    await withReservedPort(3231, async (port) => {
+      apiRoot = `http://localhost:${port}/api`
+      server = new HttpServerToolTransport({
+        port,
+        apiUrl: apiRoot,
+        manager,
+        identity: new RpcBearerPolicy({
+          allowAnonymous: false,
+          verify: (credential: string) => (credential === 'ok-1' ? { id: 'alice' } : undefined),
+        }),
+      })
+      server.addRpcHandler(apiRoot)
+      await server.start({ port, host: 'localhost' })
+      client = new HttpClientToolTransport(apiRoot)
+    }, 'localhost')
+  })
+
+  afterAll(async () => {
+    await server.stop()
+    ToolFunc.items = {}
+    ServerTools.items = {}
+    ClientTools.items = {}
+  })
+
+  it('身份拒绝进 Manager 钩子：审计日志能看到 401 尝试（带 toolId 与错码）', async () => {
+    manager.rejected.length = 0
+
+    await expect(client._fetch('whoami', {}, 'run')).rejects.toMatchObject({ code: 401 })
+    expect(manager.rejected).toEqual([{ toolId: 'whoami', code: RpcStatusCode.UNAUTHENTICATED }])
+  })
+
+  it('流水线错误响应回显 req-id：客户端能把 401 对上自己那次调用', async () => {
+    const res = await fetch(`${apiRoot}/whoami`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'req-id': 'req-audit-1' },
+      body: '{}',
+    })
+
+    expect(res.status).toBe(RpcStatusCode.UNAUTHENTICATED)
+    expect(res.headers.get(RPC_HEADERS.REQUEST_ID)).toBe('req-audit-1')
+  })
+
+  it('成功调用不触发 onRequestRejected', async () => {
+    manager.rejected.length = 0
+
+    const res = await fetch(`${apiRoot}/whoami`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer ok-1' },
+      body: '{}',
+    })
+
+    expect(res.status).toBe(200)
+    expect(manager.rejected).toEqual([])
   })
 })

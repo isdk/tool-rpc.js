@@ -100,6 +100,11 @@ throw new RpcError('Access Denied', 403, 'forbidden', { ip: '1.2.3.4' });
 * **架构级策略校验 (validateRpcRequest)**：
   * **SSRF 防御**：通过 `addRestrictedPattern` 注入正则或字符串模式（如 `localhost`, `127.0.0.1`），Manager 会在分发前拦截非法地址请求。
   * **钩子重写**：允许通过继承 Manager 并重写此方法来实现自定义的全局策略校验。
+* **审计钩子 (onRequestRejected)**：被流水线拒掉的请求都进这里（身份策略 401、`validateRpcRequest` 的
+  SSRF/白名单 403、寻址失败），默认 no-op，继承覆写（issue #10）。
+  它存着是因为两个钩子不在同一层、也不在同一时刻：`validateRpcRequest` 跑在身份判定**之后**，
+  所以被 401 拒掉的请求根本走不到它——而拿钩子当日志的部署最想记的恰恰是这批失败尝试。
+  钩子自己报错不会掉响应（审计失败不该把 401 变成 500）。
 * **生命周期管理**：
   * `startAll()`：批量启动所有已注册的服务端 Transport。
   * `stopAll()`：优雅关闭所有实例。由于 HTTP 层引入了引用计数，此操作会根据使用情况自动关闭物理 Server。
@@ -601,4 +606,7 @@ class MyTool extends ServerTools {
 
 ## 15. 评估与调试
 
-建议在生产环境通过 `RpcTransportManager.instance.validateRpcRequest` 扩展自定义的安全审计。在调试时，关注响应 Header 中的 `req-id` 确保全链路追踪的闭环。
+建议在生产环境通过 `RpcTransportManager.instance.validateRpcRequest` 扩展自定义的安全审计，
+并用 `onRequestRejected` 记下被拒的尝试（身份 401 / 架构层 403 / 寻址失败，issue #10）。
+在调试时，关注响应 Header 中的 `req-id` 确保全链路追踪的闭环：它不只成功响应回显，
+流水线错误响应（401/403/400）也回显——客户端对不上自己那次调用的，恰恰就是失败的那批。

@@ -743,6 +743,10 @@ Key rules (the full contract list lives in `IDENTITY_POLICY_DESIGN.cn.md` at the
   treats the request as unauthenticated instead of quietly re-reading `authorization`. That is what makes
   "only trust the header my proxy injects" actually hold. A deployment that wants the opposite topology
   (client-supplied standard header only) opts in with `new RpcBearerPolicy({ fallback: 'authorization' })`.
+- Rejected requests bypass `validateRpcRequest` (identity is resolved first, on purpose), so an audit log built
+  on that hook sees nothing about failed authentication attempts. Override `onRequestRejected(request, err)` on
+  your `RpcTransportManager` subclass instead — it fires for every pipeline rejection (401 / 403 / bad addressing),
+  and pipeline error responses echo `req-id` so a client can correlate them with its own call.
 
 ## Advanced Usage
 

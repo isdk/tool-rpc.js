@@ -20,7 +20,7 @@
 
 | 组件 | 角色 | 关键方法/属性 |
 |------|------|---------------|
-| `RpcTransportManager` | 协议注册中心、路由归属登记、连接池管理 | `bindScheme()`, `registerServer()`, `startAll()`, `stopAll()`, `validateRpcRequest()` |
+| `RpcTransportManager` | 协议注册中心、路由归属登记、连接池管理 | `bindScheme()`, `registerServer()`, `startAll()`, `stopAll()`, `validateRpcRequest()`, `onRequestRejected()` |
 | `RpcServerDispatcher` | 执行调度、能力协商、影子实例隔离、超时裁决 | `dispatch()`, `handleError()`；每次调用自动登记进 Tracker（`trackTask`），并把自身放进 `ctx.dispatcher`（**`ctx` 上没有 `tracker` 字段**） |
 | `RpcActiveTaskTracker` | 任务登记、状态转换、硬死线、结果保留、物理中止联动 | `add()`, `get()`, `remove()`, `stop()`；内部维护 `tasks` Map（每 60s 扫一次，`ttlMs` 默认 5 分钟未访问则中止） |
 
@@ -419,6 +419,8 @@ new HttpServerToolTransport({
 - **不装策略就是 no-op**：`ctx.identity` 为 `undefined`，`clientId` 仍是客户端自报值（与旧行为逐字节一致）。
 - **拒绝要抛** `new RpcError('Unauthenticated', RpcStatusCode.UNAUTHENTICATED, 'unauthenticated')`（401）；
   `match` 返回 `undefined` 只是「另起新会话」。
+- **被拒的尝试走 `manager.onRequestRejected(request, err)` 审计**，不是 `validateRpcRequest`：后者跑在身份判定
+  之后，401 根本走不到它。流水线错误响应也回显 `req-id`（与正常路径一致）。
 - **会话凭证的闭环是四步，默认只做两步**：签发与认。下发要 `deliver: 'header:<name>'`（策略自己经
   `ctx.res` 写头，框架不写），取回要配 `credentialReader`。两者都不配时每次连接都是新身份，
   **不报错也不警告**——别把「续用不上」当成 bug，它是防冒充不是登录流程。
@@ -535,7 +537,7 @@ Mailbox 在严格模式下**必须**带 `req-id` header（否则 400），非严
 | 类 | 作用域 | 说明 |
 |-----|--------|------|
 | `RpcClientTransportManager` | 浏览器 + Node.js | 轻量版，仅含 `register()`, `getClient()`, `bindScheme()`, `clearSchemes()` 等客户端方法 |
-| `RpcTransportManager` | 浏览器 + Node.js | 继承自 `RpcClientTransportManager`，额外增加 `registerServer()` / `unregisterServer()`, `startAll()`, `stopAll()`, `validateRpcRequest()` 等服务端方法（旧名 `addServer()` 已废弃） |
+| `RpcTransportManager` | 浏览器 + Node.js | 继承自 `RpcClientTransportManager`，额外增加 `registerServer()` / `unregisterServer()`, `startAll()`, `stopAll()`, `validateRpcRequest()`, `onRequestRejected()`（被流水线拒掉的请求的审计钩子）等服务端方法（旧名 `addServer()` 已废弃） |
 
 ```
 src/transports/

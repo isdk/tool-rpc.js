@@ -487,6 +487,21 @@ const scopes = ctx.identity?.attributes?.scopes;
 客户端自报的 `clientId` 不在 `ctx` 顶层，在 `ctx.headers[RPC_HEADERS.CLIENT_ID]`（契约 9）；`peer`（socket 地址）
 也不在 `ctx`：反代后它是代理地址、不可信，策略要用就从 `ctx.req` 自己取。
 
+### 10.1 被拒的尝试也要能审计（issue #10）
+
+身份判定插在 `validateRpcRequest` **之前**（为了让它看得到 `request.identity`），后果是：被 401 拒掉的
+请求根本走不到架构层校验。拿 Manager 钩子当日志的部署，对这批「最想进日志的尝试」什么都记不到。
+
+补法：`RpcTransportManager.onRequestRejected(request, err)`（默认 no-op，继承覆写，与
+`validateRpcRequest` 同一套扩展方式），由顶级防护（`sendPipelineError`）叫。它覆盖整条流水线的拒绝：
+身份 401、架构层 403、寻址失败（此时 `request` 可能是 `undefined`）。钩子自己报错不会掉响应。
+
+同处一并修的是响应回显：`echoRequestId` 以前只盖正常路径，流水线错误不回 `req-id`——客户端对不上
+自己那次调用的，恰恰就是失败的那批。现在 `sendPipelineError` 也回显（`toRpcRequest` 都没成的请求
+没有 id 可回）。
+
+要在策略内部自己记录（比如带 `verify` 的失败原因）仍然可以：两个钩子不互斥，只是层不同。
+
 ## 11. 分期与顺序（已定）
 
 **先只改 tool-rpc，测试打磨好并发布，之后才动 tool-event / tool-rpc-fastify。**

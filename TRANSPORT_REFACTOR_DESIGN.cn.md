@@ -138,6 +138,8 @@
   3. **实例层缓存 (Instance)**：以**完整 apiUrl 字符串**为 key 缓存 Transport 实例（`transports.set(apiUrl, inst)`）。
      同 Origin 不同 path 不会自动复用客户端实例；物理底座共享是**服务端**侧靠 `getListenAddr()` + 路由表实现的。
 - **架构级策略校验 (`validateRpcRequest`)**：在调度前进行最终策略校验。包括 **SSRF 防御**（通过 `restrictedPatterns` 正则或字符串匹配）、协议白名单、工具访问权限控制。
+- **拒绝审计钩子 (`onRequestRejected(request, err)`)**：流水线（身份判定 / `validateRpcRequest` / 寻址）拒掉的请求都进这里，
+  默认 no-op。它与 `validateRpcRequest` 不能合并：后者跑在身份判定之后，被 401 拒掉的请求走不到它（issue #10）。
 
 ### 4.2 RpcServerDispatcher (逻辑执行引擎)
 
