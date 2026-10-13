@@ -27,7 +27,9 @@ export type {
 } from './identity';
 export { RpcSessionIdentityPolicy, RpcInProcessCredentialRegistry } from './identity-session';
 export type { RpcSessionIdentityOptions } from './identity-session';
-export { RpcBearerPolicy } from './identity-bearer';
+// 两个 bearer 解析 helper 也对外：下游自己写 reader 时复用那一段 RFC 7235 解析
+// （`tool-event` 在用），否则同一个请求两个包会给出不同答案。
+export { RpcBearerPolicy, readBearerCredential, parseBearerCredential } from './identity-bearer';
 export type { RpcVerifiedCredentialOptions } from './identity-bearer';
 export * from './server';
 export * from './client';

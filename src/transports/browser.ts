@@ -31,7 +31,9 @@ export type {
 } from './identity';
 export { RpcSessionIdentityPolicy, RpcInProcessCredentialRegistry } from './identity-session';
 export type { RpcSessionIdentityOptions } from './identity-session';
-export { RpcBearerPolicy } from './identity-bearer';
+// 名单与 Node 入口一致：两个 bearer 解析 helper 也是纯函数（不碰 Node API），
+// 客户端侧装配自定义 reader 时同样用得上。
+export { RpcBearerPolicy, readBearerCredential, parseBearerCredential } from './identity-bearer';
 export type { RpcVerifiedCredentialOptions } from './identity-bearer';
 export * from './server';
 export * from './dispatcher';

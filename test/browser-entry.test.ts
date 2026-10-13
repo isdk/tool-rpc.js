@@ -115,7 +115,7 @@ const INTERNAL_ADDRESS_HELPERS = [
   'withBindOptions',
 ]
 
-// 身份策略（设计见根目录 IDENTITY_POLICY_DESIGN.cn.md）：11 个公开符号。
+// 身份策略（设计见根目录 IDENTITY_POLICY_DESIGN.cn.md）：13 个公开符号。
 // 名单在 src/transports/index.ts 与 src/transports/browser.ts 里是**显式**的（那两个入口
 // 其余行是 export *，靠它顺带带出的符号没人钉）。其中只有三个类是运行时值，
 // 其余八个是类型——类型进不了运行时 import，只能由 dist/*.d.ts 的断言钉（未构建时 skip）。
@@ -136,6 +136,9 @@ const EXPECTED_IDENTITY_VALUES = [
   'RpcSessionIdentityPolicy',
   'RpcInProcessCredentialRegistry',
   'RpcBearerPolicy',
+  // 两个 bearer 解析 helper：下游写自己的 reader 时复用那一段 RFC 7235 解析
+  'readBearerCredential',
+  'parseBearerCredential',
 ]
 
 // Types that should NOT appear in dist/browser.d.ts (Node.js-only modules)

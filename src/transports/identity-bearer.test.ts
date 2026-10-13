@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { RpcBearerPolicy } from './identity-bearer';
+import { parseBearerCredential, readBearerCredential, RpcBearerPolicy } from './identity-bearer';
 import { RpcError, RpcStatusCode } from './models';
 import type { RpcIdentity, RpcIdentityContext } from './identity';
 
@@ -314,6 +314,36 @@ describe('RpcBearerPolicy (§5 默认实现 B)', () => {
 
     expect(policy.assign(ctxOf())).toEqual({ id: 'anon-of-/api' });
     expect(calls).toEqual(['verify:ok-alice:/api', 'verify:nope:/api', 'reject:nope:http://localhost/api/echo', 'assign']);
+  });
+
+  it('C9 内置 reader 只读标准字段 authorization（去 Bearer 前缀）', () => {
+    expect(readBearerCredential({ headers: { authorization: 'Bearer abc' } })).toBe('abc');
+    expect(readBearerCredential({ headers: { authorization: 'bearer abc' } })).toBe('abc');
+    expect(readBearerCredential({ headers: { Authorization: 'abc' } })).toBe('abc');
+    // 私有 header 不读：部署写自己的 reader
+    expect(readBearerCredential({ headers: { 'x-auth': 'secret' } })).toBeUndefined();
+    expect(readBearerCredential({ headers: {} })).toBeUndefined();
+    expect(readBearerCredential({})).toBeUndefined();
+    // 只有 scheme、没有 token → 无凭证（不是字面量凭证 `Bearer`）：
+    // 否则「带没带凭证」就成了客户端凭一个空 header 就能造出来的状态
+    expect(readBearerCredential({ headers: { authorization: 'Bearer' } })).toBeUndefined();
+    expect(readBearerCredential({ headers: { authorization: 'Bearer   ' } })).toBeUndefined();
+    expect(readBearerCredential({ headers: { authorization: 'bearer' } })).toBeUndefined();
+    // 但字面量 token 就是 `Bearer` 时仍是凭证——两者分得开
+    expect(readBearerCredential({ headers: { authorization: 'Bearer Bearer' } })).toBe('Bearer');
+  });
+
+  it('parseBearerCredential 只管整值解析，找 header 归调用方', () => {
+    // 对外导出的就是这一段：下游自己懂来路（SSE 的 query、代理的私有 header），
+    // 解析不能各写一份，否则同一个请求两个包给出不同答案。
+    expect(parseBearerCredential('Bearer abc')).toBe('abc');
+    expect(parseBearerCredential('  Bearer   abc  ')).toBe('abc');
+    expect(parseBearerCredential('bare-token')).toBe('bare-token');
+    expect(parseBearerCredential('Bearer')).toBeUndefined();
+    expect(parseBearerCredential('Bearer   ')).toBeUndefined();
+    expect(parseBearerCredential('Bearer Bearer')).toBe('Bearer');
+    expect(parseBearerCredential('')).toBeUndefined();
+    expect(parseBearerCredential(undefined)).toBeUndefined();
   });
 
   it('策略是无状态的：同一个实例服务多次调用不串身份', async () => {

@@ -1,7 +1,6 @@
 import { uuidv4 } from '@isdk/hash';
 import { RpcError, RpcStatusCode } from './models';
 import {
-  readBearerCredential,
   type RpcIdentity,
   type RpcIdentityContext,
   type RpcIdentityPolicy,
@@ -151,4 +150,61 @@ export class RpcBearerPolicy<Req = any> implements RpcIdentityPolicy<Req> {
   protected assignIdentity(ctx: RpcIdentityContext<Req>): RpcIdentity {
     return { id: uuidv4() };
   }
+}
+
+/**
+ * 把 `Authorization` 的**整值**按 RFC 7235 解析成凭证（不含找 header 那一段）。
+ *
+ * 只有 scheme、没有 token（`Bearer` / `Bearer   `）算**无凭证**，不是字面量凭证 `Bearer`。
+ * 它既不是「带前缀的 token」也不是「不带前缀的 token」；当凭证用就把「有没有凭证」
+ * 变成客户端凭一个空 header 就能造出来的状态：`allowAnonymous` 谓词、审计里的
+ * 「这次是否尝试认证」、自定义策略里的 `if (ctx.credential)` 全都会被骗。
+ * 只拦「整值就是 scheme」这一种：`Bearer Bearer` 仍是字面量 token `Bearer`，两者必须分得开
+ * （代价：不带前缀、字面量恰好是 `bearer` 的 token 无法与空 scheme 区分，这里选 scheme）。
+ *
+ * 对外导出是给**懂自己凭证来路**的 reader 复用这一段解析（`tool-event` 的
+ * `sseCredentialReader` 就是：它自己找 header/query，解析交给这里），不是往策略里开注入口：
+ * 策略侧的来路仍是封闭的（契约 9）。
+ */
+export function parseBearerCredential(value: string | undefined): string | undefined {
+  if (value === undefined) {return undefined;}
+
+  const trimmed = value.trim();
+  if (/^bearer$/i.test(trimmed)) {return undefined;}
+
+  const match = /^Bearer\s+(.+)$/i.exec(trimmed);
+  return (match ? match[1] : trimmed).trim() || undefined;
+}
+
+/**
+ * 内置凭证 reader：只读标准字段 `authorization`（去 `Bearer ` 前缀，RFC 7235）。
+ *
+ * 私有 header（鉴权代理、Electron payload、EventSource 的 query）由部署写自己的 reader，
+ * 框架侧不猜。transport 的默认 reader 用它：HTTP 与 Mailbox 的原生请求都带 `headers`，
+ * 所以同一个函数覆盖两者；拿不到 `headers` 时退到已归一化的 `ToolRpcRequest.headers`。
+ *
+ * 对外导出的判据是「下游在用」（`src/transports/README.cn.md` 的公开面判据）：
+ * `tool-event` 的 SSE reader 走同一个解析，两个包对同一个请求就不会给出不同答案。
+ * 它仍是「内置 reader」而非可注入口——要换来路就在构造 ctx 的那一层换
+ * （transport 配 `credentialReader`，裸用策略时调用方自己备 `ctx.credential`）。
+ */
+export function readBearerCredential(req: any): string | undefined {
+  const headers = req?.headers;
+  if (!headers || typeof headers !== 'object') {return undefined;}
+
+  // Node 的 IncomingMessage 已把 header 名小写；Mailbox 的 headers 是调用方写的，
+  // 大小写不可控，所以按大小写不敏感找这一个标准字段（只此一个，私有 header 归部署）。
+  let raw = headers.authorization ?? headers.Authorization;
+  if (raw === undefined) {
+    for (const key of Object.keys(headers)) {
+      if (key.toLowerCase() === 'authorization') {
+        raw = headers[key];
+        break;
+      }
+    }
+  }
+  if (Array.isArray(raw)) {raw = raw[0];}
+  if (raw === undefined || raw === null) {return undefined;}
+
+  return parseBearerCredential(String(raw));
 }

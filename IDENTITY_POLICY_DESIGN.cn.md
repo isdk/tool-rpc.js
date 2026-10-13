@@ -514,7 +514,7 @@ const scopes = ctx.identity?.attributes?.scopes;
 | **P0** | 三个文件 + 单测 + 名单 | 纯新增，零行为变化 |
 | **P1a** | 只加载体：`ToolRpcRequest.identity` / `ToolRpcContext.identity` + `dispatcher.prepareContext`（`private`，`src/transports/dispatcher.ts:181`，透传在 :197） | 零行为变化（基线 44 文件 / 539 测试可直接对照） |
 | **P1b** | 装调用点：`ServerToolTransport.identity` + `credentialReader` + `resolveRequestIdentity`；HTTP 与 Mailbox 提供 reader；§3 第 3/4 条 | 装了策略才改变行为；未装策略逐字节不变 |
-| **发布** | `release`（11 个新公开符号 = 公开面变化，`CHANGELOG.md` 与 `docs/api/**` 重生成） | 下游只看到 dist |
+| **发布** | `release`（13 个新公开符号 = 公开面变化，`CHANGELOG.md` 与 `docs/api/**` 重生成；原定 11 个，另两个见 §18 末） | 下游只看到 dist |
 | **之后** | `tool-event` 收口（§12）+ `tool-rpc-fastify` 装配 `identity` 与它的 `credentialReader`（它已走 `processIncomingCall`，`fastify-server.ts:154`） | 在下游仓库，各自单独发布 |
 
 `ai-tool` 与 `tool-electron` 零代码变更（§12 实测）。
@@ -601,10 +601,10 @@ export const createSSEIdentity = (o?: SSETokenIdentityOptions) =>
 
 ## 14. 落地清单
 
-1. 先改名单：`test/browser-entry.test.ts` 加 `EXPECTED_IDENTITY_TYPES`，它会先红，再动代码。断言要写成**运行时 import 两个入口**（照 :199 的 `should export only the address helpers a transport needs`：`await import('../src/browser')` 与 `'../src/index'`，逐个 `typeof` 断言）——文件末尾那两条 dist 断言在未构建时会 skip，不会红。11 个符号：
+1. 先改名单：`test/browser-entry.test.ts` 加 `EXPECTED_IDENTITY_TYPES`，它会先红，再动代码。断言要写成**运行时 import 两个入口**（照 :199 的 `should export only the address helpers a transport needs`：`await import('../src/browser')` 与 `'../src/index'`，逐个 `typeof` 断言）——文件末尾那两条 dist 断言在未构建时会 skip，不会红。当时定的 11 个符号：
    `RpcIdentity`、`RpcIdentityContext`、`RpcCredentialReader`、`RpcCredentialSource`、`RpcIdentityPolicy`、
    `RpcCredentialRegistry`、`RpcSessionIdentityPolicy`、`RpcSessionIdentityOptions`、`RpcInProcessCredentialRegistry`、
-   `RpcBearerPolicy`、`RpcVerifiedCredentialOptions`。
+   `RpcBearerPolicy`、`RpcVerifiedCredentialOptions`。（2026-10-13 起共 13 个：另加 `readBearerCredential` / `parseBearerCredential`，理由见 §18 末。）
 2. 两个入口显式导出且一致：`src/transports/index.ts`、`src/transports/browser.ts`。
 3. 单测要钉住：§3 十一条契约、§4 登记表四条契约、§7 两个继承例子、§8 自定义策略例子（能编译且行为对）。
    P1b 另加两条回归：**未装策略时 header 透传与今天逐字节一致**（照 `src/transports/http-server-regressions.test.ts` 的写法）、
@@ -786,6 +786,16 @@ new RpcBearerPolicy({
 - 要「只认客户端」那种拓扑就显式写开关：`fallback: 'none'`（默认，reader 权威）| `'authorization'`
   （忽略 transport 的 reader，按标准 `authorization` 再读一次）。两种拓扑都合法，所以它是选项而不是隐式行为。
 - 默认 `'none'` 不带兼容包被：`identity` 在 1.1.0 后才引入、尚未发布。
+
+补（2026-10-13）：bearer 解析从包内 helper 改为**对外导出**，`readBearerCredential`（找 header + 解析）
+与 `parseBearerCredential`（只解析整值）都搬进 `identity-bearer.ts`，`identity.ts` 回到纯类型。
+理由：`tool-event` 的 `sseCredentialReader` 自己复制了那一段 RFC 7235 解析，两边对同一个 header
+给出不同答案（空 token 那次就是先在那边暴露的）；按 `src/transports/README.cn.md:285` 的公开面判据，
+「下游在用」就是公开。**这不放宽上面的封闭性**：导出的是纯函数，策略侧仍没有注入口——
+来路仍只有 `ctx.credential` 与那个写死的调用。分段是为了让「懂来路」的一方只借解析那一段：
+`tool-event` 保留自己的 `singleHeaderValue`（重复 header 不给凭证，比内置 reader 取第一个更严）。
+名单同步：`src/transports/index.ts`、`src/transports/browser.ts`、`test/browser-entry.test.ts` 的
+`EXPECTED_IDENTITY_VALUES`（现 5 个运行时符号）。
 
 测试：`src/transports/identity-bearer.test.ts`（reader 已读且无凭证 → 401，`verify` 零调用；
 `fallback: 'authorization'` opt-in 生效；单独用时只备 `ctx.headers`（没有 `req`）也读标准字段，

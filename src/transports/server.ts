@@ -4,7 +4,8 @@ import { normalizeRoutePath, routeMatchKey } from './route-path';
 import { RpcServerDispatcher } from './dispatcher';
 import { RpcTransportManager } from './server-manager';
 import { RPC_HEADERS, ToolRpcRequest, ToolRpcResponse } from './models';
-import { readBearerCredential, type RpcCredentialReader, type RpcIdentityContext, type RpcIdentityPolicy } from './identity';
+import { type RpcCredentialReader, type RpcIdentityContext, type RpcIdentityPolicy } from './identity';
+import { readBearerCredential } from './identity-bearer';
 import { RPC_APIS_TOOL_ID, manifestItem, manifestItems, registryEntries } from './rpc-apis';
 
 export interface ServerToolTransportOptions extends ToolTransportOptions {

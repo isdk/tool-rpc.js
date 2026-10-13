@@ -427,7 +427,9 @@ new HttpServerToolTransport({
   `ctx.res` 写头，框架不写），取回要配 `credentialReader`。两者都不配时每次连接都是新身份，
   **不报错也不警告**——别把「续用不上」当成 bug，它是防冒充不是登录流程。
 - **凭证取法可换，且 reader 权威**：transport 的 `credentialReader` 从原生 req 取字符串，内置默认只读
-  `authorization`（去 Bearer 前缀），私有 header 自己写 reader。**任意 reader 只有一个注入点，在构造 ctx
+  `authorization`（去 Bearer 前缀），私有 header 自己写 reader——要复用那一段解析就 import
+  `readBearerCredential`（找 header + 解析）或 `parseBearerCredential`（只解析整值），它们已对外
+  （下游在用，判据见 `src/transports/README.cn.md` 公开面判据）；但它们是纯函数，不是策略侧的注入口。**任意 reader 只有一个注入点，在构造 ctx
   的那一层**：策略侧的来路是封闭的（`ctx.credential` + 写死的 `authorization`），没有可注入的 reader，
   只有 `fallback` 那个枚举开关。transport 的 reader 返回 `undefined` 就是「这条请求没带我要的凭证」：
   `RpcBearerPolicy` 不会回头再读 `authorization`（否则部署明确不信的来路仍会被用）。`ctx.credentialRead`
