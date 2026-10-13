@@ -142,6 +142,13 @@ describe('identity contracts (§3)', () => {
     expect(readBearerCredential({ headers: { 'x-auth': 'secret' } })).toBeUndefined();
     expect(readBearerCredential({ headers: {} })).toBeUndefined();
     expect(readBearerCredential({})).toBeUndefined();
+    // 只有 scheme、没有 token → 无凭证（不是字面量凭证 `Bearer`）：
+    // 否则「带没带凭证」就成了客户端凭一个空 header 就能造出来的状态
+    expect(readBearerCredential({ headers: { authorization: 'Bearer' } })).toBeUndefined();
+    expect(readBearerCredential({ headers: { authorization: 'Bearer   ' } })).toBeUndefined();
+    expect(readBearerCredential({ headers: { authorization: 'bearer' } })).toBeUndefined();
+    // 但字面量 token 就是 `Bearer` 时仍是凭证——两者分得开
+    expect(readBearerCredential({ headers: { authorization: 'Bearer Bearer' } })).toBe('Bearer');
   });
 
   it('C10 钩子可同步可异步，框架侧一律 await', async () => {

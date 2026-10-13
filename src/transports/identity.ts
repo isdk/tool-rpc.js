@@ -136,6 +136,8 @@ export interface RpcCredentialRegistry {
  * 框架侧不猜。transport 的默认 reader 用它：HTTP 与 Mailbox 的原生请求都带 `headers`，
  * 所以同一个函数覆盖两者；拿不到 `headers` 时退到已归一化的 `ToolRpcRequest.headers`。
  *
+ * 只有 scheme、没有 token 的 `Authorization: Bearer` 算**无凭证**（不是字面量凭证 `Bearer`）。
+ *
  * 包内 helper，不在 11 个公开符号里（部署要换 reader 就自己写一个）。
  */
 export function readBearerCredential(req: any): string | undefined {
@@ -157,6 +159,14 @@ export function readBearerCredential(req: any): string | undefined {
   if (raw === undefined || raw === null) {return undefined;}
 
   const value = String(raw).trim();
+
+  // 「只有 scheme、没有 token」不是凭证。它既不是「带前缀的 token」也不是「不带前缀的 token」，
+  // 当凭证用就把「有没有凭证」变成客户端凭一个空 header 就能造出来的状态：`allowAnonymous` 谓词、
+  // 审计里的「这次是否尝试认证」、自定义策略里的 `if (ctx.credential)` 全都会被骗。
+  // 只拦「整值就是 scheme」这一种：`Bearer Bearer` 仍是字面量 token `Bearer`，两者必须分得开
+  // （代价：不带前缀、字面量恰好是 `bearer` 的 token 无法与空 scheme 区分，这里选 scheme）。
+  if (/^bearer$/i.test(value)) {return undefined;}
+
   const match = /^Bearer\s+(.+)$/i.exec(value);
   return (match ? match[1] : value).trim() || undefined;
 }

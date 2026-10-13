@@ -227,6 +227,37 @@ describe('RpcBearerPolicy (§5 默认实现 B)', () => {
     expect(seen).toEqual(['from-headers']);
   });
 
+  it('`Authorization: Bearer`（只有 scheme、没有 token）不进 verify：presence 不能被空 header 造出来', async () => {
+    const seen: string[] = [];
+    const policy = new RpcBearerPolicy({
+      verify: (credential) => {
+        seen.push(credential);
+        return { id: 'alice' };
+      },
+    });
+
+    // 默认 `allowAnonymous: true` → 走匿名，而不是拿 `Bearer` 这个串去 verify
+    await expect(policy.match(ctxOf({ req: { headers: { authorization: 'Bearer   ' } } })))
+      .resolves.toBeUndefined();
+    expect(seen).toEqual([]);
+
+    // 严格模式下是「没凭证」的 401，不是「凭证验不过」
+    const strict = new RpcBearerPolicy({
+      allowAnonymous: false,
+      verify: (credential) => {
+        seen.push(credential);
+        return { id: 'alice' };
+      },
+    });
+    await expect(strict.match(ctxOf({ req: { headers: { authorization: 'Bearer' } } })))
+      .rejects.toMatchObject({ code: RpcStatusCode.UNAUTHENTICATED });
+    expect(seen).toEqual([]);
+
+    // 字面量 token 就是 `Bearer` 时照旧进 verify：两者分得开
+    await strict.match(ctxOf({ req: { headers: { authorization: 'Bearer Bearer' } } }));
+    expect(seen).toEqual(['Bearer']);
+  });
+
   it('assign 默认给连接级 uuid，且返回体不带 credential（服务端不签发凭证，契约 5）', () => {
     const policy = new RpcBearerPolicy({ verify: () => undefined });
 
