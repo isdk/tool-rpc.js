@@ -109,7 +109,10 @@ export interface RouteEntry {
   path: string;
   /** 命中条件。都不写就是「该路径上任何请求都算」。 */
   when?: {
-    /** HTTP method（大写）。Mailbox 没有 method，这一项自然不命中。 */
+    /**
+     * HTTP method。声明侧大小写不敏感（`addRoute` 存进表时归成大写），
+     * 表里与匹配用的始终是大写值。Mailbox 没有 method，这一项自然不命中。
+     */
     method?: string;
     /** 请求已带上的 act。 */
     act?: string;
@@ -538,9 +541,13 @@ export abstract class ServerToolTransport extends ToolTransport implements IServ
 
     const rows = this.routeTable.get(prefix)!;
     // 先归一再算 key：否则 `path: ''` 与 `path: '/'` 会当成两条声明（它们是同一个路由）。
+    // `when.method` 一并归成大写：`matchRouteEntry` 与它比的是 `rawReq.method`，
+    // Node 的 HTTP 永远大写（issue #7）——不归一的话 `{ method: 'get' }` 是一条
+    // 永不命中的声明，而且它与大写声明的 key 不同，连「替换内置行」都做不到。
     const normalized: RouteEntry = {
       ...entry,
       path: normalizeRoutePath(entry.path, { mode: 'request', strictTrailingSlash: this.strictTrailingSlash }).path,
+      when: entry.when ? { ...entry.when, method: entry.when.method?.toUpperCase() } : entry.when,
     };
     const key = this.routeEntryKey(normalized);
     const existing = rows.findIndex(row => this.routeEntryKey(row) === key);

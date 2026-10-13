@@ -99,6 +99,22 @@ describe('ServerToolTransport route table', () => {
       expect(t.entryOf('/api', { path: '/', method: 'GET' })).toMatchObject({ toolId: 'myRoot' });
    });
 
+   it('normalizes a lower-case when.method declaration (issue #7)', () => {
+      const t = new TableProbe();
+      t.addRpcHandler('/api');
+
+      // Node 的 `rawReq.method` 永远大写，声明写小写也必须能命中
+      t.addRoute('/api', { path: '/legacy', when: { method: 'get' }, toolId: 'lowerCase' });
+
+      expect(t.tableOf().find(row => row.path === '/legacy')?.when).toEqual({ method: 'GET' });
+      expect(t.entryOf('/api', { path: '/legacy', method: 'GET' })).toMatchObject({ toolId: 'lowerCase' });
+
+      // 归一后才谈得上「同一条声明」：小写声明要能替换内置行，而不是多出一条永不命中的行
+      t.addRoute('/api', { path: '/', when: { method: 'get' }, toolId: 'myRoot' });
+      expect(t.entryOf('/api', { path: '/', method: 'GET' })).toMatchObject({ toolId: 'myRoot' });
+      expect(t.tableOf().filter(row => row.prefix === '/api' && row.path === '/' && row.when?.method).length).toBe(1);
+   });
+
    it('a third-party row replaces the built-in one, and other rows coexist', () => {
       const t = new TableProbe();
       t.addRpcHandler('/api');

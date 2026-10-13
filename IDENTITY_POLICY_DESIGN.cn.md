@@ -669,7 +669,8 @@ new RpcBearerPolicy({
 - **路由表**（`ServerToolTransport.addRoute()` / `getRouteTable()` / `matchRouteEntry()`）：每个前缀自带三行内置声明——
   `GET 前缀根`、`act: 'list'`、`act: 'get'`（前两者 HTTP 与 Mailbox 各自命中，互不抢）。它们不是特权开关：
   第三方用同一个 `addRoute()` 写同一路径同条件就能换掉。`path: ''` 与 `'/'` 同义；`/x` 与 `/x/` 默认同义
-  （`strictTrailingSlash: true` 才分两条）。
+  （`strictTrailingSlash: true` 才分两条）；`when.method` 声明侧大小写不敏感（存进表时归成大写，
+  否则 `{ method: 'get' }` 是一条永不命中的声明，也替换不了内置行）。
 - **注册表分层真正参与 dispatch**：`requestRegistry(rpcReq)` 把「前缀 claim 的 registry → transport 自己的 →
   dispatcher 的 → 系统保留」叠成一个 `get(toolId)` 视图交给 dispatcher。修了之前的半成品：`mount(RegB, '/v2')`
   会把 `/api` 也改指向 RegB。解析顺序与 `resolveRouteTool` 同一套，所以策略看到的 `tool` 就是真会被调的那个。
