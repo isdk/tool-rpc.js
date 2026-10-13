@@ -407,6 +407,57 @@ describe('identity end-to-end over HTTP: 会话凭证下发再带回来', () => 
   })
 })
 
+describe('identity end-to-end over HTTP: 会话闭环不靠子类（issue #6）', () => {
+  /**
+   * 与上面那个 describe 同一件事，但**不子类化 transport**：下发交给策略自己的
+   * `deliver: 'header:rpc-session'`。两行配置（下发 + 取回）就能闭环，不需要 10 行子类。
+   */
+  let server: HttpServerToolTransport
+  let client: HttpClientToolTransport
+
+  beforeAll(async () => {
+    resetRegistries()
+
+    await withReservedPort(3221, async (port) => {
+      const apiRoot = `http://localhost:${port}/api`
+      server = new HttpServerToolTransport({
+        port,
+        apiUrl: apiRoot,
+        identity: new RpcSessionIdentityPolicy({ deliver: 'header:rpc-session' }),
+        credentialReader: (req: any) => req?.headers?.['rpc-session'],
+      })
+      server.addRpcHandler(apiRoot)
+      await server.start({ port, host: 'localhost' })
+      client = new HttpClientToolTransport(apiRoot)
+    }, 'localhost')
+  })
+
+  afterAll(async () => {
+    await server.stop()
+    ToolFunc.items = {}
+    ServerTools.items = {}
+    ClientTools.items = {}
+  })
+
+  it('策略自己下发：首次连接的响应头里就有凭证', async () => {
+    const res = (await client._fetch('whoami', {}, 'run')) as Response
+    expect(res.status).toBe(200)
+    expect(res.headers.get('rpc-session')).toMatch(/^[0-9a-f-]{36}$/)
+  })
+
+  it('两行配置就闭环：带回来的凭证续用同一个身份，且不重发', async () => {
+    const first = (await client._fetch('whoami', {}, 'run')) as Response
+    const credential = first.headers.get('rpc-session')!
+    const firstId = (await first.json()).identityId
+
+    const again = (await client._fetch('whoami', {}, 'run', undefined, {
+      headers: { 'rpc-session': credential },
+    })) as Response
+    expect((await again.json()).identityId).toBe(firstId)
+    expect(again.headers.get('rpc-session')).toBeNull()
+  })
+})
+
 describe('identity end-to-end over HTTP: 私有 header 的 bearer（契约 9）', () => {
   let server: HttpServerToolTransport
   let client: HttpClientToolTransport

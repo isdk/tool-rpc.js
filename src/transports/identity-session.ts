@@ -35,6 +35,18 @@ export interface RpcSessionIdentityOptions {
    * 外接 Redis / 数据库、LRU 等淘汰策略）。
    */
   registry?: RpcCredentialRegistry;
+  /**
+   * 下发通道（issue #6）。默认不下发：`assign` 只把凭证放进返回值，上不上 wire 看部署。
+   *
+   * 目前只有一种形状：`'header:<name>'`——策略自己经 `ctx.res.setHeader` 把凭证写进响应头。
+   * 它是**策略**写的，不是框架：契约 11 不变（框架不定义凭证的 header 名、不写响应）。
+   * 写不了就降级为不下发（没有 `ctx.res`、已 `headersSent`、非 HTTP 形状如 Mailbox）。
+   *
+   * 它只补上四步闭环里的第二步。取回那一步仍要自己配 `credentialReader`：
+   * 内置 reader 只读 `authorization`，客户端从响应头拿到的凭证它读不到。
+   * 所以 HTTP 上跑通一个会话闭环是两行：`deliver: 'header:x'` + `credentialReader: r => r.headers['x']`。
+   */
+  deliver?: string;
 }
 
 /** 默认值单点：30s 续用窗口、一万条容量。 */
@@ -147,6 +159,14 @@ export class RpcInProcessCredentialRegistry implements RpcCredentialRegistry {
 /**
  * 会话身份策略：服务端在首次连接签发凭证，客户端断线后带回来续用。
  *
+ * 完整闭环是四步：签发 → 下发 → 客户端带回来 → 认。本类默认只做第一与第四步，
+ * 中间两步要部署配（issue #6）：
+ * 1. 下发：`deliver: 'header:rpc-session'`（策略自己经 `ctx.res` 写响应头），或覆写 `deliverCredential()` 换通道。
+ * 2. 取回：`credentialReader: (r) => r.headers['rpc-session']`（内置 reader 只读 `authorization`，读不到响应头里那张）。
+ *
+ * 两步都不配时它仍然可用，只是每次连接都是新身份（不报错、不警告）——它是**防冒充**，
+ * 不是登录流程：不配闭环不会让任何请求失败，只是续用不了。
+ *
  * 可继承，覆写点一律 `protected`（设计文档 §7）。`name` 必须声明成 `string`：
  * 写成 `readonly name = 'session'` 会被推断成字面量类型，子类换不了 `name`（TS2416）。
  */
@@ -158,11 +178,14 @@ export class RpcSessionIdentityPolicy<Req = any> implements RpcIdentityPolicy<Re
   protected ttlMs: number;
   protected maxUses?: number;
   protected maxEntries: number;
+  /** `deliver` 解析结果：要写哪个响应头。`undefined` = 不下发（默认）。 */
+  protected deliverHeader?: string;
 
   constructor(options?: RpcSessionIdentityOptions) {
     this.ttlMs = options?.ttlMs ?? DEFAULT_TTL_MS;
     this.maxUses = options?.maxUses;
     this.maxEntries = options?.maxEntries ?? DEFAULT_MAX_ENTRIES;
+    this.deliverHeader = this.parseDelivery(options?.deliver);
     this.registry = options?.registry
       ?? new RpcInProcessCredentialRegistry({ ttlMs: this.ttlMs, maxUses: this.maxUses, maxEntries: this.maxEntries });
   }
@@ -184,13 +207,47 @@ export class RpcSessionIdentityPolicy<Req = any> implements RpcIdentityPolicy<Re
     const id = this.newIdentityId(ctx);
     const identity = this.decorate({ id }, ctx);
     const credential = this.registry.ensureCredential(id);
-    if (credential !== undefined) {identity.credential = credential;}
+    if (credential !== undefined) {
+      identity.credential = credential;
+      this.deliverCredential(credential, ctx);
+    }
     return identity;
   }
 
   /** 销：丢弃该身份的凭证。P0/P1 无调用点（「一个 HTTP 请求结束」不等于「会话结束」），给通道事件预留。 */
   public revoke(identityId: string): void {
     this.registry.revoke(identityId);
+  }
+
+  /**
+   * `deliver` 选项的解析：只认 `'header:<name>'`。写了别的形状就**构造时报错**，
+   * 不默默降级——否则「配了下发」与「没配」在部署眼里长得一样，难查。
+   */
+  protected parseDelivery(spec?: string): string | undefined {
+    if (spec === undefined || spec === null || spec === '') {return undefined;}
+    const match = /^header:\s*([!#$%&'*+\-.^_`|~0-9A-Za-z]+)$/i.exec(String(spec).trim());
+    if (!match) {
+      throw new Error(
+        `RpcSessionIdentityPolicy: deliver must be 'header:<name>' (got ${JSON.stringify(spec)}). ` +
+        'Other delivery channels (query / SSE welcome frame / private header) belong in a subclass: ' +
+        'override deliverCredential().'      );
+    }
+    return match[1];
+  }
+
+  /**
+   * 下发：把凭证交给客户端。默认只处理 `deliver: 'header:<name>'` 这一种 HTTP 形状，
+   * 且用的是 `ctx.res` 这个逃生口（框架侧不写响应、不定义 header 名，契约 11）。
+   * 拿不到可写的 res 就降级为不下发（Mailbox 的回复 header 在 `sendRpcResponse` 内部才成形）。
+   * 要别的通道（query / SSE welcome 帧）就覆写这里。
+   */
+  protected deliverCredential(credential: string, ctx: RpcIdentityContext<Req>): void {
+    const header = this.deliverHeader;
+    if (!header) {return;}
+
+    const res: any = ctx.res;
+    if (!res || res.headersSent || typeof res.setHeader !== 'function') {return;}
+    res.setHeader(header, credential);
   }
 
   /** 新身份的 id：默认连接级 uuid。要用户级 id 就覆写这里（代价见设计文档 §5 的注）。 */

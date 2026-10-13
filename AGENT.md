@@ -394,8 +394,13 @@ await manager.startAll();
 `identity-bearer.ts`（凭证外部签发、服务端只验）。完整规格见根目录 `IDENTITY_POLICY_DESIGN.cn.md`。
 
 ```typescript
-// A：服务端首次连接自动签发会话凭证（不做认证，但连上后不可冒充、断线可续）
-new HttpServerToolTransport({ apiUrl: '/api', identity: new RpcSessionIdentityPolicy() });
+// A：服务端首次连接自动签发会话凭证（不做认证，但连上后不可冒充、断线可续）。
+// 闭环要成对配：`deliver` 下发 + `credentialReader` 取回（内置 reader 只读 authorization）。
+new HttpServerToolTransport({
+  apiUrl: '/api',
+  identity: new RpcSessionIdentityPolicy({ deliver: 'header:rpc-session' }),
+  credentialReader: (r) => r.headers['rpc-session'],
+});
 
 // B：JWT / api key（做认证；不认就 401）
 new HttpServerToolTransport({
@@ -414,6 +419,9 @@ new HttpServerToolTransport({
 - **不装策略就是 no-op**：`ctx.identity` 为 `undefined`，`clientId` 仍是客户端自报值（与旧行为逐字节一致）。
 - **拒绝要抛** `new RpcError('Unauthenticated', RpcStatusCode.UNAUTHENTICATED, 'unauthenticated')`（401）；
   `match` 返回 `undefined` 只是「另起新会话」。
+- **会话凭证的闭环是四步，默认只做两步**：签发与认。下发要 `deliver: 'header:<name>'`（策略自己经
+  `ctx.res` 写头，框架不写），取回要配 `credentialReader`。两者都不配时每次连接都是新身份，
+  **不报错也不警告**——别把「续用不上」当成 bug，它是防冒充不是登录流程。
 - **凭证取法可换，且 reader 权威**：`credentialReader` 从原生 req 取字符串，内置默认只读 `authorization`（去 Bearer 前缀）；
   私有 header 自己写 reader。它返回 `undefined` 就是「这条请求没带我要的凭证」：`RpcBearerPolicy` 不会回头
   再读 `authorization`（否则部署明确不信的来路仍会被用）。`ctx.credentialRead` 就是用来区分「reader 拒读」与

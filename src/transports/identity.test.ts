@@ -334,6 +334,57 @@ describe('credential registry (§4)', () => {
   });
 });
 
+describe('session credential delivery (issue #6)', () => {
+  /** 假 `ctx.res`：只钉「有没有写这个头」，不依赖 Node 响应对象。 */
+  const resOf = (headersSent = false) => {
+    const written: Record<string, string> = {};
+    return {
+      headersSent,
+      setHeader: (name: string, value: string) => { written[name] = String(value); },
+      written,
+    };
+  };
+
+  it('默认不下发：凭证只在 assign 的返回值里，`ctx.res` 不被碰（兼容不变）', () => {
+    const policy = new RpcSessionIdentityPolicy();
+    const res = resOf();
+    const identity = policy.assign({ res });
+
+    expect(identity.credential).toMatch(/^[0-9a-f-]{36}$/);
+    expect(res.written).toEqual({});
+  });
+
+  it("deliver: 'header:<name>' 由策略自己写响应头（契约 11：交付通道归策略，框架不写）", () => {
+    const policy = new RpcSessionIdentityPolicy({ deliver: 'header:rpc-session' });
+    const res = resOf();
+    const identity = policy.assign({ res });
+
+    expect(res.written['rpc-session']).toBe(identity.credential);
+  });
+
+  it('下发只跟着 assign：match 命中不重发（契约 5）', () => {
+    const policy = new RpcSessionIdentityPolicy({ deliver: 'header:rpc-session' });
+    const first = policy.assign({ res: resOf() });
+
+    const res = resOf();
+    expect(policy.match({ credential: first.credential, res })?.id).toBe(first.id);
+    expect(res.written).toEqual({});
+  });
+
+  it('res 不在 / 已 headersSent / 不是 HTTP 形状 → 不炸，降级为不下发', () => {
+    const policy = new RpcSessionIdentityPolicy({ deliver: 'header:rpc-session' });
+
+    expect(() => policy.assign({})).not.toThrow();
+    expect(() => policy.assign({ res: { headersSent: true, setHeader: () => { throw new Error('never'); } } })).not.toThrow();
+    expect(() => policy.assign({ res: {} })).not.toThrow();
+  });
+
+  it('deliver 写成不认识的形状：构造时就报错，不是默默不下发', () => {
+    expect(() => new RpcSessionIdentityPolicy({ deliver: 'rpc-session' } as any)).toThrow(/deliver/);
+    expect(() => new RpcSessionIdentityPolicy({ deliver: 'query:token' } as any)).toThrow(/deliver/);
+  });
+});
+
 describe('custom policy (§8)', () => {
   it('鉴权代理 header 策略：match + assign 两个方法就是全部形状', async () => {
     class ProxyHeaderPolicy implements RpcIdentityPolicy {

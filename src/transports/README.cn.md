@@ -439,6 +439,16 @@ new RpcBearerPolicy({
 与 `ensureCredential` 满容量两处，`prune` 是给部署接定时任务的入口。内置实现按**凭证**为 key、按身份找凭证靠
 第二索引（`identityId → credential`），要持久化 / 跨进程共享 / LRU 就自己实现那四个方法从 `registry` 口子注入。
 
+**会话凭证的闭环是四步，默认只做两步**（issue #6）：签发 → 下发 → 客户端带回来 → 认。`assign` 只把凭证放进
+返回值，没人写 wire；内置 reader 又只读 `authorization`，所以默认配法下每次连接都是新身份（不报错、不警告）。
+HTTP 上跑通它不需要子类化 transport，成对配两行就够：
+`identity: new RpcSessionIdentityPolicy({ deliver: 'header:rpc-session' })` 配
+`credentialReader: (r) => r.headers['rpc-session']`。
+
+写响应头的是**策略**（用 `ctx.res` 这个逃生口），不是框架：契约 11 不变。`deliver` 默认不配；只认
+`'header:<name>'` 这一种 HTTP 形状（写错形状构造时报错），拿不到可写的 res（Mailbox、已 `headersSent`）
+就降级为不下发。要 query / SSE welcome 帧这类通道就覆写 `deliverCredential()`。
+
 ---
 
 ## 10. 信号联动与延迟中止

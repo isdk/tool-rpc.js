@@ -588,6 +588,25 @@ import { HttpServerToolTransport, RpcSessionIdentityPolicy } from '@isdk/tool-rp
 new HttpServerToolTransport({ apiUrl: '/api', identity: new RpcSessionIdentityPolicy() });
 ```
 
+完整闭环是四步：**签发 → 下发 → 客户端带回来 → 认**。光 `new RpcSessionIdentityPolicy()` 只做第一步与最后一步：
+凭证只进 `assign` 的返回值，没人把它写上 wire；而内置 reader 只读 `authorization`，客户端从响应头拿到的那张它读不到。
+这种配法仍可用，只是每次连接都是新身份，不报错也不警告（它是**防冒充**，不是登录流程）。
+
+要真能断线续用，就成对配两个选项，不需要子类：
+
+```typescript
+new HttpServerToolTransport({
+  apiUrl: '/api',
+  // 下发：策略自己经 `ctx.res` 写响应头（框架仍不定义凭证 header 名、不写响应，契约 11）
+  identity: new RpcSessionIdentityPolicy({ deliver: 'header:rpc-session' }),
+  // 取回：reader 要读同一个头（内置 reader 只读 `authorization`）
+  credentialReader: (r) => r.headers['rpc-session'],
+});
+```
+
+下发仍是显式选项（通道本质上跟拓扑走），而且是 HTTP 形状的（Mailbox 那时拿不到可写的 `res`，
+降级为不下发而不报错）；且只在 `assign` 时写——`match` 命中不重发凭证。
+
 **B. `RpcBearerPolicy`**：凭证由外部签发（JWT / OAuth2 access token / 自有 api key），服务端只验。
 **做认证**；无状态，天然跳副本可用。
 

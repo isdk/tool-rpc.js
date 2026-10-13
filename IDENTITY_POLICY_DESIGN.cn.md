@@ -198,6 +198,11 @@ export interface RpcSessionIdentityOptions {
    * 外接 Redis / 数据库、LRU 等淘汰策略）。
    */
   registry?: RpcCredentialRegistry;
+  /**
+   * 下发通道（默认不下发）。目前只认 `'header:<name>'`：策略自己经 `ctx.res.setHeader` 写响应头。
+   * 写了别的形状构造时报错。要 query / SSE welcome 帧就覆写 `deliverCredential()`（见 §4.1）。
+   */
+  deliver?: string;
 }
 
 export class RpcSessionIdentityPolicy<Req = any> implements RpcIdentityPolicy<Req> {
@@ -205,11 +210,12 @@ export class RpcSessionIdentityPolicy<Req = any> implements RpcIdentityPolicy<Re
   readonly name: string = 'session';   // 与 'bearer' 对称：只写机制名
   constructor(options?: RpcSessionIdentityOptions);
   match(ctx: RpcIdentityContext<Req>): RpcIdentity | undefined;
-  assign(ctx: RpcIdentityContext<Req>): RpcIdentity;   // 返回体带 credential
+  assign(ctx: RpcIdentityContext<Req>): RpcIdentity;   // 返回体带 credential；配了 `deliver` 就顺手下发
   revoke(identityId: string): void;
   protected registry: RpcCredentialRegistry;
   protected newIdentityId(ctx: RpcIdentityContext<Req>): string;   // 默认 uuid
   protected decorate(identity: RpcIdentity, ctx: RpcIdentityContext<Req>): RpcIdentity;  // 默认原样返回
+  protected deliverCredential(credential: string, ctx: RpcIdentityContext<Req>): void;  // 默认只处理 `deliver: 'header:<name>'`
 }
 
 /**
@@ -236,6 +242,30 @@ export class RpcInProcessCredentialRegistry implements RpcCredentialRegistry {
   连接照常服务。内置实现只有这一条容量行为；要 LRU 等淘汰策略就实现 `RpcCredentialRegistry` 换掉 `registry`。
 - 框架侧不驱动过期（无定时器）：清理只发生在 `lookupIdentity` 命中作废项与 `ensureCredential` 满容量两处，
   `prune` 是给部署自己接定时任务的入口。单测要钉住「大量闲置身份后条目数有界」。
+
+### 4.1 会话闭环是四步，默认只做两步（issue #6）
+
+签发 → 下发 → 客户端带回来 → 认。本类默认只做第一与第四步：`assign` 把凭证放进返回值，
+但没人写 wire；而内置 reader 只读 `authorization`，客户端从响应头拿到的那张它读不到。
+所以默认配置下每次连接都是新身份（不报错、不警告）——它是**防冒充**，不是登录流程。
+
+补上中间两步不需要子类（以前要 10 行子类覆写 `resolveRequestIdentity`）：
+
+```typescript
+new HttpServerToolTransport({
+  apiUrl: '/api',
+  identity: new RpcSessionIdentityPolicy({ deliver: 'header:rpc-session' }),  // 下发：策略自己写响应头
+  credentialReader: (r) => r.headers['rpc-session'],                        // 取回：reader 得读同一个头
+})
+```
+
+守住的约束：
+
+- **默认仍是「不自动下发」**：下发通道本质上是拓扑相关的，而且默认行为不变。
+- **写头的是策略，不是框架**：它用 `ctx.res` 这个逃生口，契约 11 不变（框架不定义凭证 header 名、不写响应）。
+- **这个选项是 HTTP 形状的**：Mailbox 的回复 header 在 `sendRpcResponse` 内部才成形，拿不到可写的 res
+  就降级为不下发（不报错）。
+- **只在下发时写**：`match` 命中不重发（契约 5），续用靠客户端手上那张。
 
 ## 5. 默认实现 B：`RpcBearerPolicy` + `RpcVerifiedCredentialOptions`
 

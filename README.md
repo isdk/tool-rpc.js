@@ -595,6 +595,30 @@ import { HttpServerToolTransport, RpcSessionIdentityPolicy } from '@isdk/tool-rp
 new HttpServerToolTransport({ apiUrl: '/api', identity: new RpcSessionIdentityPolicy() });
 ```
 
+The full round trip is four steps: **issue → deliver → the client carries it back → match**. Bare
+`new RpcSessionIdentityPolicy()` only does the first and the last one: the credential lands in
+`assign`'s return value and nothing writes it to the wire, and the built-in reader only reads
+`authorization`, so it can't pick up a credential the client got from a response header. That
+configuration still works — every connection just gets a fresh identity, with no error and no warning
+(this policy prevents impersonation; it is not a login flow).
+
+To actually resume across disconnects, pair two options — no subclass required:
+
+```typescript
+new HttpServerToolTransport({
+  apiUrl: '/api',
+  // deliver: the policy writes the response header itself, through `ctx.res` (the framework still
+  // defines no credential header name and never writes responses — contract 11)
+  identity: new RpcSessionIdentityPolicy({ deliver: 'header:rpc-session' }),
+  // carry it back: the reader has to read that same header, since the default one only reads `authorization`
+  credentialReader: (r) => r.headers['rpc-session'],
+});
+```
+
+Delivery stays opt-in (the channel is genuinely topology-specific), it is HTTP-shaped (Mailbox has no
+writable `res` at that point, so it degrades to "not delivered" rather than throwing), and it happens
+only on `assign` — a `match` hit never re-sends the credential.
+
 **B. `RpcBearerPolicy`** — credentials are issued elsewhere (JWT / OAuth2 access token / your own api key);
 the server only verifies them. **It does authenticate**; stateless, so it works across replicas out of the box.
 
