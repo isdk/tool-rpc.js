@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { withReservedPort } from './helpers/ports'
+import { startOnKernelPort, withReservedPort } from './helpers/ports'
 import { ToolFunc } from '@isdk/tool-func'
 import { Mailbox, MemoryProvider } from '@mboxlabs/mailbox'
 
@@ -414,5 +414,123 @@ describe('discovery end-to-end over Mailbox: 认证与兼容外壳', () => {
       const apis = await legacyClient.loadApis()
       expect(Object.keys(apis)).toEqual(['custom'])
       expect((apis as any).custom.customField).toBe(1)
+   })
+})
+
+/**
+ * 注册表不会 `toJSON` 时，发现端点不能回 `200 {}`（issue #1）。
+ *
+ * 上面的套件都挂 `ServerTools` 子类（它有静态 `toJSON`），所以一直没碰到这条路径：
+ * transport 的注册表视图以前在没有任何一层会 `toJSON` 时回 `undefined`，
+ * 而内置 `rpcApis` 只看「有没有 `toJSON` 这个方法」就照单全收，于是它自己那三条
+ * 枚举分支（静态 `items` / `entries()` / 自有键）在 transport 后面永远走不到。
+ * 客户端那边也不报错，只是注册不到工具，到调用时才报「tool not found」。
+ *
+ * 这里钉的是**消费侧**：真 socket + 真客户端，三种注册表形态都要列得出工具，
+ * `loadFrom()` 要真注册上。视图层的分层规则在 `src/transports/route-table.test.ts` 钉。
+ */
+describe('discovery over a registry with no toJSON(): 清单不能是 200 {}', () => {
+   let server: HttpServerToolTransport
+   let root: string
+
+   beforeAll(async () => {
+      ToolFunc.items = {}
+      ServerTools.items = {}
+
+      // A）ToolFunc 家族：只有静态 `items`，没有 `toJSON`
+      class MyToolFuncTools extends ToolFunc {}
+      MyToolFuncTools.items = {}
+      new (MyToolFuncTools as any)('alpha', { params: {}, func: () => 'alpha', isApi: true }).register()
+
+      // B）Map 形状：只有 `get` / `entries`
+      const map = new Map([['beta', { name: 'beta', toJSON: () => ({ name: 'beta' }) }]])
+
+      // C）普通对象映射
+      const objectMap = { gamma: { name: 'gamma', toJSON: () => ({ name: 'gamma' }) } }
+
+      server = new HttpServerToolTransport()
+      server.addRpcHandler('/a', { registry: MyToolFuncTools })
+      server.addRpcHandler('/m', { registry: { get: (id: string) => map.get(id), entries: () => map.entries() } })
+      server.addRpcHandler('/o', { registry: objectMap })
+
+      const port = await startOnKernelPort(server)
+      root = `http://localhost:${port}`
+   })
+
+   afterAll(async () => {
+      await server.stop()
+      ToolFunc.items = {}
+      ServerTools.items = {}
+      ClientTools.items = {}
+   })
+
+   it('GET 前缀根列出工具，不是空清单', async () => {
+      for (const [prefix, tool] of [['a', 'alpha'], ['m', 'beta'], ['o', 'gamma']] as const) {
+         const res = await fetch(`${root}/${prefix}/`, { headers: { accept: 'application/json' } })
+         expect(res.status, prefix).toBe(200)
+         expect(Object.keys(await res.json()), prefix).toContain(tool)
+      }
+   })
+
+   it('客户端 loadApis() 拿到清单（以前它注册不到任何工具）', async () => {
+      for (const [prefix, tool] of [['a', 'alpha'], ['m', 'beta'], ['o', 'gamma']] as const) {
+         const apis = await new HttpClientToolTransport(`${root}/${prefix}`).loadApis()
+         expect(Object.keys(apis), prefix).toContain(tool)
+      }
+   })
+
+   it('ClientTools.loadFrom() 真的把这类注册表里的工具注册上', async () => {
+      RpcClientTransportManager.bindScheme('http', HttpClientToolTransport)
+      ClientTools.items = {}
+      try {
+         const items = await ClientTools.loadFrom(undefined, { apiUrl: `${root}/a` })
+         expect(Object.keys(items!)).toContain('alpha')
+      } finally {
+         ClientTools.items = {}
+      }
+   })
+})
+
+describe('discovery 合并每一层注册表：get() 解析得到的工具必须在清单里', () => {
+   let server: HttpServerToolTransport
+   let root: string
+
+   beforeAll(async () => {
+      ToolFunc.items = {}
+      ServerTools.items = {}
+
+      // 前缀 claim 一层，dispatcher 一层（两层都会 `toJSON`）：以前视图只取**第一个**，
+      // 另一层的工具从清单里消失，可它照样能被 `get()` 解析到、能被调用。
+      class FromPrefix extends ServerTools {}
+      class FromDispatcher extends ServerTools {}
+      FromPrefix.items = {}
+      FromDispatcher.items = {}
+      new (FromPrefix as any)('fromPrefix', { params: {}, func: () => 'fromPrefix', isApi: true }).register()
+      new (FromDispatcher as any)('fromDispatcher', { params: {}, func: () => 'fromDispatcher', isApi: true }).register()
+
+      server = new HttpServerToolTransport({
+         dispatcher: new RpcServerDispatcher({ registry: FromDispatcher }),
+      })
+      server.addRpcHandler('/api', { registry: FromPrefix })
+
+      const port = await startOnKernelPort(server)
+      root = `http://localhost:${port}/api`
+   })
+
+   afterAll(async () => {
+      await server.stop()
+      ToolFunc.items = {}
+      ServerTools.items = {}
+   })
+
+   it('两层都在清单里，且两层都能真调用', async () => {
+      const apis = await new HttpClientToolTransport(root).loadApis()
+      expect(Object.keys(apis).sort()).toEqual(['fromDispatcher', 'fromPrefix'])
+
+      for (const tool of ['fromPrefix', 'fromDispatcher']) {
+         const res = await fetch(`${root}/${tool}`, { method: 'GET' })
+         expect(res.status, tool).toBe(200)
+         expect(await res.json(), tool).toBe(tool)
+      }
    })
 })

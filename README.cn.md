@@ -513,7 +513,7 @@ import { ClientTools } from '@isdk/tool-rpc'
 
 - **`IToolTransport`**: 所有传输的通用基础接口（`src/transports/base.ts`）：`apiUrl`（寻址基准）、`options`，以及可选生命周期钩子 `start()` / `stop()` / `close()`。`mount()` **不在**该接口中——它属于 `ClientToolTransport`，且已标 `@deprecated`（仅用于把 `apiUrl` 复制到工具类上）。
 - **`IServerToolTransport`**: 服务器端传输必须实现的接口。其核心职责是：
-    1. **暴露发现端点**: 列出工具的路由（通常为 `GET /api`）由框架内置的 `rpcApis` 工具回答，每个被声明的前缀会自动登记它。它是一个普通工具：与业务调用走同一条身份/校验/超时流水线，且列的是**命中前缀**所绑定的注册表。`addDiscoveryHandler(apiUrl, handler)` 已标 **@deprecated**——它只覆盖该前缀的清单内容，首次调用会打一次迁移提示（进程级，不刷屏）。只有需要自定义清单时才保留它（或自己注册一个工具再 `addRoute(apiUrl, { path: '/', when: { method: 'GET' }, toolId: 'myListing' })`）。
+    1. **暴露发现端点**: 列出工具的路由（通常为 `GET /api`）由框架内置的 `rpcApis` 工具回答，每个被声明的前缀会自动登记它。它是一个普通工具：与业务调用走同一条身份/校验/超时流水线，且列的是**命中前缀**所绑定的注册表。清单不挑注册表形态：会 `toJSON()` 的层直接用它，不会的按静态 `items`（ToolFunc 家族）/ `entries()`（Map 形状）/ 自有键（普通对象映射）枚举；多层按 `get()` 同一套优先级合并，所以该前缀能解析到的工具一定在清单里——有工具的注册表不会回 `200 {}`。`addDiscoveryHandler(apiUrl, handler)` 已标 **@deprecated**——它只覆盖该前缀的清单内容，首次调用会打一次迁移提示（进程级，不刷屏）。只有需要自定义清单时才保留它（或自己注册一个工具再 `addRoute(apiUrl, { path: '/', when: { method: 'GET' }, toolId: 'myListing' })`）。
     2. **处理 RPC 调用**: 创建一个通用的 RPC 路由（例如 `/api/:toolId`），它接收请求，根据 `toolId` 查找对应的工具，执行它，然后返回结果。这是通过 `addRpcHandler` 方法实现的。
     3. 管理服务器生命周期 (`start`, `stop`)。
     4. **物理感知 (V2)**: 通过 `getListenAddr()` 和 `getRoutes()` 实现物理端口复用与逻辑路由归属登记。

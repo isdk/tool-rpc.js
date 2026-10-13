@@ -179,6 +179,9 @@ await manager.stopAll();
 
 * **列清单**：`GET <前缀根>`（Mailbox 侧是无 `toolId` 且 `act: 'list' | 'get'`）。它从 `ctx.registry` 取
   **本次命中前缀**的注册表，所以多前缀多注册表时各列各自的工具；`timeout: 0`（纯内存操作，不吃超时预算）。
+* **注册表形态不限**：会 `toJSON()` 的层用它（多层会合并，与 `get()` 同一套优先级），不会的按
+  静态 `items`（ToolFunc 家族）/ `entries()`（Map 形状）/ 自有键（普通对象映射）枚举。
+  规则只有一套：`get()` 解析得到的工具，清单里就必须有它——不能回 `200 {}`。
 * **不是旁路**：它与业务工具同在一个 `systemRegistry`、走同一条流水线（路由表解析 → 身份判定 →
   `validateRpcRequest` → dispatch）。要换掉它：在自己注册表里注册同名 `rpcApis`（业务表优先于系统表），
   或 `addRoute()` 声明同一路由行。

@@ -152,6 +152,63 @@ describe('ServerToolTransport route table', () => {
       expect(t.registryViewFor('/b').toJSON()).toEqual({ only: 'b' });
    });
 
+   it('the view enumerates a layer that has no toJSON() (issue #1)', () => {
+      // 以前视图在没有任何一层会 `toJSON` 时回 `undefined`，`rpcApis` 照单全收，
+      // 于是下面三种形态在 transport 后面只能得到空清单。
+      const t = new TableProbe();
+
+      // ToolFunc 家族：只有静态 `items`
+      class MyToolFuncTools extends ToolFunc {}
+      MyToolFuncTools.items = {} as any;
+      new (MyToolFuncTools as any)('alpha', { params: {}, func: () => 'a', isApi: true }).register();
+      t.addRpcHandler('/f', { registry: MyToolFuncTools });
+      expect(Object.keys(t.registryViewFor('/f').toJSON())).toContain('alpha');
+
+      // Map 形状：只有 `get` / `entries`
+      const map = new Map<string, any>([['one', { name: 'one' }], ['two', { name: 'two' }]]);
+      t.addRpcHandler('/m', { registry: { get: (id: string) => map.get(id), entries: () => map.entries() } });
+      expect(t.registryViewFor('/m').toJSON()).toMatchObject({ one: { name: 'one' }, two: { name: 'two' } });
+
+      // 普通对象映射
+      t.addRpcHandler('/o', { registry: { gamma: { name: 'gamma' } } });
+      expect(t.registryViewFor('/o').toJSON()).toMatchObject({ gamma: { name: 'gamma' } });
+   });
+
+   it('the view merges every layer, so anything get() resolves is listed', () => {
+      // 只取第一个会 `toJSON` 的层，另一层的工具就从清单里消失了——可 `get()` 能解析到它，
+      // 它也真能被调用。清单与寻址必须同一套分层。
+      const t = new TableProbe({
+         dispatcher: new RpcServerDispatcher({ registry: { toJSON: () => ({ fromDispatcher: { name: 'fromDispatcher' } }) } }),
+      });
+      t.addRpcHandler('/a', { registry: { toJSON: () => ({ fromPrefix: { name: 'fromPrefix' } }) } });
+
+      expect(t.registryViewFor('/a').toJSON()).toEqual({
+         fromPrefix: { name: 'fromPrefix' },
+         fromDispatcher: { name: 'fromDispatcher' },
+      });
+   });
+
+   it('a name claimed by an earlier layer is listed as that layer\'s tool', () => {
+      // 与 `get()` 同一套优先级：清单里那个条目就是真会被调的那个。
+      const t = new TableProbe({
+         dispatcher: new RpcServerDispatcher({
+            registry: {
+               get: (id: string) => (id === 'shared' ? { name: 'shared', from: 'dispatcher' } : undefined),
+               toJSON: () => ({ shared: { name: 'shared', from: 'dispatcher' } }),
+            },
+         }),
+      });
+      t.addRpcHandler('/a', {
+         registry: {
+            get: (id: string) => (id === 'shared' ? { name: 'shared', from: 'prefix' } : undefined),
+            toJSON: () => ({ shared: { name: 'shared', from: 'prefix' } }),
+         },
+      });
+
+      expect(t.registryViewFor('/a').toJSON().shared).toEqual({ name: 'shared', from: 'prefix' });
+      expect(t.resolveFor('/a/shared', 'shared')).toMatchObject({ from: 'prefix' });
+   });
+
    it('a custom discoveryHandler is that prefix\'s rpcApis implementation', async () => {
       const t = new TableProbe();
       t.addRpcHandler('/a');

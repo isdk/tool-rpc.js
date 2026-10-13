@@ -5,7 +5,7 @@ import { RpcServerDispatcher } from './dispatcher';
 import { RpcTransportManager } from './server-manager';
 import { ToolRpcRequest, ToolRpcResponse } from './models';
 import { readBearerCredential, type RpcCredentialReader, type RpcIdentityContext, type RpcIdentityPolicy } from './identity';
-import { RPC_APIS_TOOL_ID } from './rpc-apis';
+import { RPC_APIS_TOOL_ID, manifestItem, registryEntries } from './rpc-apis';
 
 export interface ServerToolTransportOptions extends ToolTransportOptions {
   dispatcher?: RpcServerDispatcher;
@@ -389,14 +389,54 @@ export abstract class ServerToolTransport extends ToolTransport implements IServ
       return this.dispatcher?.getSystemTool?.(toolId);
     };
 
+    // 清单合并：后面的层不覆盖前面同名的工具——与 `get()` 同一套优先级，
+    // 清单里那个条目就是真会被调的那个。
+    const merge = (parts: any[]): Record<string, any> => {
+      const out: Record<string, any> = {};
+      for (const part of parts) {
+        for (const [id, tool] of Object.entries(part ?? {})) {
+          if (!(id in out)) {out[id] = tool;}
+        }
+      }
+      return out;
+    };
+
     return {
       get: lookup,
-      // 发现工具列清单读的就是 `ctx.registry`，所以这个视图也要能 toJSON：按层退到第一个会 toJSON 的
+      /**
+       * 发现工具列清单读的就是 `ctx.registry`，所以这个视图也要**列得全**（issue #1）。
+       *
+       * 两条规则，都与 `get()` 的分层语义对齐：
+       *
+       * - **每一层都算**：会 `toJSON` 的层合并起来，不是只取第一个。只取第一个时，
+       *   `mount(RegB, '/v2')` 加 transport 自己的注册表会让另一层的工具从清单里消失，
+       *   可它们照样被 `get()` 解析到、照样能被调用——清单与寻址不一致。
+       * - **不会 `toJSON` 的层也要枚举**（`items` / `entries` / 自有键，见 `registryEntries`）。
+       *   以前这里在没有任何一层会 `toJSON` 时回 `undefined`，而 `rpcApis` 只看「有没有
+       *   `toJSON` 这个方法」就照单全收，于是它自己那三条枚举分支在 transport 后面永远走不到，
+       *   线上就是 `200 {}`。
+       *
+       * 某层的 `toJSON()` 回空（`undefined` / `null`）不算清单，那一层退到枚举；
+       * 异步清单（回 Promise）整体回一个 Promise，由 dispatcher 等。
+       */
       toJSON: () => {
-        for (const registry of layers) {
-          if (typeof registry.toJSON === 'function') {return registry.toJSON();}
+        // 每一层各自交清单：会 `toJSON` 就用它（可以是 Promise），不会就按形态枚举这一层。
+        const parts = layers.map(registry => {
+          if (typeof registry.toJSON === 'function') {
+            const json = registry.toJSON();
+            if (json) {return json;}
+          }
+          const out: Record<string, any> = {};
+          for (const [id, tool] of registryEntries(registry)) {
+            out[id] = manifestItem(tool);
+          }
+          return out;
+        });
+
+        if (parts.some(part => typeof part?.then === 'function')) {
+          return Promise.all(parts).then(merge);
         }
-        return undefined;
+        return merge(parts);
       },
     };
   }

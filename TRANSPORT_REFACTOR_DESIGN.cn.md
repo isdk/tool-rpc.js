@@ -282,7 +282,8 @@ pollHeaders 删除 RPC_HEADERS.TIMEOUT;                                 // 轮�
   废弃理由：往类上注入 transport 使类与物理通道耦合，同进程多实例时后者覆盖前者，且无法按调用选通道。
 - **旧版参数桥接**：`elevateV1ParamsToV2Request` 确保写在 `params.id/act` 中的信息能被 V2 调度器正确识别。
 - **发现端点（已修订）**：`addDiscoveryHandler(apiUrl, handler)` 已标 `@deprecated`——清单由内置工具 `rpcApis` 从**命中前缀**的注册表出，
-  所以下游通常只需 `addRpcHandler(prefix)`。只有要自定义清单内容时才保留它（或自己注册一个工具再
+  所以下游通常只需 `addRpcHandler(prefix)`。清单不挑注册表形态：会 `toJSON()` 的层用它，不会的按静态 `items` /
+  `entries()` / 自有键枚举，多层按 `get()` 同一套优先级合并（规则只有一套：`registryEntries()`）。只有要自定义清单内容时才保留它（或自己注册一个工具再
   `addRoute(apiUrl, { path: '/', when: { method: 'GET' }, toolId: 'myListing' })`）。首次调用会打一次迁移提示（进程级，不刷屏）；
   基类仍**要求实现**该方法，所以自带路由表的后端不会被破。旧客户端（只发 `act: 'list' | 'get'`，不带 `toolId`）仍经内置行命中，行为不变。
 
