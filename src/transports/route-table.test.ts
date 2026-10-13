@@ -295,6 +295,40 @@ describe('built-in rpcApis tool through the dispatcher', () => {
       expect(missing.error?.code).toBe(404);
    });
 
+   it('a manifest entry carries no function body unless the tool opts in (issue #2)', async () => {
+      // `ToolFunc.toJSON()` 把 `func` 序列成源码字符串（那是 `allowExportFunc` 的本地执行通道），
+      // 所以「照工具自己的 `toJSON()` 回」等于把实现源码发到发现端点。
+      // 规则与 `ServerTools.toJSON()` 对齐：默认剥掉，`allowExportFunc: true` 才导出。
+      class PlainTools extends ToolFunc {}
+      PlainTools.items = {} as any;
+      new (PlainTools as any)('plain', { params: {}, func: () => 'plain', isApi: true }).register();
+
+      const listed = await new RpcServerDispatcher({ registry: PlainTools }).dispatch(request());
+      expect(listed.data!.plain).toMatchObject({ name: 'plain', isApi: true });
+      expect(listed.data!.plain.func).toBeUndefined();
+
+      // `act: 'get'` 的单条走同一条规则（以前它直接回 `tool.toJSON()`，函数体照送）
+      const single = await new RpcServerDispatcher({ registry: PlainTools }).dispatch(request({ act: 'get', resId: 'plain' }));
+      expect(single.data).toMatchObject({ name: 'plain' });
+      expect(single.data.func).toBeUndefined();
+
+      // 显式导出仍然带函数体
+      class ExportedTools extends ServerTools {}
+      ExportedTools.items = {} as any;
+      new (ExportedTools as any)('exported', { params: {}, func: () => 'exported', isApi: true, allowExportFunc: true }).register();
+
+      const optedIn = await new RpcServerDispatcher({ registry: ExportedTools }).dispatch(request({ act: 'get', resId: 'exported' }));
+      expect(typeof optedIn.data.func).toBe('string');
+
+      // 同一个工具没开导出，就是另一回事
+      class PrivateTools extends ServerTools {}
+      PrivateTools.items = {} as any;
+      new (PrivateTools as any)('private', { params: {}, func: () => 'private', isApi: true }).register();
+
+      const optedOut = await new RpcServerDispatcher({ registry: PrivateTools }).dispatch(request({ act: 'get', resId: 'private' }));
+      expect(optedOut.data.func).toBeUndefined();
+   });
+
    it('is registered as a system tool with timeout 0 (not exempt, not timed out by the default)', () => {
       const dispatcher = new RpcServerDispatcher();
       expect(dispatcher.getSystemTool(RPC_APIS_TOOL_ID)).toBeDefined();

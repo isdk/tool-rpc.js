@@ -513,7 +513,7 @@ import { ClientTools } from '@isdk/tool-rpc'
 
 - **`IToolTransport`**: 所有传输的通用基础接口（`src/transports/base.ts`）：`apiUrl`（寻址基准）、`options`，以及可选生命周期钩子 `start()` / `stop()` / `close()`。`mount()` **不在**该接口中——它属于 `ClientToolTransport`，且已标 `@deprecated`（仅用于把 `apiUrl` 复制到工具类上）。
 - **`IServerToolTransport`**: 服务器端传输必须实现的接口。其核心职责是：
-    1. **暴露发现端点**: 列出工具的路由（通常为 `GET /api`）由框架内置的 `rpcApis` 工具回答，每个被声明的前缀会自动登记它。它是一个普通工具：与业务调用走同一条身份/校验/超时流水线，且列的是**命中前缀**所绑定的注册表。清单不挑注册表形态：会 `toJSON()` 的层直接用它，不会的按静态 `items`（ToolFunc 家族）/ `entries()`（Map 形状）/ 自有键（普通对象映射）枚举；多层按 `get()` 同一套优先级合并，所以该前缀能解析到的工具一定在清单里——有工具的注册表不会回 `200 {}`。`addDiscoveryHandler(apiUrl, handler)` 已标 **@deprecated**——它只覆盖该前缀的清单内容，首次调用会打一次迁移提示（进程级，不刷屏）。只有需要自定义清单时才保留它（或自己注册一个工具再 `addRoute(apiUrl, { path: '/', when: { method: 'GET' }, toolId: 'myListing' })`）。
+    1. **暴露发现端点**: 列出工具的路由（通常为 `GET /api`）由框架内置的 `rpcApis` 工具回答，每个被声明的前缀会自动登记它。它是一个普通工具：与业务调用走同一条身份/校验/超时流水线，且列的是**命中前缀**所绑定的注册表。清单不挑注册表形态：会 `toJSON()` 的层直接用它，不会的按静态 `items`（ToolFunc 家族）/ `entries()`（Map 形状）/ 自有键（普通对象映射）枚举；多层按 `get()` 同一套优先级合并，所以该前缀能解析到的工具一定在清单里——有工具的注册表不会回 `200 {}`。清单条目默认不带函数体：除非工具用 `allowExportFunc: true` 显式导出（与 `ServerTools.toJSON()` 同一套规则；剔除发生在副本上，服务端工具本身不受影响）。`addDiscoveryHandler(apiUrl, handler)` 已标 **@deprecated**——它只覆盖该前缀的清单内容，首次调用会打一次迁移提示（进程级，不刷屏）。只有需要自定义清单时才保留它（或自己注册一个工具再 `addRoute(apiUrl, { path: '/', when: { method: 'GET' }, toolId: 'myListing' })`）。
     2. **处理 RPC 调用**: 创建一个通用的 RPC 路由（例如 `/api/:toolId`），它接收请求，根据 `toolId` 查找对应的工具，执行它，然后返回结果。这是通过 `addRpcHandler` 方法实现的。
     3. 管理服务器生命周期 (`start`, `stop`)。
     4. **物理感知 (V2)**: 通过 `getListenAddr()` 和 `getRoutes()` 实现物理端口复用与逻辑路由归属登记。
@@ -692,6 +692,8 @@ new HttpServerToolTransport({
 ### 导出函数以在客户端执行
 
 在某些场景下，您可能希望将计算从服务器卸载或允许客户端在本地执行函数。`allowExportFunc` 选项通过序列化函数体并在发现阶段将其发送到客户端来实现这一点。当该选项设置为 `true` 时，客户端的 `ClientTools` 将自动使用这个下载的函数，而不是发起网络请求。
+
+它是严格显式的：发现清单默认不带 `func` 函数体，无论条目来自 `ServerTools.toJSON()` 还是来自框架自己枚举的注册表（见[暴露发现端点](#核心抽象)）。剔除发生在条目的副本上，服务端工具自己的实现不受影响。
 
 **服务器端配置:**
 

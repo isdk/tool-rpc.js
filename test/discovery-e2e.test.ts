@@ -534,3 +534,64 @@ describe('discovery 合并每一层注册表：get() 解析得到的工具必须
       }
    })
 })
+
+/**
+ * 发现清单默认不带函数体（issue #2）。
+ *
+ * `ToolFunc.toJSON()` 会把 `func` 序列成源码字符串——那是 `allowExportFunc` 把函数下发给
+ * 客户端本地执行的通道。`ServerTools.toJSON()` 早就知道这一点（不开导出就 `delete item.func`），
+ * 但枚举路径（#1 修好了才可达）是照工具自己的 `toJSON()` 回，等于把实现源码发到发现端点。
+ * 现在两条路径同一套规则：默认剥掉，`allowExportFunc: true` 才导出。
+ */
+describe('discovery 不带函数体：allowExportFunc 才是显式导出', () => {
+   let server: HttpServerToolTransport
+   let root: string
+
+   beforeAll(async () => {
+      ToolFunc.items = {}
+      ServerTools.items = {}
+
+      class PlainToolFunc extends ToolFunc {}
+      PlainToolFunc.items = {}
+      new (PlainToolFunc as any)('plain', { params: {}, func: () => 'plain body', isApi: true }).register()
+
+      class MixedTools extends ServerTools {}
+      MixedTools.items = {}
+      new (MixedTools as any)('exported', { params: {}, func: () => 'exported body', isApi: true, allowExportFunc: true }).register()
+      new (MixedTools as any)('private', { params: {}, func: () => 'private body', isApi: true }).register()
+
+      server = new HttpServerToolTransport()
+      server.addRpcHandler('/tf', { registry: PlainToolFunc })
+      server.addRpcHandler('/srv', { registry: MixedTools })
+
+      const port = await startOnKernelPort(server)
+      root = `http://localhost:${port}`
+   })
+
+   afterAll(async () => {
+      await server.stop()
+      ToolFunc.items = {}
+      ServerTools.items = {}
+      ClientTools.items = {}
+   })
+
+   it('枚举出的清单不带函数体', async () => {
+      const apis = await new HttpClientToolTransport(`${root}/tf`).loadApis()
+
+      expect(apis.plain).toMatchObject({ name: 'plain', isApi: true })
+      expect((apis.plain as any).func).toBeUndefined()
+   })
+
+   it('ServerTools 清单：默认剥掉，开了导出的才带函数体', async () => {
+      const apis = await new HttpClientToolTransport(`${root}/srv`).loadApis()
+
+      expect((apis.private as any).func).toBeUndefined()
+      expect(typeof (apis.exported as any).func).toBe('string')
+   })
+
+   it('工具本身不受影响：清单是副本，没把工具的 `func` 抹掉', async () => {
+      const res = await fetch(`${root}/tf/plain`, { method: 'GET' })
+      expect(res.status).toBe(200)
+      expect(await res.json()).toBe('plain body')
+   })
+})

@@ -33,6 +33,8 @@
   它从执行上下文里拿**本次命中前缀**的注册表（`ctx.registry`）列工具清单，`timeout: 0`。
   列清单不挑注册表形态（`registryEntries()`）：会 `toJSON()` 的层用它，不会的按静态 `items` / `entries()` / 自有键枚举；
   多层按 `get()` 同一套优先级合并——**`get()` 解析得到的工具必须在清单里**，不能回 `200 {}`。
+  清单条目默认不带函数体（`manifestItem()` 在副本上剔 `func`，与 `ServerTools.toJSON()` 同一套规则），
+  只有 `allowExportFunc: true` 才导出给客户端本地执行。
   - `GET /api` — 列该前缀的全部工具（`act: 'get'` 带 `resId` 则只回那一个）
   - Mailbox：无 `toolId` 且 `act: 'list' | 'get'` 即发现请求，同样寻址到它
 

@@ -43,10 +43,32 @@ export function* registryEntries(registry: any): Generator<[string, any]> {
   }
 }
 
-/** 单个工具条目的形态归工具自己定（`toJSON()` 是它的约定），框架不裁剪字段。 */
+/**
+ * 单个工具条目的形态归工具自己定（`toJSON()` 是它的约定），框架不裁剪字段——
+ * **只有一个例外：函数体**（issue #2）。
+ *
+ * `ToolFunc.toJSON()` 会把 `func` 序列成源码字符串（那是 `allowExportFunc` 的本地执行通道），
+ * 所以「照工具自己的 `toJSON()` 回」就等于把实现源码发到发现端点。`ServerTools.toJSON()` 早就
+ * 知道这一点（`if (!item.allowExportFunc) delete item.func`）；枚举路径以前不可达，所以从没暴露。
+ * 这里与它对齐：默认剥掉 `func`，`allowExportFunc: true` 才导出。
+ *
+ * 只管**框架自己取用**的条目（枚举出的清单、`act: 'get'` 的单条）；注册表自带 `toJSON()`
+ * 的清单形态仍归它自己定，框架不伸手。
+ */
 export function manifestItem(tool: any): any {
-  if (tool && typeof tool.toJSON === 'function') {return tool.toJSON();}
-  return tool;
+  const item = (tool && typeof tool.toJSON === 'function') ? tool.toJSON() : tool;
+
+  if (!item || typeof item !== 'object' || Array.isArray(item) || item.func === undefined) {
+    return item;
+  }
+
+  // 导出与否看工具本身（`toJSON()` 的输出不保证带上这个字段）
+  if (tool?.allowExportFunc === true || item.allowExportFunc === true) {return item;}
+
+  // 副本上删：不能改动工具自己的对象（`toJSON()` 也可能直接回实例本身）
+  const copy: any = { ...item };
+  delete copy.func;
+  return copy;
 }
 
 /**
