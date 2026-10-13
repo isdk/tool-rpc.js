@@ -38,7 +38,7 @@ Please feel free to file GitHub Issues or propose Pull Requests. We're always ha
 
 **引用其他包时用完整包名**，不要写 `../mailbox/...` 这类同级仓库目录：文档会被发布出去，读者手上只有 `node_modules`，没有你的工作区布局。写 `@mboxlabs/mailbox/src/interfaces.ts` 的 `IMailboxProvider`，读者能对着已安装的包找到它。本包自己的文件写仓库内相对路径（`src/transports/mailbox-server.ts`）。
 
-**引用只到文件与符号，不写行号**：写 `src/transports/server.ts` 的 `processIncomingCall`，不写 `server.ts:253`。行号在提交之间就漂（一轮之内 `server.ts` 的引用能漂到 +5～+94），而手写文档里上百处引用没人能逐轮核住；**漂了的行号比没有行号更坏**——读者会照着跳到错的地方，还以为是自己看错了。要指到具体分支，就写成可 grep 的符号名，或直接引一小段代码。
+**引用只到文件与符号，不写行号**：写 `src/transports/server.ts` 的 `processIncomingCall`，不写 `server.ts:253`。行号在提交之间就漂（一轮之内 `server.ts` 的引用能漂到 +5～+94），而手写文档里上百处引用没人能逐轮核住；**漂了的行号比没有行号更坏**——读者会照着跳到错的地方，还以为是自己看错了。要指到具体分支，就写成可 grep 的符号名，或直接引一小段代码。这条由 `test/docs-line-refs.test.ts` 钉着：手写文档里出现 `file.ts:NN` 就红（生成物 `docs/`、`web/`、`CHANGELOG.md` 不算）；讲解这条规则本身的行，末尾加 `<!-- line-ref:allow -->` 豁免。<!-- line-ref:allow -->
 
 例外：跑下游仓库的 shell 命令（`grep -rn ... ../tool-event/src`）照旧写工作区路径——那是给在本仓库开发的人跑的，不是给读者的引用。
 
