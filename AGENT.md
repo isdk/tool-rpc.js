@@ -414,8 +414,10 @@ new HttpServerToolTransport({
 - **不装策略就是 no-op**：`ctx.identity` 为 `undefined`，`clientId` 仍是客户端自报值（与旧行为逐字节一致）。
 - **拒绝要抛** `new RpcError('Unauthenticated', RpcStatusCode.UNAUTHENTICATED, 'unauthenticated')`（401）；
   `match` 返回 `undefined` 只是「另起新会话」。
-- **凭证取法可换**：`credentialReader` 从原生 req 取字符串，内置默认只读 `authorization`（去 Bearer 前缀）；
-  私有 header 自己写 reader。
+- **凭证取法可换，且 reader 权威**：`credentialReader` 从原生 req 取字符串，内置默认只读 `authorization`（去 Bearer 前缀）；
+  私有 header 自己写 reader。它返回 `undefined` 就是「这条请求没带我要的凭证」：`RpcBearerPolicy` 不会回头
+  再读 `authorization`（否则部署明确不信的来路仍会被用）。`ctx.credentialRead` 就是用来区分「reader 拒读」与
+  「没人读过」的；要「只认客户端标准 header」那种拓扑就显式写 `fallback: 'authorization'`。
 - **逐 API 的认证判定在策略里，不在 transport 上**：`allowAnonymous` 可以是谓词（`(ctx) => boolean`）。
   `ctx` 带寻址结果与备料：`toolId` / `act` / `resId`、`prefix` / `apiUrl`、`tool`（注册表里那个实例，**只读**，
   按 dispatcher 的解析顺序取，取不到就 `undefined`）。没有 `builtin` 开关——内置端点也是普通工具，

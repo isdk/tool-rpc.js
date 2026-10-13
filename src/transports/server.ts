@@ -314,6 +314,9 @@ export abstract class ServerToolTransport extends ToolTransport implements IServ
     // 内置 reader 只读标准字段；拿不到原生 req 时退到已归一化的 headers（HTTP / Mailbox 都有）
     const reader = this.credentialReader ?? readBearerCredential;
     ctx.credential = reader(ctx.req ?? rpcReq);
+    // 标上「transport 已读过凭证」：`credential === undefined` 从此意味着「reader 说了算，
+    // 这个请求没带我要的凭证」，策略不能回头自己读 `authorization`（issue #3）。
+    ctx.credentialRead = true;
 
     const matched = await policy.match(ctx);
     // match 返回 undefined = 另起新会话（不是拒绝）；拒绝由策略抛错，走顶级防护

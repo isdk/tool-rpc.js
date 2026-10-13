@@ -35,8 +35,28 @@ export interface RpcVerifiedCredentialOptions {
    * 无凭证连接的 `assign` 产物就是所谓匿名身份，不再单开一个名字。
    */
   assign?: (ctx: RpcIdentityContext) => RpcIdentity;
-  /** 凭证取法。默认读 authorization（去 Bearer 前缀）。 */
+  /**
+   * 凭证取法。默认读 authorization（去 Bearer 前缀）。
+   *
+   * 它只在**没人读过凭证**时生效（策略单独用、或 transport 没装 reader）。
+   * transport 装了 `credentialReader` 时，它的返回值就是凭证（见 `fallback`）。
+   */
   credentialReader?: RpcCredentialReader;
+  /**
+   * transport 的 reader 返回 `undefined` 后，策略要不要自己再读一次凭证（issue #3）。
+   *
+   * - `'none'`（默认）：reader 权威。它说「这个请求没带我要的凭证」，这条请求就是未认证，
+   *   策略不会回头去读客户端递上来的 `authorization`——那是部署明确选择不信的凭证来路
+   *   （鉴权代理拓扑：只认代理注入的私有 header）。
+   * - `'authorization'`：反过来，忽略代理那条路，只认客户端自带的标准 `authorization` header。
+   *
+   * 两种都是合法拓扑，所以这里是个开关而不是隐式行为。默认 `'none'`：`identity` 在 1.1.0 后
+   * 才引入、尚未发布，没有兼容包被。
+   *
+   * 注：它只管「transport 读过但没读到」这一种情况。没人读过（策略单独用）时仍走
+   * `credentialReader`。
+   */
+  fallback?: 'none' | 'authorization';
 }
 
 /**
@@ -63,8 +83,7 @@ export class RpcBearerPolicy<Req = any> implements RpcIdentityPolicy<Req> {
    * 返回 undefined 是「另起新会话」，不是拒绝，两者不能混。
    */
   public async match(ctx: RpcIdentityContext<Req>): Promise<RpcIdentity | undefined> {
-    // transport 的 credentialReader 优先（它懂这个协议）；没备到 ctx 才退策略自己的 reader
-    const credential = ctx.credential ?? this.readerOf()(ctx.req as Req);
+    const credential = this.readCredential(ctx);
 
     if (!credential) {
       if (this.allowAnonymous(ctx)) {return undefined;}
@@ -89,6 +108,29 @@ export class RpcBearerPolicy<Req = any> implements RpcIdentityPolicy<Req> {
   /** 凭证取法：选项缺省读 `authorization`（去 Bearer 前缀）。 */
   protected readerOf(): RpcCredentialReader<Req> {
     return (this.options.credentialReader ?? readBearerCredential) as RpcCredentialReader<Req>;
+  }
+
+  /**
+   * 凭证从哪里取（issue #3）。
+   *
+   * 三种情况必须分得开，而 `ctx.credential === undefined` 本身分不开：
+   * 1. transport 的 reader 取到了 → 就用它（它懂这个协议）。
+   * 2. transport 已读过但没取到（`credentialRead`）→ reader 权威：默认不再自己读。
+   *    只有显式 `fallback: 'authorization'` 才按标准 header 再读一次。
+   * 3. 没人读过（策略单独用）→ 退策略自己的 `credentialReader`。
+   */
+  protected readCredential(ctx: RpcIdentityContext<Req>): string | undefined {
+    if (ctx.credential !== undefined && ctx.credential !== null) {return ctx.credential;}
+
+    if (ctx.credentialRead) {
+      // 这里的 `readBearerCredential` 是有意写死的：`fallback: 'authorization'` 说的就是
+      // 「只认客户端自带的标准 header」，不是「再跑一遍某个 reader」。
+      return this.options.fallback === 'authorization'
+        ? readBearerCredential(ctx.req ?? { headers: ctx.headers })
+        : undefined;
+    }
+
+    return this.readerOf()(ctx.req as Req);
   }
 
   /**

@@ -715,6 +715,10 @@ Key rules (the full contract list lives in `IDENTITY_POLICY_DESIGN.cn.md` at the
 - Storage for server-issued credentials is swappable: implement the four `RpcCredentialRegistry` methods and
   inject it through the `registry` option (persistence / cross-process sharing / Redis / LRU eviction).
 - "Who may call which tool" is not the policy's job — put it in `manager.validateRpcRequest` or in the tool.
+- The transport's `credentialReader` is **authoritative**: when it returns `undefined`, `RpcBearerPolicy`
+  treats the request as unauthenticated instead of quietly re-reading `authorization`. That is what makes
+  "only trust the header my proxy injects" actually hold. A deployment that wants the opposite topology
+  (client-supplied standard header only) opts in with `new RpcBearerPolicy({ fallback: 'authorization' })`.
 
 ## Advanced Usage
 

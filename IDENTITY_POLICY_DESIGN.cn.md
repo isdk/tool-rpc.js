@@ -77,6 +77,11 @@ export interface RpcIdentityContext<Req = any, Res = any> {
   res?: Res;
   /** transport 用 credentialReader 取出来的凭证；没有就是新连接。 */
   credential?: string;
+  /**
+   * transport 已跑过凭证 reader（`credential` 就是它的返回值）。
+   * 它把「reader 读了、没读到」与「没人读过（策略单独用）」分开——两者 `credential` 都是 undefined（§18）。
+   */
+  credentialRead?: boolean;
   /** 已归一化的 header 集合。 */
   headers?: Record<string, string | number | string[] | undefined>;
   /** 命中的逻辑前缀与 apiUrl：同一 transport 服务多个前缀时，策略可按前缀分租户。 */
@@ -255,8 +260,16 @@ export interface RpcVerifiedCredentialOptions {
    * 无凭证连接的 `assign` 产物就是所谓匿名身份，不再单开一个名字。
    */
   assign?: (ctx: RpcIdentityContext) => RpcIdentity;
-  /** 凭证取法。默认读 authorization（去 Bearer 前缀）。 */
+  /**
+   * 凭证取法。默认读 authorization（去 Bearer 前缀）。
+   * 只在**没人读过凭证**时生效（策略单独用）；transport 装了 reader 就以它为准（见 `fallback`）。
+   */
   credentialReader?: RpcCredentialReader;
+  /**
+   * transport 的 reader 返回 undefined 后，策略要不要自己再读一次（§18）。
+   * `'none'`（默认）= reader 权威；`'authorization'` = 忽略代理那条路，只认客户端自带的标准 header。
+   */
+  fallback?: 'none' | 'authorization';
 }
 
 export class RpcBearerPolicy<Req = any> implements RpcIdentityPolicy<Req> {
@@ -270,6 +283,7 @@ export class RpcBearerPolicy<Req = any> implements RpcIdentityPolicy<Req> {
   protected reject(credential: string | undefined, ctx: RpcIdentityContext<Req>): never;   // 默认抛 RpcStatusCode.UNAUTHENTICATED（401）
   protected assignIdentity(ctx: RpcIdentityContext<Req>): RpcIdentity;   // `assign` 钩子的默认实现
   protected allowAnonymous(ctx: RpcIdentityContext<Req>): boolean;       // 选项是布尔就一刀切，是谓词就逐 API
+  protected readCredential(ctx: RpcIdentityContext<Req>): string | undefined;  // transport reader 优先；`fallback` 决定它拒读后要不要自己读（§18）
 }
 ```
 
@@ -696,3 +710,28 @@ new RpcBearerPolicy({
 新基线（2026-10-12 实测）：`tsc -p tsconfig.json` 与 `tsc -p tsconfig.release.json` exit 0；`eslint .` exit 0；
 `vitest run` 50 文件 / 652 测试通过；`tsup`（含 `--dts --dts-resolve`）exit 0；
 `typedoc --plugin typedoc-plugin-markdown` 0 errors（16 条外部符号链接 warning，与本轮无关）。
+
+---
+
+## 18. 凭证来路的权威：reader 说了算（issue #3）
+
+`ctx.credential === undefined` 以前分不开两种情况：「transport 的 reader 读了，这个请求没带我要的凭证」
+与「没人读过（策略单独用 / 测试里直接 `match`）」。`RpcBearerPolicy` 因此写成了
+`ctx.credential ?? this.readerOf()(ctx.req)`——reader 拒读后它回头自己读 `authorization`。
+
+后果：部署的 `credentialReader` 不是权威。鉴权代理拓扑（只认代理注入的 `x-proxy-token`）下，
+一个绕过代理、直接递 `Authorization: Bearer <valid>` 的请求能拿到身份——部署明确选择不信的
+凭证来路仍被用了。
+
+**定下的机制**：
+
+- `resolveRequestIdentity` 备 `ctx.credential` 的同时标 `ctx.credentialRead = true`，两种情况从此可分。
+- `RpcBearerPolicy.readCredential()` 三段：取到了就用；`credentialRead` 且没取到→默认不自己读；
+  没人读过→退策略自己的 `credentialReader`（策略单独用这条路保留）。
+- 要「只认客户端」那种拓扑就显式写开关：`fallback: 'none'`（默认，reader 权威）| `'authorization'`
+  （忽略 transport 的 reader，按标准 `authorization` 再读一次）。两种拓扑都合法，所以它是选项而不是隐式行为。
+- 默认 `'none'` 不带兼容包被：`identity` 在 1.1.0 后才引入、尚未发布。
+
+测试：`src/transports/identity-bearer.test.ts`（reader 已读且无凭证 → 401，`verify` 零调用；
+`fallback: 'authorization'`  opt-in 生效）、`test/identity-e2e.test.ts`（`authorization` 里放**能过 verify**
+的值，这样 401 只能来自 reader 权威——旧断言用了一个无效 token，钉不住契约）。

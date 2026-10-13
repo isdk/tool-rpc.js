@@ -386,6 +386,10 @@ grep -rn '\b符号名\b' ../tool-rpc-fastify/src ../tool-electron/src ../ai-tool
 1. **凭证取法归 transport**：`credentialReader` 从原生 req 取一个字符串。内置默认只读标准字段 `authorization`
    （去 `Bearer` 前缀）；私有 header（鉴权代理、Electron payload、EventSource 的 query）由部署写自己的 reader。
    HTTP 与 Mailbox 的原生请求都带 `headers`，所以默认 reader 直接覆盖两者。
+   它备进 `ctx.credential` 的同时要标上 `ctx.credentialRead = true`：**reader 权威**——它返回
+   `undefined` 就是「这个请求没带我要的凭证」，策略不能回头自己读 `authorization`（否则部署明确
+   不信的凭证来路仍会被用，issue #3）。`credential === undefined` 与「没人读过」必须分得开，
+   这就是 `credentialRead` 存在的理由（策略单独用时两个字段都没有）。
 2. **采信什么由策略决定**：客户端自报的 `clientId` 在 `ctx.headers[RPC_HEADERS.CLIENT_ID]`，不在 `ctx` 顶层；
    基类不把 header 值塞进 `clientId`。装了策略则基类保证 `request.clientId === identity.id`（`clientId` 类型保持
    `string`：它是 wire 字段与下游 Map 的 key）。

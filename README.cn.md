@@ -699,6 +699,9 @@ new HttpServerToolTransport({
 - 服务端自签发凭证的存储可换：实现 `RpcCredentialRegistry` 四个方法，从 `registry` 选项注入
   （持久化 / 跳进程共享 / 外接 Redis / LRU 淘汰）。
 - 「谁能调哪个工具」不在策略，在 `manager.validateRpcRequest` 或业务工具。
+- transport 的 `credentialReader` 是**权威**：它返回 `undefined` 时，`RpcBearerPolicy` 把这条请求当未认证，
+  不会回头再读 `authorization`。「只认代理注入的那个 header」因此是真的成立。要反过来那种拓扑
+  （只认客户端自带的标准 header）就显式写：`new RpcBearerPolicy({ fallback: 'authorization' })`。
 
 ## 高级用法
 

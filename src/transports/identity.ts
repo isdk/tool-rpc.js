@@ -59,6 +59,17 @@ export interface RpcIdentityContext<Req = any, Res = any> {
   res?: Res;
   /** transport 用 credentialReader 取出来的凭证；没有就是新连接。 */
   credential?: string;
+  /**
+   * transport 已经跑过凭证 reader 了（`credential` 就是它的返回值）。
+   *
+   * 它把两种情况分开，而 `credential === undefined` 本身分不开：
+   * - 「reader 读了，这个请求没带我要的凭证」→ `credentialRead: true` + `credential: undefined`；
+   * - 「没人读过（策略单独用 / 测试里直接 `match`）」→ 两个字段都没有。
+   *
+   * 前者里 reader 是权威：策略不该回头自己读 `authorization`，否则部署明确不信的
+   * 凭证仍会被用（issue #3）。要那种拓扑就显式写 `fallback: 'authorization'`。
+   */
+  credentialRead?: boolean;
   /** 已归一化的 header 集合。 */
   headers?: Record<string, string | number | string[] | undefined>;
   /** 命中的逻辑前缀与 apiUrl：同一 transport 服务多个前缀时，策略可按前缀分租户。 */

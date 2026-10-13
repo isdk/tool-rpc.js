@@ -143,6 +143,46 @@ describe('RpcBearerPolicy (§5 默认实现 B)', () => {
     expect(seen).toEqual(['proxy-1']);
   });
 
+  it('transport 已读过凭证且没有 → 不再自己读 authorization（reader 权威，issue #3）', async () => {
+    // 部署只信 `x-proxy-token`（transport 的 reader），那么客户端直接递上来的
+    // `authorization` 就不是凭证——哪怕它的值能过 `verify`。
+    const seen: string[] = [];
+    const policy = new RpcBearerPolicy({
+      allowAnonymous: false,
+      verify: (credential) => {
+        seen.push(credential);
+        return credential === 'proxy-1' ? { id: 'behind-proxy' } : undefined;
+      },
+    });
+
+    await expect(policy.match(ctxOf({
+      req: { headers: { authorization: 'Bearer proxy-1' } },
+      credential: undefined,
+      credentialRead: true,
+    }))).rejects.toMatchObject({ code: RpcStatusCode.UNAUTHENTICATED });
+    expect(seen).toEqual([]);
+  });
+
+  it("fallback: 'authorization' 是显式 opt-in：忽略 transport 的 reader，只认客户端标准 header", async () => {
+    const seen: string[] = [];
+    const policy = new RpcBearerPolicy({
+      fallback: 'authorization',
+      verify: (credential) => {
+        seen.push(credential);
+        return { id: 'alice' };
+      },
+    });
+
+    const identity = await policy.match(ctxOf({
+      req: { headers: { authorization: 'Bearer signed-jwt' } },
+      credential: undefined,
+      credentialRead: true,
+    }));
+
+    expect(identity).toEqual({ id: 'alice' });
+    expect(seen).toEqual(['signed-jwt']);
+  });
+
   it('默认 reader 读 authorization（去 Bearer 前缀）', async () => {
     const seen: string[] = [];
     const policy = new RpcBearerPolicy({

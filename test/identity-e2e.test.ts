@@ -439,8 +439,10 @@ describe('identity end-to-end over HTTP: 私有 header 的 bearer（契约 9）'
   })
 
   it('authorization 里有值也不作凭证：reader 说了算（未认证 401）', async () => {
+    // 故意用**能过 verify** 的值：否则 401 只是「token 无效」，钉不住「reader 权威」这条契约（issue #3）。
+    // 这个请求是绕过代理直接递上来的：`verify` 不能拿到 `proxy-1`。
     await expect(client._fetch('whoami', {}, 'run', undefined, {
-      headers: { authorization: 'Bearer e2e-token' },
+      headers: { authorization: 'Bearer proxy-1' },
     })).rejects.toMatchObject({ code: 401 })
   })
 
