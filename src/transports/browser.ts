@@ -19,6 +19,10 @@ export {
   unixSocketPath,
   unixSocketUri,
 } from './socket-address';
+// 路径归一化：纯字符串 + WHATWG URL，无 Node API，browser-safe。名单与 Node 入口必须一致
+// （`test/browser-entry.test.ts` 钉着）——自定义 transport 在浏览器侧装配也要同一个归一化。
+export { normalizeRoutePath, RoutePathError } from './route-path';
+export type { NormalizedRoutePath, RoutePathOptions } from './route-path';
 // 身份策略：browser-safe（不碰监听对象、不碰 http 模块、不 import Node 内建模块），
 // 名单与 Node 入口必须一致（`test/browser-entry.test.ts` 钉着）。
 export type {

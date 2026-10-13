@@ -36,7 +36,9 @@ Please feel free to file GitHub Issues or propose Pull Requests. We're always ha
 「框架底座」，所以：指那套纯函数时写**传输层 helper**；指 tool-rpc 内置代码与外部策略的对比时写**框架侧**；
 指监听底座本身（`sharedServers` 池 / refCount）时写**物理底座**，它属于 `http-server.ts`，不在任何 API 表里。
 
-**引用其他包时用完整包名**，不要写 `../mailbox/...` 这类同级仓库目录：文档会被发布出去，读者手上只有 `node_modules`，没有你的工作区布局。写 `@mboxlabs/mailbox/src/interfaces.ts:120-162`，读者能对着已安装的包核行号。本包自己的文件写仓库内相对路径（`src/transports/mailbox-server.ts:123`）。
+**引用其他包时用完整包名**，不要写 `../mailbox/...` 这类同级仓库目录：文档会被发布出去，读者手上只有 `node_modules`，没有你的工作区布局。写 `@mboxlabs/mailbox/src/interfaces.ts` 的 `IMailboxProvider`，读者能对着已安装的包找到它。本包自己的文件写仓库内相对路径（`src/transports/mailbox-server.ts`）。
+
+**引用只到文件与符号，不写行号**：写 `src/transports/server.ts` 的 `processIncomingCall`，不写 `server.ts:253`。行号在提交之间就漂（一轮之内 `server.ts` 的引用能漂到 +5～+94），而手写文档里上百处引用没人能逐轮核住；**漂了的行号比没有行号更坏**——读者会照着跳到错的地方，还以为是自己看错了。要指到具体分支，就写成可 grep 的符号名，或直接引一小段代码。
 
 例外：跑下游仓库的 shell 命令（`grep -rn ... ../tool-event/src`）照旧写工作区路径——那是给在本仓库开发的人跑的，不是给读者的引用。
 
@@ -85,7 +87,7 @@ pnpm test
 
 1. `test/browser-entry.test.ts` 里钉着 Node 入口与 browser 入口的导出名单（以及 `dist/*.d.ts` 的对应断言）。
 2. 改公开面时**先改那份名单**（它会红），再动代码。它是唯一能表达「这个符号不该公开」的机制——测试钉得住行为，钉不住公开面。
-3. 两个入口（`src/transports/index.ts` / `src/transports/browser.ts`）的名单必须一致。入口现在大部分是 `export * from './xxx'`，**只有要钉公开面的那组用显式名单**（`socket-address.ts` 的七个 helper、`HttpServerToolTransport`）：新增公开符号要走显式名单导出，并在 `test/browser-entry.test.ts` 加对应名单（照 `EXPORTED_ADDRESS_HELPERS` / `INTERNAL_ADDRESS_HELPERS` 的写法），否则它只是被 `export *` 顺带带出去的，没人钉。
+3. 两个入口（`src/transports/index.ts` / `src/transports/browser.ts`）的名单必须一致。入口现在大部分是 `export * from './xxx'`，**只有要钉公开面的那组用显式名单**（`socket-address.ts` 的七个 helper、`route-path.ts` 的 `normalizeRoutePath` / `RoutePathError`、`HttpServerToolTransport`）：新增公开符号要走显式名单导出，并在 `test/browser-entry.test.ts` 加对应名单（照 `EXPORTED_ADDRESS_HELPERS` / `INTERNAL_ADDRESS_HELPERS` 的写法），否则它只是被 `export *` 顺带带出去的，没人钉。同一个文件可以一半公开一半包内：`route-path.ts` 只把归一化放出去，`routeMatchKey` / `matchRoute` 仍钉在包内名单里。
 4. 该公开还是包内的判据，见 `src/transports/README.cn.md` 的「公开面判据」。
 5. 公开面变化是 breaking：走 `release`，让 `CHANGELOG.md` 与 `docs/api/**` 一起重生成。
 

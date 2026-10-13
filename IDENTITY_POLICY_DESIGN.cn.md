@@ -21,7 +21,7 @@ v2.1 修订（对着代码与 `@isdk/tool-event` 原始实现核过）：钩子�
 | `src/transports/identity-bearer.ts` | `RpcBearerPolicy` + `RpcVerifiedCredentialOptions` | 默认实现 B（无状态：凭证外部签发，服务端只验） |
 
 三个文件都是 browser-safe：不碰监听对象、不碰 `http` 模块、不 import Node 内建模块。生成 id 用 `@isdk/hash`
-的 `uuidv4`（本仓库现有写法，`src/transports/dispatcher.ts:2`、`src/transports/http-server.ts:22`）。
+的 `uuidv4`（本仓库现有写法，`src/transports/dispatcher.ts`、`src/transports/http-server.ts`）。
 全部符号在 `src/transports/index.ts` 与 `src/transports/browser.ts` 里走**显式**导出（照 `socket-address.ts` 那七个 helper 的写法），两份名单一致：这两个入口其余行是 `export * from './xxx'`，靠它顺带带出的符号没人钉（见 `CONTRIBUTING.md`「改公开 API 的流程」）。
 
 `identity.ts` 只回答「这个请求是谁」。超时归 dispatcher，路由归 `route-path.ts`，SSRF/全局拦截归
@@ -169,8 +169,8 @@ export interface RpcCredentialRegistry {
    封闭枚举里选来路（`fallback`），不可注入自定义 reader。`RPC_HEADERS.CLIENT_ID`（`rpc-client-id`）
    保留，语义是「客户端自报标识」，不是身份。
 10. **钩子可同步可异步，框架侧一律 `await`**（`match`/`assign`/`revoke` 三个都是）。落点已核：
-    `ServerToolTransport.processIncomingCall`（`src/transports/server.ts:248`）已 `await this.toRpcRequest(...)`（:250）
-    再 `validateRpcRequest`（:256）与 `dispatch`（:261），身份判定插在 :250 与 :256 之间（现已落在 :254），零结构改动（插入位置见 §10）。
+    `ServerToolTransport.processIncomingCall`（`src/transports/server.ts`）已 `await this.toRpcRequest(...)`
+    再 `validateRpcRequest` 与 `dispatch`，身份判定插在两者之间（现已落地），零结构改动（插入位置见 §10）。
 11. **凭证在 wire 上的位置归策略/协议，框架侧不定义**：bearer 用 `authorization`（RFC 7235 定的，服务端不签发，
     没有下发需求）；服务端自签发的策略自己定下发处（tool-event 的原始实现就是 `rpc-session-token` header +
     `session_token` query + welcome 帧的 `sessionToken` 键，因为 EventSource 不能设 header）。框架侧只保证策略拿得到
@@ -239,7 +239,7 @@ export class RpcInProcessCredentialRegistry implements RpcCredentialRegistry {
 
 - `ensureCredential` 对同一身份**幂等复用**（反复断线不累积凭证），并滑动 TTL。
   它是按**身份**找凭证，而 `entries` 按**凭证**为 key → 内置实现需要第二个索引（`identityId → credential`）；
-  原实现是两处线性扫（`@isdk/tool-event` 的 `src/utils/sse-identity.ts:148` 的 `credential`、`:160` 的 `revoke`），一万条时不能这么写。
+  原实现是两处线性扫（`@isdk/tool-event` 的 `src/utils/sse-identity.ts` 的 `credential`、`revoke`），一万条时不能这么写。
 - `lookupIdentity` 只数**出示**次数（单位见 `maxUses` 的注释），签发不计；过期/超次数即作废、**删除该条目**、返回 `undefined`。
 - 满容量时 `ensureCredential` 先调一次 `prune(now)`，仍满则返回 `undefined`，策略据此降级为「不发续用凭证」，
   连接照常服务。内置实现只有这一条容量行为；要 LRU 等淘汰策略就实现 `RpcCredentialRegistry` 换掉 `registry`。
@@ -360,7 +360,7 @@ verify: async (token) => {
 | 服务端拿凭证做什么 | 只认自己发出去的那张 | 只验证外部签发的，自己不签发 |
 | 前置条件 | 无 | 调用方已有认证体系 |
 | 状态 | 进程内登记表 | 无状态 |
-| 依赖 | 无新增依赖：`@isdk/hash` 的 `uuidv4`（本包已有，见 `src/transports/dispatcher.ts:2`）+ 一个 Map | 验证材料（key / JWKS / HMAC / 数据库）+ 一个 `verify` |
+| 依赖 | 无新增依赖：`@isdk/hash` 的 `uuidv4`（本包已有，见 `src/transports/dispatcher.ts`）+ 一个 Map | 验证材料（key / JWKS / HMAC / 数据库）+ 一个 `verify` |
 | `id` 粒度 | 连接级（默认 uuid） | 由 `verify` 定：用户级会合并下游会话（见 §5 的注） |
 | 跨副本 | 默认实现是进程内的，所以要 sticky session；要共享/持久化就换 `registry` 实现 | 天然可用 |
 | 断线续用 | 内建 | 取决于客户端能否重带凭证 |
@@ -463,10 +463,10 @@ const scopes = ctx.identity?.attributes?.scopes;
   会话表会爆炸；身份本体只走 `ctx.identity`。
 - 凭证在 wire 上的位置不在这一节定（契约 11）：bearer 用 `authorization`；自签发策略自己定下发处，
   交付句柄是 `ctx.res`。客户端侧 `credentialSource` 只给值，写进哪个 header 由部署的 transport 定
-  （`ClientTools.connect(apiUrl, options)` 的 options 落 `fetchOptions`，`src/client-tools.ts:63-68`；   现有写法参考 `src/transports/client.ts:124-127` 写 `rpc-client-id` 的那一段）。
+  （`ClientTools.connect(apiUrl, options)` 的 options 落 `fetchOptions`，`src/client-tools.ts`；现有写法参考 `src/transports/client.ts` 写 `rpc-client-id` 的那一段）。
 - 会话活性（`resumeWindow` 那类「会话还活着吗」）归通道，不进 `RpcIdentityPolicy`。已有实现可对照：
-  `@isdk/tool-event` 的 `resumable: Map<string, { events?, expiresAt }>`（`src/utils/sse-channel.ts:56`，
-  `resumeWindow` 默认 30000，同文件 :133）。P2 可选件：`RpcSessionRegistry`（`id → { state, expiresAt }` +
+  `@isdk/tool-event` 的 `resumable: Map<string, { events?, expiresAt }>`（`src/utils/sse-channel.ts`，
+  `resumeWindow` 默认 30000，同文件）。P2 可选件：`RpcSessionRegistry`（`id → { state, expiresAt }` +
   `markAlive/markDropped/resumable`）。
 
 ## 10. 框架侧与策略的分工
@@ -474,8 +474,8 @@ const scopes = ctx.identity?.attributes?.scopes;
 框架侧只有一个调用点，没有第二个入口：策略从构造参数传入（§9），**没传就是 no-op**，基类不启用任何身份逻辑。
 基类里那段「取凭证 → `match` → 必要时 `assign` → 写 `request.identity`」的代码需要一个名字，建议
 `resolveRequestIdentity`（命名判据第 2/3 条：名词带领域限定、动词带宾语），位置在
-`processIncomingCall` 里 `toRpcRequest`（`src/transports/server.ts:250`）之后、`validateRpcRequest`（:256）之前
-——插在这里，Manager 的架构层校验才能看到 `request.identity`；`dispatch` 在 :261。`protected` 可覆写。
+`processIncomingCall` 里 `toRpcRequest`（`src/transports/server.ts`）之后、`validateRpcRequest`之前
+——插在这里，Manager 的架构层校验才能看到 `request.identity`；`dispatch`。`protected` 可覆写。
 
 | 框架侧提供 | 策略自己负责 |
 |---|---|
@@ -512,17 +512,17 @@ const scopes = ctx.identity?.attributes?.scopes;
 | 期 | 范围 | 对下游的影响 |
 |---|---|---|
 | **P0** | 三个文件 + 单测 + 名单 | 纯新增，零行为变化 |
-| **P1a** | 只加载体：`ToolRpcRequest.identity` / `ToolRpcContext.identity` + `dispatcher.prepareContext`（`private`，`src/transports/dispatcher.ts:181`，透传在 :197） | 零行为变化（基线 44 文件 / 539 测试可直接对照） |
+| **P1a** | 只加载体：`ToolRpcRequest.identity` / `ToolRpcContext.identity` + `dispatcher.prepareContext`（`private`，`src/transports/dispatcher.ts`，透传） | 零行为变化（基线 44 文件 / 539 测试可直接对照） |
 | **P1b** | 装调用点：`ServerToolTransport.identity` + `credentialReader` + `resolveRequestIdentity`；HTTP 与 Mailbox 提供 reader；§3 第 3/4 条 | 装了策略才改变行为；未装策略逐字节不变 |
 | **发布** | `release`（13 个新公开符号 = 公开面变化，`CHANGELOG.md` 与 `docs/api/**` 重生成；原定 11 个，另两个见 §18 末） | 下游只看到 dist |
-| **之后** | `tool-event` 收口（§12）+ `tool-rpc-fastify` 装配 `identity` 与它的 `credentialReader`（它已走 `processIncomingCall`，`fastify-server.ts:154`） | 在下游仓库，各自单独发布 |
+| **之后** | `tool-event` 收口（§12）+ `tool-rpc-fastify` 装配 `identity` 与它的 `credentialReader`（它已走 `processIncomingCall`，`fastify-server.ts`） | 在下游仓库，各自单独发布 |
 
 `ai-tool` 与 `tool-electron` 零代码变更（§12 实测）。
 
 **`revoke` 在 P0/P1 没有调用点**（“调用点”= 哪段代码、在哪个事件上会调它）。P1 的调用点只有请求流水线上的
 `match`/`assign`，而「一个 HTTP 请求结束」不等于「会话结束」，所以没有任何代码会调 `revoke`：它是给 P2 的
-会话活性事件预留的（对照 tool-event 的原始实现：调用点是 `@isdk/tool-event` 的 `src/utils/sse-channel.ts:391`
-`clearClients()`，:398 逐个 `identity.revoke?.(clientId)`，即通道 reset；`disconnect()`（:379）故意不 revoke，
+会话活性事件预留的（对照 tool-event 的原始实现：调用点是 `@isdk/tool-event` 的 `src/utils/sse-channel.ts`
+`clearClients()`， 逐个 `identity.revoke?.(clientId)`，即通道 reset；`disconnect()`故意不 revoke，
 因为要留 resume window）。P0/P1 的单测只测策略自身行为（直接调 `revoke` 断言
 凭证作废），不要承诺「通道自动 revoke」。
 
@@ -530,10 +530,10 @@ const scopes = ctx.identity?.attributes?.scopes;
 
 | 下游 | 证据 | 要改代码吗 |
 |---|---|---|
-| `ai-tool` | `src/index.ts:30` = `export * from '@isdk/tool-rpc'`；自身 src 零 `clientId` / `.identity` 命中 | 不用。重建 dist + 版本 bump |
-| `tool-electron` | `src/pubsub/electron-server.ts:130` = `clientId: sessionId.toString()`，自己生成；它的 transport 走共用流水线（`src/ipc-server.ts:60` `extends ServerToolTransport`、:192 `processIncomingCall`） | 不用。跑测试确认。要在 IPC 上装策略得先给 payload 开一个凭证字段：`src/ipc-server.ts:217` 的 `headers` 是空对象，`src/pubsub/electron-client.ts:140` 写 `clientId: ''`（契约 11 的落点） |
-| `tool-event` | 它**确实**从 RPC header 取 clientId：`src/transports/pubsub/sse-server.ts:77` 的 `getSessionFromReq`；客户端侧把服务端发的 id 回写进 header（`src/event-client.ts:89-94` → 本包 `src/transports/client.ts:124-127`）。不 forward 本包 | 要：§12.1 收口 |
-| `tool-rpc-fastify` | `src/fastify-server.ts:340` = `clientId: headers[RPC_HEADERS.CLIENT_ID]`；但它走共用流水线（:65 `extends ServerToolTransport`、:154 `processIncomingCall`） | 不用改那行（未装策略时透传）；要的是装配时传 `identity` + `credentialReader`。它的 `Req` 是 `FastifyRequest`（不是 `IncomingMessage`），Node 对象在 `raw._req` / `raw._res`（:345） |
+| `ai-tool` | `src/index.ts` = `export * from '@isdk/tool-rpc'`；自身 src 零 `clientId` / `.identity` 命中 | 不用。重建 dist + 版本 bump |
+| `tool-electron` | `src/pubsub/electron-server.ts` = `clientId: sessionId.toString()`，自己生成；它的 transport 走共用流水线（`src/ipc-server.ts` `extends ServerToolTransport`、 `processIncomingCall`） | 不用。跑测试确认。要在 IPC 上装策略得先给 payload 开一个凭证字段：`src/ipc-server.ts` 的 `headers` 是空对象，`src/pubsub/electron-client.ts` 写 `clientId: ''`（契约 11 的落点） |
+| `tool-event` | 它**确实**从 RPC header 取 clientId：`src/transports/pubsub/sse-server.ts` 的 `getSessionFromReq`；客户端侧把服务端发的 id 回写进 header（`src/event-client.ts` → 本包 `src/transports/client.ts`）。不 forward 本包 | 要：§12.1 收口 |
+| `tool-rpc-fastify` | `src/fastify-server.ts` = `clientId: headers[RPC_HEADERS.CLIENT_ID]`；但它走共用流水线（`extends ServerToolTransport`、 `processIncomingCall`） | 不用改那行（未装策略时透传）；要的是装配时传 `identity` + `credentialReader`。它的 `Req` 是 `FastifyRequest`（不是 `IncomingMessage`），Node 对象在 `raw._req` / `raw._res` |
 
 ### 12.1 tool-event 收口（保留它的公开面）
 
@@ -554,31 +554,31 @@ export const createSSEIdentity = (o?: SSETokenIdentityOptions) =>
 
 **收口注意事项**（改 tool-event 时逐条核）：
 
-原实现位置（2026-10-12 实测）：`src/utils/sse-identity.ts`（172 行，`SSETokenIdentityPolicy` 在 :112）与
+原实现位置（2026-10-12 实测）：`src/utils/sse-identity.ts`（172 行，`SSETokenIdentityPolicy`）与
 `src/utils/sse-channel.ts`（425 行）。它的钩子形状是 `resolve` / `issue` / `credential(clientId)` / `revoke(clientId)`
-（:33 / :36 / :42 / :45），对应框架侧的 `match` / `assign` 的 id 部分 / `assign` 返回体的 `credential` / `revoke`。
+，对应框架侧的 `match` / `assign` 的 id 部分 / `assign` 返回体的 `credential` / `revoke`。
 
 1. 框架侧的类顶掉 `SSETokenIdentityPolicy` 前，逐条核 §4 四条契约对它的等价性：`ensureCredential` 幂等复用、TTL 滑动、
-   `lookupIdentity` 只数出示且作废即删条目（原实现 `resolve` 已如此：`src/utils/sse-identity.ts:124-135`，
-   过期/超次数就 `tokens.delete(token)`，:130）。
-   **默认值不等价**：原实现 `maxUses` 默认 5（:121），框架侧默认不限（§4）→ 收口时要显式传 `maxUses: 5` 才与今天同行为。
-2. `SSEChannel` 现在靠反查取凭证发 welcome 帧（`src/utils/sse-channel.ts:359` 的 `identity.credential?.(finalClientId)`）；
+   `lookupIdentity` 只数出示且作废即删条目（原实现 `resolve` 已如此：`src/utils/sse-identity.ts`，
+   过期/超次数就 `tokens.delete(token)`）。
+   **默认值不等价**：原实现 `maxUses` 默认 5，框架侧默认不限（§4）→ 收口时要显式传 `maxUses: 5` 才与今天同行为。
+2. `SSEChannel` 现在靠反查取凭证发 welcome 帧（`src/utils/sse-channel.ts` 的 `identity.credential?.(finalClientId)`）；
    框架侧无反查 → welcome 帧改在 `assign` 返回体的 `credential` 上取（框架侧不定义下发通道，契约 11）。
 3. §3 第 3/4 条（`clientId === identity.id`）对 tool-event 是行为变更，排在 tool-rpc 发布之后做；它的
-   三张表全部以 clientId 为 key（`clients`：`src/utils/sse-channel.ts:44`；`resumable`：同文件 :56；
-   `sessions`：`src/transports/pubsub/sse-server.ts:28`），所以 `id` 必须是连接级（见 §5 的注）。
+   三张表全部以 clientId 为 key（`clients`：`src/utils/sse-channel.ts`；`resumable`：同文件；
+   `sessions`：`src/transports/pubsub/sse-server.ts`），所以 `id` 必须是连接级（见 §5 的注）。
 4. 它的公开面 `SSEIdentityPolicy` / `sseCredentialReader` / `createSSEIdentity` / `SSETokenIdentityOptions` 键名不变
    （四个全部换成框架侧对应类型的别名，或框架侧类的工厂），实现换成框架侧的类。
-5. `getSessionFromReq`（`src/transports/pubsub/sse-server.ts:77`）直取 `req.headers[RPC_HEADERS.CLIENT_ID]` 查
+5. `getSessionFromReq`（`src/transports/pubsub/sse-server.ts`）直取 `req.headers[RPC_HEADERS.CLIENT_ID]` 查
    `sessions` 表：收口后改走 identity。今天它能工作，靠的是客户端把服务端发的 id 回写进 header
-   （`src/event-client.ts:89-94`）——契约 3 就是把这套约定形式化。
+   （`src/event-client.ts`）——契约 3 就是把这套约定形式化。
 
 ## 13. 需要单独解释的点
 
 正文不展开，逐条说明在对话里：
 
 1. 为什么 A 叫 `session`：它与 `bearer` 同为**机制名**（`bearer` 是 RFC 7235 的方案名），且本包与 tool-event 已用
-   `session` 指「服务端认出来的那段连接生命周期」（`src/transports/models.ts:23` 的 `CLIENT_ID` 注释、tool-event 的
+   `session` 指「服务端认出来的那段连接生命周期」（`src/transports/models.ts` 的 `CLIENT_ID` 注释、tool-event 的
    `rpc-session-token` / `sessions` 表）。它的边界：只管凭证的签发与识别这一段；「会话还活着吗」（resume window /
    在线表）在通道（§9 的 P2 `RpcSessionRegistry`），不进这个类——所以 `session` 不会长成「会话族基类」。
    扩展它不是只有继承一条路（§7：继承与替换策略并列）。
@@ -601,7 +601,7 @@ export const createSSEIdentity = (o?: SSETokenIdentityOptions) =>
 
 ## 14. 落地清单
 
-1. 先改名单：`test/browser-entry.test.ts` 加 `EXPECTED_IDENTITY_TYPES`，它会先红，再动代码。断言要写成**运行时 import 两个入口**（照 :199 的 `should export only the address helpers a transport needs`：`await import('../src/browser')` 与 `'../src/index'`，逐个 `typeof` 断言）——文件末尾那两条 dist 断言在未构建时会 skip，不会红。当时定的 11 个符号：
+1. 先改名单：`test/browser-entry.test.ts` 加 `EXPECTED_IDENTITY_TYPES`，它会先红，再动代码。断言要写成**运行时 import 两个入口**（照 `test/browser-entry.test.ts` 里 `should export only the address helpers a transport needs` 那条：`await import('../src/browser')` 与 `'../src/index'`，逐个 `typeof` 断言）——文件末尾那两条 dist 断言在未构建时会 skip，不会红。当时定的 11 个符号：
    `RpcIdentity`、`RpcIdentityContext`、`RpcCredentialReader`、`RpcCredentialSource`、`RpcIdentityPolicy`、
    `RpcCredentialRegistry`、`RpcSessionIdentityPolicy`、`RpcSessionIdentityOptions`、`RpcInProcessCredentialRegistry`、
    `RpcBearerPolicy`、`RpcVerifiedCredentialOptions`。（2026-10-13 起共 13 个：另加 `readBearerCredential` / `parseBearerCredential`，理由见 §18 末。）
@@ -609,7 +609,7 @@ export const createSSEIdentity = (o?: SSETokenIdentityOptions) =>
 3. 单测要钉住：§3 十一条契约、§4 登记表四条契约、§7 两个继承例子、§8 自定义策略例子（能编译且行为对）。
    P1b 另加两条回归：**未装策略时 header 透传与今天逐字节一致**（照 `src/transports/http-server-regressions.test.ts` 的写法）、
    **装了策略后 401 的响应形状**（`RpcError('Unauthenticated', 401, 'unauthenticated')` → `code: 401` +
-   `status: 'unauthenticated'`，见 `src/transports/models.ts:182`（`RpcError` 类，构造签名在 :189）；经 `server.ts:275-277` 的顶级防护
+   `status: 'unauthenticated'`，见 `src/transports/models.ts`（`RpcError` 类，构造签名）；经 `server.ts` 的顶级防护
    映射成响应 `status: 401` + `error.status: 'unauthenticated'`）。登记表加一条内存有界（大量闲置身份后条目数有界）。
 4. 检查：`./node_modules/.bin/tsc --noEmit -p tsconfig.release.json`、`./node_modules/.bin/tsc --noEmit -p tsconfig.json`、
    `npx vitest run`、`npx tsup --dts --dts-resolve`。
@@ -625,9 +625,9 @@ export const createSSEIdentity = (o?: SSETokenIdentityOptions) =>
 
 三条缺口，按同一顺序补（先钉名单/测试，再动代码）：
 
-1. **401 进枚举**：`RpcStatusCode.UNAUTHENTICATED = 401`（`src/transports/models.ts:92`）。
+1. **401 进枚举**：`RpcStatusCode.UNAUTHENTICATED = 401`（`src/transports/models.ts`）。
    之前 `reject` 里是裸数字 401，`dispatcher.handleError` 的自动状态串补全也只到 400/404/409。
-   现在 `identity-bearer.ts:114` 用枚举，`dispatcher.ts:352` 对 401 自动补 `unauthenticated`。
+   现在 `identity-bearer.ts` 用枚举，`dispatcher.ts` 对 401 自动补 `unauthenticated`。
    枚举只是常见码语义对照表、不是闭集：策略要 403 就直接写 403（见 `identity-bearer.test.ts` 的 HmacPolicy 例子）。
 2. **`src/transports/identity-bearer.test.ts`**（15 条）：默认实现 B 自身的契约——`allowAnonymous` 两态、
    「verify 不认」与「无凭证」同形状、verify 可 async、verify 抛错不被吞成 undefined、
@@ -704,12 +704,12 @@ new RpcBearerPolicy({
 - 当时响应仍由物理路由直接回（不经 `dispatcher`），只是在回之前多一步 `resolveBuiltinIdentity('discovery', …)`。
   **第三轮删了这类内置端点专用入口**：发现端点现在就是普通工具，走 `processIncomingCall` 同一条路（§17）。
 - 判定与业务侧同一条：`match` → 必要时 `assign`，**只有策略抛错才是 401**（与契约 1 一致：拒绝必须抛）。
-  错误封包走 `sendPipelineError`（`src/transports/server.ts:289`），取码规则与顶级防护同一套，
+  错误封包走 `sendPipelineError`（`src/transports/server.ts`），取码规则与顶级防护同一套，
   所以客户端 `loadApis()` 拿到的是带 `code` / `status` 的 RPC 错误，不是裸 500。
 - **默认仍公开**：不装策略逐字节不变；装了策略，要不要认由谓词定（当时是 `ctx.builtin === 'discovery'`，
   现在是 `ctx.toolId === 'rpcApis'`）。全局 `allowAnonymous: false` 会连发现一起拦——那是部署显式选了「一刀切」的结果，不是框架偷偷改默认。
 - 客户端侧配套：`ClientTools.loadFrom()` 把类级 `fetchOptions`（凭证就在那）合进发现调用
-  （`src/client-tools.ts:109`），否则发现端点一开认证就取不到工具清单。
+  （`src/client-tools.ts`），否则发现端点一开认证就取不到工具清单。
 
 测试：`test/identity-e2e.test.ts` 的「逐 API 的认证判定」（同一策略实例下未标记的 API 匿名可进、带 `authScope`
 的必须凭证、发现端点在谓词里单独放行）与「策略看到的备料」（`toolId` / `act` / `resId` / `tool` 字段）。
@@ -790,7 +790,7 @@ new RpcBearerPolicy({
 补（2026-10-13）：bearer 解析从包内 helper 改为**对外导出**，`readBearerCredential`（找 header + 解析）
 与 `parseBearerCredential`（只解析整值）都搬进 `identity-bearer.ts`，`identity.ts` 回到纯类型。
 理由：`tool-event` 的 `sseCredentialReader` 自己复制了那一段 RFC 7235 解析，两边对同一个 header
-给出不同答案（空 token 那次就是先在那边暴露的）；按 `src/transports/README.cn.md:285` 的公开面判据，
+给出不同答案（空 token 那次就是先在那边暴露的）；按 `src/transports/README.cn.md` 的公开面判据，
 「下游在用」就是公开。**这不放宽上面的封闭性**：导出的是纯函数，策略侧仍没有注入口——
 来路仍只有 `ctx.credential` 与那个写死的调用。分段是为了让「懂来路」的一方只借解析那一段：
 `tool-event` 保留自己的 `singleHeaderValue`（重复 header 不给凭证，比内置 reader 取第一个更严）。

@@ -253,7 +253,7 @@ await manager.stopAll();
 - **名字里的 socket 指「监听底座」**（TCP socket 或 unix socket 文件），不是「只能 unix」：HTTP 只是同一个底座的其中一个写法家族。
 - **监听前后两个时刻不可合并**：`socketAddressFromBind()` 在 listen **前**推声明地址（`port: 0` 时端口是假的）；listen **后**要把内核观测值过 `socketAddressFromListen()`（本包的 HTTP 拿的是 Node `server.address()`；外部包 `@isdk/tool-rpc-fastify` 拿的是 Fastify `listen()` 的返回值，形状不同，由同一个函数区分）。两边必须算出同一个字符串，否则同一个 socket 在池里会有两个 key。
 - **物理底座不在 helper 里**：`sharedServers` 池 / refCount / 最长前缀分发表属于 `http-server.ts`。helper 只处理字符串与参数，不碰监听对象。
-- **L0 不读 bind**：`ServerToolTransport.start(options?)`（`src/transports/server.ts:210`）只做三件事：把 `this.options` 深合并进参数、按当前地址 `registerRoutes()`、`return this._start(options)`。基类从不读 bind 字段去算地址，`getListenAddr()` 对它只是个不透明值。所以 helper 是**可选规则库**：mailbox transport 读 `options?.address`（总线名）、electron 的 `_start()` 无参，两者都不碰 `socket-address.ts`。`defaultBindOptions()` 也不在基类，只有监听 TCP/unix 的 transport 各自定义。
+- **L0 不读 bind**：`ServerToolTransport.start(options?)`（`src/transports/server.ts`）只做三件事：把 `this.options` 深合并进参数、按当前地址 `registerRoutes()`、`return this._start(options)`。基类从不读 bind 字段去算地址，`getListenAddr()` 对它只是个不透明值。所以 helper 是**可选规则库**：mailbox transport 读 `options?.address`（总线名）、electron 的 `_start()` 无参，两者都不碰 `socket-address.ts`。`defaultBindOptions()` 也不在基类，只有监听 TCP/unix 的 transport 各自定义。
 - **为什么 `BindOptions` 不单独成文件**：`BindOptions`（调用方声明这一轮怎么监听）与 `socket-address.ts`（这一轮落在哪个地址）是同一件事的两半，`socketAddressFromBind()` 就是从前者算后者。拆开就会两边各读一遍 bind，声明地址与真实监听就会错开。
 
 #### 参考实现：本库自带的 transport
@@ -297,13 +297,16 @@ grep -rn '\b符号名\b' ../tool-rpc-fastify/src ../tool-electron/src ../ai-tool
 | 下游在用 | 插件契约 | 包内 |
 |---|---|---|
 | `BindOptions`、`normalizeListenBind`、`socketAddressFromBind`、`socketAddressFromListen` | `ResolvedListenBind`（`normalizeListenBind` 的返回类型，必须可命名）、`normalizeSocketAddress`、`normalizeHostAndPort`、`unixSocketUri`、`unixSocketPath` | `hasUriScheme`、`nativeAddressFromBind`、`withBindOptions`、`normalizeNativeAddress` |
+| `normalizeRoutePath`（按 URL 寻址的 transport 都要它：`tool-rpc-fastify` 在用） | `RoutePathError`、`NormalizedRoutePath`、`RoutePathOptions`（`normalizeRoutePath` 的错误与返回类型，必须可命名） | `routeMatchKey`、`matchRoute`（读的是基类自己的 `routeTable`，覆写者拿不到也不该拿） |
+
+路径归一化只有 `normalizeRoutePath` 一个入口，它存在的理由就是消灭「四处各自实现、规则互不一致」（`%2F` 算不算分隔符、`//` 是否折叠、`.`/`..` 是否消解、尾斜杠算不算不同路径）。所以适配器**不得**从框架自己的 params 反推路径（find-my-way 会把 `%2F` 解成分隔符、把 `//` 分成两段、对 `x/..` 直接 404）——那正是这个模块要修的 bug 再长回来。
 
 名单在 `transports/index.ts` 与 `transports/browser.ts` 里是**显式**的（不是 `export *`），由 `test/browser-entry.test.ts` 钉住。改公开面时**先改那份名单**（它会红）再动代码：它是唯一能表达「这个符号不该公开」的机制——测试网钉得住行为，钉不住公开面。
 
 ### 8.1 HttpServerToolTransport
 *   **物理底座复用 (Physical Reuse)**：支持多个逻辑 Transport 实例共享同一个物理端口（Node.js `http.Server`）。静态池只按 `getListenAddr()` 的字符串精确匹配：相等就复用同一个 server，不相等就各自 `listen()`，真撞了由内核报 `EADDRINUSE`。不做「通配覆盖具体 host」那种包含判断（非传递、会漏报，又会把不同 host 塌成同一个底座）。
 *   **地址跟着监听走**：`getListenAddr()` 在监听前是声明值（apiUrl + `start({ host, port, path })`），监听后是真实底座——`port: 0` 时只有内核知道端口，地址必须是「能被别人访问」的那个。地址定下来后调 `registerRoutes()` 重登归属。apiUrl 是裸 path 前缀（只说了路由、没说底座）时，由 bind 参数加上传输层 `defaultBindOptions()` 的确定默认值**造**出底座 URI，于是 `/api` 与 `/v2` 两个实例能共用同一个 socket 而不是各自 EADDRINUSE。
-*   **地址归一化 (`normalizeSocketAddress`)**：地址语义属于 HTTP transport，不在通用 URI 模块里。`http://localhost:3000`（精确绑定）、`http://*:8080`（通配监听）；只规范化「同一个 socket 的两种写法」：回环别名（`127.0.0.1` / `[::1]`）归一为 `localhost`，通配写法（`0.0.0.0` / `[::]` / `*`）归一为 `*`，默认端口由 URL 自身丢弃（`http://h:80` 与 `http://h` 同 key），无 scheme 的 `host:port`（绑定观测、legacy 写法）补 `http://`。具体 host 不塌成通配（否则 vhost 判死）。
+* **地址归一化 (`normalizeSocketAddress`)**：地址语义属于 HTTP transport，不在通用 URI 模块里。`http://localhost:3000`（精确绑定）、`http://*`（通配监听）；只规范化「同一个 socket 的两种写法」：回环别名（`127.0.0.1` / `[:]`）归一为 `localhost`，通配写法（`0.0.0.0` / `[::]` / `*`）归一为 `*`，默认端口由 URL 自身丢弃（`http://h:80` 与 `http://h` 同 key），无 scheme 的 `host:port`（绑定观测、legacy 写法）补 `http://`。具体 host 不塌成通配（否则 vhost 判死）。
 *   **Host 头归一**：Host 是客户端可控输入，会被拼进 `ToolRpcRequest.apiUrl` 喂给 SSRF 校验（`url.includes(pattern)` 式匹配），所以先过归一（小写、去末尾点、去默认端口）：不归一的话 `Host: LocalHost` 能绕过针对 `localhost` 的限制。
 *   **unix socket 底座**（本节属 `HttpServerToolTransport`：unix socket 是这个 HTTP transport 自带的监听模式，不是独立插件，所以 `unix:` 这种地址形式也在这里说——它是 `getListenAddr()` 会报的底座 key，不是另一套 API）：`start({ path })`（也认 `socketPath` / `socket`）监听 unix socket，`getListenAddr()` 就是 `unix:<path>`。`unix:` 之后按 URI 规范处理：入参**先按段 percent-encode 再进 URI**，要原值用 `unixSocketPath()` decode（空格→`%20`、`#`→`%23`、字面 `%`→`%25`、非 ASCII→UTF-8 百分号序列）。词法归一（折叠 `//`、去尾斜杠、消 `.` / `..`）在**已编码**空间做，所以 `/` 只作分隔符、段内 `%2F` 是字面斜杠。两条不变量：`unixSocketPath(canonical)` 就是实际 listen 的路径；编码幂等且单射——`/tmp/a b.sock` → `unix:/tmp/a%20b.sock`，而 `/tmp/a%20b.sock` → `unix:/tmp/a%2520b.sock`，两个可共存的合法文件名不会塌成同一个 key（塌了会误报冲突、还会复用错 socket）。注意带 `unix:` 前缀的入参按已编码理解：`unix:/tmp/a%20b.sock` 指的文件是 `a b.sock`，字面叫 `a%20b.sock` 的要写 `unix:/tmp/a%2520b.sock`。socket 声明优先于 host/port（与 Node「有 port 就忽略 path」相反，否则声明身份与真实监听会错开）。库默认不删 socket 文件（Node 的 `close()` 不删），重启到同一路径需调用方先清掉旧文件。同一 socket 上重复挂载同一逻辑路由会被 Manager 报 `Routing Conflict`；不同 socket 文件就是不同底座。
 *   **精准路由分发 (Longest Prefix Match)**：当物理端口接收到请求时，采用“最长前缀匹配”算法扫描逻辑实例。
@@ -326,7 +329,7 @@ grep -rn '\b符号名\b' ../tool-rpc-fastify/src ../tool-electron/src ../ai-tool
 
 ### 8.3 监听地址不变量（写 transport 要守的规则）
 
-服务端 transport 只有一个地址概念：`getListenAddr()` —— 别人访问本服务用的地址。框架把它当**不透明字符串**：只用作底座池 key、路由归属表 key、分发 key 与日志，不解析、不校验、不预测 bind 冲突。签名是 `string | string[]`（`src/transports/server.ts:160`）：一个实例同时监听多个地址就报多个，Manager 在 `src/transports/server-manager.ts:99-100` 摊平成逐地址登记，仍然一个字符串一个 key。
+服务端 transport 只有一个地址概念：`getListenAddr()` —— 别人访问本服务用的地址。框架把它当**不透明字符串**：只用作底座池 key、路由归属表 key、分发 key 与日志，不解析、不校验、不预测 bind 冲突。签名是 `string | string[]`（`src/transports/server.ts`）：一个实例同时监听多个地址就报多个，Manager 在 `src/transports/server-manager.ts` 摊平成逐地址登记，仍然一个字符串一个 key。
 
 - 地址语义（host/port/socket、回环写法、默认端口、监听之后补真实端口）归按 scheme 分派到的那个 transport 自己管；HTTP 家族那套在 `socket-address.ts`。插件只需覆写 `getListenAddr()` 返回一个字符串（`unix:/run/ai.sock`、`mem://bus-a`）。
 - 基类默认返回 `apiUrl` 原值。覆写后报什么就是什么：两个 transport 报的字符串**相等就复用同一个底座**，**不相等就各自 `listen()`**，真撞了由内核报 `EADDRINUSE`（fail fast，不误报也不漏报）。**不做包含关系预测**（不把 `0.0.0.0:3000` 视为覆盖 `localhost:3000`）：那种关系非传递（会漏报），又会把不同 host 同端口塌成一个底座（误报、vhost 判死）。

@@ -42,8 +42,9 @@ export interface RouteClaimOptions {
    * 它不是「路由注册表」（物理路由表在 transport 自己那里，如 HTTP 的
    * `binding.routes`），而且**按前缀绑定**而不是挂在 transport 上：一个 transport
    * 可以服务多个前缀，各自的工具集不同；若共用 `this.registry`，第二次
-   * `mount(RegB, '/v2')` 就会把 `/api` 也改指向 RegB。请求期由 `routeRegistry(prefix)`
-   * 解析，没有 claim 时才退回 transport 自己的 registry，最后才是 dispatcher 的。
+   * `mount(RegB, '/v2')` 就会把 `/api` 也改指向 RegB。请求期由 `requestRegistry(rpcReq)`
+   * 按命中前缀分层解析（该前缀的 claim → transport 自己的 registry → dispatcher 的）；
+   * `routeRegistry(prefix)` 只是那层解析里读 claim 的一环，不是适配器该调的入口。
    */
   registry?: any;
   /** 该前缀的发现处理器（`mount` 里就是 `() => serverTools.toJSON()`）。同样按前缀绑定。 */

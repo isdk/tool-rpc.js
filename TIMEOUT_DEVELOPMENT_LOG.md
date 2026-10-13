@@ -18,7 +18,7 @@
   - `HttpClientToolTransport` **没有**加 Buffer——本地计时器与 `rpc-timeout` 用完全相同的协商值
     （`http-client.ts` 中 `setTimeout(..., Number(timeoutVal))`），所以上面的竞态仍然存在，
     只是两边都归一化为 504（见 §6）而不会变成模糊的 AbortError。
-  - `MailboxClientTransport` **有** Buffer：`mailbox-client.ts:125` 的 `timeoutVal + 200`。
+  - `MailboxClientTransport` **有** Buffer：`mailbox-client.ts` 的 `timeoutVal + 200`。
 
   写新传输层时请参照 Mailbox 那一侧。
 

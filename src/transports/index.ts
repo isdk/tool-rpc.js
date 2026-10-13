@@ -15,6 +15,13 @@ export {
   unixSocketPath,
   unixSocketUri,
 } from './socket-address';
+// 路径归一化（`route-path.ts`）：只对外导出 `normalizeRoutePath` 与它的错误/返回类型。
+// 判据是「插件契约」：任何按 URL 寻址的服务端 transport（`tool-rpc-fastify` 是第一个）
+// 都要把请求路径变成同一个形态，否则 `%2F`、`//`、尾斜杠、`.`/`..` 在各家实现里答案不同
+// —— 这个模块就是为了消灭那四处实现而存在的，实现再长回来就是它的反面。
+// `routeMatchKey` / `matchRoute` 仍是包内：路由表在基类手里，覆写者拿不到也不该拿。
+export { normalizeRoutePath, RoutePathError } from './route-path';
+export type { NormalizedRoutePath, RoutePathOptions } from './route-path';
 // 身份策略（设计见根目录 IDENTITY_POLICY_DESIGN.cn.md）：走**显式**导出，与 browser.ts 同一份名单
 // （那两个入口其余行是 export *，靠它带出的符号没人钉）。名单在 `test/browser-entry.test.ts`。
 export type {

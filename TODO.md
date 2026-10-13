@@ -11,7 +11,7 @@
 ## ClientTools 架构优化
 
 - [ ] **优化 `ClientTools.connect` 的元数据复用**（未实现）
-  - **现状**: `connect` 创建子类后仍重置 `items = {}`（`src/client-tools.ts:63-68`，注释写明是「Scope isolation for discovered stubs」），每个连接实例都要重新 `loadFrom` 填充工具桩。没有 `with({apiUrl})`，也没有靠原型链共享 `items`。
+  - **现状**: `connect` 创建子类后仍重置 `items = {}`（`src/client-tools.ts`，注释写明是「Scope isolation for discovered stubs」），每个连接实例都要重新 `loadFrom` 填充工具桩。没有 `with({apiUrl})`，也没有靠原型链共享 `items`。
   - **目标**: 所有连接实例（BoundService）共享同一套工具定义（Metadata），仅在请求终点（`apiUrl`）和执行配置上保持独立。
   - **思路**:
     - 考虑使用类似 `with({apiUrl})` 的模式，利用原型链继承 `items`。
@@ -20,34 +20,34 @@
   - **注意**: 共享 `items` 与现有「Scope isolation」是同一处代码的两个诉求，改动要说明隔离性怎么保（同名工具在不同 apiUrl 上的桩不能互相污染）。
 
 - [x] **增强 `loadFrom` 的灵活性**（已实现）
-  - `loadFrom(items?, options?)` 在传入 `items` 时**跳过网络 fetch**，直接走 `loadFromSync(items, apiUrl)`（`src/client-tools.ts:118-131`，`loadFromSync` 定义于 `:140`）；只有 `items` 缺省时才 `transport.loadApis()`。
+  - `loadFrom(items?, options?)` 在传入 `items` 时**跳过网络 fetch**，直接走 `loadFromSync(items, apiUrl)`（`src/client-tools.ts`，`loadFromSync`）；只有 `items` 缺省时才 `transport.loadApis()`。
   - 「从已有的元数据（如父类的 `items`）同步定义」这条诉求已经满足，无需再实现。
 
 ## 传输层默认值
 
 - [ ] **`RPC_DEFAULTS.GLOBAL_TIMEOUT_MS` 定义了但无人消费**
-  - `src/transports/models.ts:49` 声明默认全局硬超时 30000，**生产代码零消费**：全仓除定义处外，唯一命中是 `src/transports/models.test.ts:20` 断言这个常量本身的值。
-  - 实况：默认值散在各处各写各的——`mailbox-client.ts:51` 的 `options.timeout || 30000`、`mailbox-client.ts:99` 的 `timeoutValue()` 兜底 30000。
+  - `src/transports/models.ts` 声明默认全局硬超时 30000，**生产代码零消费**：全仓除定义处外，唯一命中是 `src/transports/models.test.ts` 断言这个常量本身的值。
+  - 实况：默认值散在各处各写各的——`mailbox-client.ts` 的 `options.timeout || 30000`、`mailbox-client.ts` 的 `timeoutValue()` 兜底 30000。
   - **目标**: 默认超时从 `RPC_DEFAULTS` 单点取，避免默认值漂移；顺带确认 HTTP 侧的默认超时是否同一来源。
 
 ## 流式（streaming）
 
 - [ ] **分片流的顺序重组与 RPC 层背压（`RpcStreamReassembler`）**（未实现，未排期；提案见 `RFC_STREAM_REASSEMBLY.cn.md`）
-  - **实况**：流以单条物理通道直传——HTTP 侧 `Readable.fromWeb` 桥接（`src/transports/http-server.ts:648`），无分片、无序号、无重传。全仓 grep `RpcStreamReassembler` / `sequenceNumber` 除 RFC 本身外零命中，**不要当现状引用**。
-  - 能力判定是**后置**的：`processIncomingCall` 在 dispatch 之后查 `!this.canStream`，把流改写成 `400 bad_request`（`src/transports/server.ts:263-272`）；基类默认 `false`（`:175`），HTTP 置 `true`（`src/transports/http-server.ts:133`）。能力由服务端单方面声明，协议两侧无握手。
-  - 生命周期收尾只有一个钩子：`createCallbacksTransformer({ onClose })`，`status: 'final' | 'error' | 'cancel'`（`src/transports/dispatcher.ts:285-293`）；`TransformStream` 本身没有 cancel 钩子，客户端侧靠自建流的 `underlyingSource.cancel`（`src/transports/http-client.ts:11-18`）。
+  - **实况**：流以单条物理通道直传——HTTP 侧 `Readable.fromWeb` 桥接（`src/transports/http-server.ts`），无分片、无序号、无重传。全仓 grep `RpcStreamReassembler` / `sequenceNumber` 除 RFC 本身外零命中，**不要当现状引用**。
+  - 能力判定是**后置**的：`processIncomingCall` 在 dispatch 之后查 `!this.canStream`，把流改写成 `400 bad_request`（`src/transports/server.ts`）；基类默认 `false`，HTTP 置 `true`（`src/transports/http-server.ts`）。能力由服务端单方面声明，协议两侧无握手。
+  - 生命周期收尾只有一个钩子：`createCallbacksTransformer({ onClose })`，`status: 'final' | 'error' | 'cancel'`（`src/transports/dispatcher.ts`）；`TransformStream` 本身没有 cancel 钩子，客户端侧靠自建流的 `underlyingSource.cancel`（`src/transports/http-client.ts`）。
   - **目标**：分片型协议（Mailbox 这类消息通道）上搬运 `ReadableStream` 时，按 `seq` 重排 + 去重 + 有界重排窗口，缺口超时即终止流；RPC 层要有流量反馈，而不是只靠 Web/Node 流自身队列。
   - **先决**：RFC §4 六个开放问题先定（序号归属、能力协商、背压回传通道、内存上界与 `retention` 计时起点、错误分片传播、与 102 轮询的关系），再动 `ToolRpcResponse` 的流契约。
 
 ## 测试
 
 - [ ] **Web Worker Test**（未实现）
-  - `package.json` 里没有 `@vitest/web-worker`，也没有 worker 集成测试（现有 `worker` 命中都是 vitest 的 worker 进程注释与 `worker_threads` 导出名单，见 `test/browser-entry.test.ts:39`）。
+  - `package.json` 里没有 `@vitest/web-worker`，也没有 worker 集成测试（现有 `worker` 命中都是 vitest 的 worker 进程注释与 `worker_threads` 导出名单，见 `test/browser-entry.test.ts`）。
   - 目标：安装 `@vitest/web-worker`，创建真正的集成测试（PostMessage + 完整 RPC 循环）。
 
 - [x] **排查 RpcError 问题**（症状已解决）
-  - `RpcError` 已定义并导出（`src/transports/models.ts:182`），公开面钉在导出名单里（`test/browser-entry.test.ts:55`，Node/browser 两个入口都断言 `toBeDefined()`，`:173`），并有传播测试（`test/browser-rpc-integration.test.ts:700+`、`src/transports/models.test.ts:36,47`）。原报的「not defined」不可能再来自导出层。
-  - **残留（未实现）**: 现有传播测试抛的是 plain `Error` + `.code`（`browser-rpc-integration.test.ts:709-713`），缺一条「工具 `func: () => { throw new RpcError(...) }`」的箭头函数回归用例——正是原报的写法。
+  - `RpcError` 已定义并导出（`src/transports/models.ts`），公开面钉在导出名单里（`test/browser-entry.test.ts`，Node/browser 两个入口都断言 `toBeDefined()`），并有传播测试（`test/browser-rpc-integration.test.ts`、`src/transports/models.test.ts`）。原报的「not defined」不可能再来自导出层。
+  - **残留（未实现）**: 现有传播测试抛的是 plain `Error` + `.code`（`browser-rpc-integration.test.ts`），缺一条「工具 `func: () => { throw new RpcError(...) }`」的箭头函数回归用例——正是原报的写法。
 
 - [ ] **Service Worker 测试**（未实现）
   - 无任何 Service Worker 相关测试。目标：添加 Service Worker RPC 测试。
@@ -58,41 +58,41 @@
 
 - [x] **三个文件与 11 个公开符号**（已实现，P0 + P1a + P1b，2026-10-12）
   - 三个文件已落：`src/transports/identity.ts`（153 行，抽象 + 内置 reader `readBearerCredential`，包内）、`identity-session.ts`（205 行）、`identity-bearer.ts`（121 行）。
-  - 名单先行：`test/browser-entry.test.ts:122` `EXPECTED_IDENTITY_TYPES`（11 个，钉在 dist/browser.d.ts 的导出块，断言在 :765）、`:135` `EXPECTED_IDENTITY_VALUES`（三个类，运行时 import 两个入口逐个 `typeof`，:255-257）。八个类型进不了运行时 import，只能由 dist 断言钉。
-  - 导出：`src/transports/index.ts:20-31` 与 `src/transports/browser.ts` 同名单显式导出；`readBearerCredential` 不在公开面（实测不在 `dist/*.d.ts`）。
-  - 载体（P1a）：`ToolRpcRequest.identity`（`src/transports/models.ts:121`）、`ToolRpcContext.identity`（`:168`）、`dispatcher.prepareContext` 透传（`src/transports/dispatcher.ts:197`）。
-  - 调用点（P1b）：`ServerToolTransport.resolveRequestIdentity`（`src/transports/server.ts:292`）插在 `toRpcRequest` 与 `validateRpcRequest` 之间（调用在 `:254`）；构造选项 `{ identity, credentialReader }`；`clientId` 由判定值接管（契约 3）。HTTP 与 Mailbox 共用默认 reader（两者原生请求都带 `headers`）。
+  - 名单先行：`test/browser-entry.test.ts` `EXPECTED_IDENTITY_TYPES`（11 个，钉在 dist/browser.d.ts 的导出块）；`EXPECTED_IDENTITY_VALUES`（三个类，运行时 import 两个入口逐个 `typeof`）。八个类型进不了运行时 import，只能由 dist 断言钉。
+  - 导出：`src/transports/index.ts` 与 `src/transports/browser.ts` 同名单显式导出；`readBearerCredential` 不在公开面（实测不在 `dist/*.d.ts`）。
+  - 载体（P1a）：`ToolRpcRequest.identity`（`src/transports/models.ts`）、`ToolRpcContext.identity`、`dispatcher.prepareContext` 透传（`src/transports/dispatcher.ts`）。
+  - 调用点（P1b）：`ServerToolTransport.resolveRequestIdentity`（`src/transports/server.ts`）插在 `toRpcRequest` 与 `validateRpcRequest` 之间；构造选项 `{ identity, credentialReader }`；`clientId` 由判定值接管（契约 3）。HTTP 与 Mailbox 共用默认 reader（两者原生请求都带 `headers`）。
   - 单测：`src/transports/identity.test.ts`（§3 十一条 + §4 四条 + §7/§8 例子）、`src/transports/identity-server.test.ts`（未装策略逐字节透传、401 响应形状、Mailbox reader、ctx 备料）。
   - **检查**（2026-10-12 实测）：两份 tsc exit 0、`eslint .` exit 0、`npx tsup --dts --dts-resolve` exit 0、`vitest run` **46 文件 / 573 通过**（基线 44/539）。
 
 - [x] **内置登记表的第二索引与内存有界单测**（已实现）
-  - `RpcInProcessCredentialRegistry` 两个 Map：`entries`（凭证为 key）+ `identityIndex`（`identityId → credential`，`src/transports/identity-session.ts:65`），`ensureCredential` 不线性扫。
+  - `RpcInProcessCredentialRegistry` 两个 Map：`entries`（凭证为 key）+ `identityIndex`（`identityId → credential`，`src/transports/identity-session.ts`），`ensureCredential` 不线性扫。
   - 单测钉住了：一万次闲置身份后 `entries.size` 始终 ≤ `maxEntries`；无定时器（过期项不主动清，`lookupIdentity` 命中作废项才删、`ensureCredential` 满容量才 `prune`）；作废即删条目；幂等复用 + 滑 TTL、重新签发不重置计数。见 `src/transports/identity.test.ts` 的 `credential registry (§4)`。
 
 - [x] **401 进枚举 + bearer 单测 + 端到端**（已实现，2026-10-12 复盘，见设计文档 §15）
-  - `RpcStatusCode.UNAUTHENTICATED = 401`（`src/transports/models.ts:92`）；`identity-bearer.ts:114` 的 `reject` 改用枚举；`dispatcher.handleError` 对 401 自动补 `unauthenticated` 状态串（`src/transports/dispatcher.ts:380`，与原有 400/404/409 同列）。枚举不是闭集：策略要 403 直接写 403。
+  - `RpcStatusCode.UNAUTHENTICATED = 401`（`src/transports/models.ts`）；`identity-bearer.ts` 的 `reject` 改用枚举；`dispatcher.handleError` 对 401 自动补 `unauthenticated` 状态串（`src/transports/dispatcher.ts`，与原有 400/404/409 同列）。枚举不是闭集：策略要 403 直接写 403。
   - `src/transports/identity-bearer.test.ts`（15 条）：`allowAnonymous` 两态、「verify 不认」与「无凭证」同形状、verify 可 async、verify 抛错不被吞、reader 优先级、`assign` 不带 credential、三个 `protected` 覆写点、策略无状态可复用。
   - `test/identity-e2e.test.ts`（16 条）：真 socket + 真 Mailbox。401 到客户端是 `RPC Error [401]` + `code: 401` + `status: 'unauthenticated'` 且业务工具零调用；合法凭证下 `ctx.identity` 就是 `verify` 产物；`ClientTools.loadFrom()` + `run()` 全栈走通；会话凭证经响应头下发后**下发与取回必须成对配**（只配 `res.setHeader` 不配 `credentialReader` → 每次新身份）；Mailbox 共用默认 reader。
   - 新基线：`vitest run` **48 文件 / 605 通过**；两份 tsc、`eslint .`、`tsup --dts --dts-resolve` 均 exit 0（`UNAUTHENTICATED = 401` 已进 dist d.ts）。
 
 - [x] **发现端点收进流水线：内置工具 `rpcApis` + 路由表**（已实现，2026-10-12 第三轮，见设计文档 §17）
   - 第二轮的「多一步 `resolveBuiltinIdentity`」已推翻：内置端点不该有特权通道。现在它是 `systemRegistry` 里的普通工具
-    `rpcApis`（`src/transports/rpc-apis.ts`，不声明自己的 `timeout`，因此与业务工具同受 `globalTimeout` 管），与 `rpcTask` 同处自动装载（`src/transports/dispatcher.ts:58-59`）。
-  - 路由表：`addRoute()` / `getRouteTable()` / `matchRouteEntry()`（`src/transports/server.ts:490` / `:515` / `:532`）。
-    每个前缀自带三行内置声明（`builtinRouteEntries()`，`:456`）：`GET 前缀根`、`act: 'list'`、`act: 'get'`；
+    `rpcApis`（`src/transports/rpc-apis.ts`，不声明自己的 `timeout`，因此与业务工具同受 `globalTimeout` 管），与 `rpcTask` 同处自动装载（`src/transports/dispatcher.ts`）。
+  - 路由表：`addRoute()` / `getRouteTable()` / `matchRouteEntry()`（`src/transports/server.ts` / /）。
+    每个前缀自带三行内置声明（`builtinRouteEntries()`）：`GET 前缀根`、`act: 'list'`、`act: 'get'`；
     第三方用同一个 `addRoute()` 同路径同条件就能换掉它。
-  - 注册表分层真正参与 dispatch：`requestRegistry(rpcReq)`（`src/transports/server.ts:371`）按「前缀 claim →
+  - 注册表分层真正参与 dispatch：`requestRegistry(rpcReq)`（`src/transports/server.ts`）按「前缀 claim →
     transport → dispatcher → 系统保留」叠视图。修了半成品：之前 `mount(RegB, '/v2')` 会把 `/api` 也改指向 RegB。
-  - 删了 `resolveBuiltinIdentity` 与 `ctx.builtin`（第二轮新加、未发布）；`sendPipelineError`（`src/transports/server.ts:330`）
+  - 删了 `resolveBuiltinIdentity` 与 `ctx.builtin`（第二轮新加、未发布）；`sendPipelineError`（`src/transports/server.ts`）
     保留，但只作为顶级防护的出口。`addDiscoveryHandler` 降级为兼容外壳：它只把 handler 挂成该前缀的 `rpcApis` 实现。
-  - 客户端：`loadApis()` 发 `toolId: 'rpcApis'`，旧服务端 404 时回退空 `toolId`（`src/transports/client.ts:53-64`）。
-    `ClientTools.loadFrom()` 仍把类级 `fetchOptions` 合进发现调用（`src/client-tools.ts:127`）。
+  - 客户端：`loadApis()` 发 `toolId: 'rpcApis'`，旧服务端 404 时回退空 `toolId`（`src/transports/client.ts`）。
+    `ClientTools.loadFrom()` 仍把类级 `fetchOptions` 合进发现调用（`src/client-tools.ts`）。
   - 测试：`src/transports/route-table.test.ts`（25 条：路由表归一/覆盖/最长前缀/内置行/注册表分层）、
     `test/discovery-e2e.test.ts`（15 条 e2e：HTTP 8 条 + Mailbox 7 条，发现走完整流水线：身份、校验、超时、
     多前缀各列各自清单、旧客户端回退、`addDiscoveryHandler` 兼容外壳）、
     `test/identity-e2e.test.ts`（谓词比 `ctx.toolId === 'rpcApis'`）。
   - Mailbox 侧补了一行：`addRpcHandler(apiUrl, { registry })` 以前丢掉 `registry`（基类的 `RouteClaimOptions` 有它），
-    现在转给 `claimRoute`（`src/transports/mailbox-server.ts:73-77`），所以 mailbox 也能按前缀挂注册表。
+    现在转给 `claimRoute`（`src/transports/mailbox-server.ts`），所以 mailbox 也能按前缀挂注册表。
   - **检查**（2026-10-12 实测）：`vitest run` **50 文件 / 652 通过**（上一基线 48/608）；两份 tsc、`eslint .`、`tsup` exit 0；
     `typedoc --plugin typedoc-plugin-markdown` 0 errors。
 
@@ -103,8 +103,8 @@
     声明侧与请求侧按 http-server 取段方式重放必命中、写法变体归一条、最长前缀胜出且 `/api` 不误配 `/apix`、
     随机工具名全量往返、无 `toJSON` 的 Map 形注册表不吞条目。
   - `addDiscoveryHandler` 标 `@deprecated`（基类抽象声明 + HTTP / Mailbox 两个实现），运行时经 `warnDiscoveryDeprecated()`
-    打一次迁移提示（`ServerToolTransport` 上的进程级 static flag，不刷屏）：`src/transports/server.ts:660-668`，
-    调用点 `http-server.ts:213` / `mailbox-server.ts:66`。测试钉三件事：首次打一次、后续不刷、只用 `addRpcHandler`
+    打一次迁移提示（`ServerToolTransport` 上的进程级 static flag，不刷屏）：`src/transports/server.ts`，
+    调用点 `http-server.ts` / `mailbox-server.ts`。测试钉三件事：首次打一次、后续不刷、只用 `addRpcHandler`
     的用户收不到（`src/transports/route-table.test.ts` 末段，靠 `vi.resetModules()` 重置 flag）。
     `route-claims.test.ts` 那条 `toHaveBeenCalledTimes(1)` 改成只数「替换」告警（按 `is already claimed` 过滤），
     否则它把两件不相干的事绑在同一个 `console.warn` 上。
@@ -113,37 +113,44 @@
   - 文档同步：deprecated 已写进 README（两份）、`AGENT.md`、`src/transports/README.cn.md`、`IDENTITY_POLICY_DESIGN.cn.md` §17、
     `mailbox-tool-rpc-integration.md`；`ARCHITECTURE.cn.md` 补 §1.4「两级寻址」，`TRANSPORT_REFACTOR_DESIGN.cn.md` §3 补路由表与
     deprecated 标记。`CHANGELOG.md` 是 `commit-and-tag-version` 生成的，本轮未发布所以无条目（不是漏写）。
-  - 行号引用回核：12 份手写文档里的 `file.ts:NN` 引用逐个对过代码，改了 20 余处漂移（`models.ts` 49/92/121/168/182、
-    `server.ts` 160/210/248/250/254/256/261/275-277/292/355/426/532、`dispatcher.ts` 181/197/380、
-    `identity-bearer.ts` 32/70/76、`mailbox-server.ts` 73-77/123-128/198-199、`mailbox-client.ts` 39-41、
-    `browser-entry.test.ts` 122/135/173/255-257/765）。跨包引用（tool-event / tool-electron / fastify / ai-tool 的 src）不在本仓，未核。
+  - 行号引用回核：12 份手写文档里的 `file.ts:NN` 引用逐个对过代码，改了 20 余处漂移。跨包引用（tool-event / tool-electron / fastify / ai-tool 的 src）不在本仓，未核。
+    **后续（2026-10-13）：这类引用已全部从手写文档里删掉**——上一轮刚核完，`server.ts` 的引用就漂到 +5～+94，
+    逐轮回核跟不上代码速度。现在只写文件与符号名，判据见 `CONTRIBUTING.md`「引用只到文件与符号，不写行号」。
   - **检查**（2026-10-12 实测）：`vitest run` **51 文件 / 667 通过**（上一基线 50/652）；`tsc -p tsconfig.json`、`eslint .` exit 0。
 
 - [x] **逐 API 的认证判定（`allowAnonymous` 可以是谓词）**（已实现，2026-10-12）
-  - 不在 transport 上开逐 API 开关，而是让策略拿到寻址结果与工具实例：`RpcIdentityContext` 新增 `toolId` / `act` / `resId` / `tool`（`src/transports/identity.ts:71-81`；曾加过 `builtin`，第三轮删），`server.ts:292` 的 `resolveRequestIdentity` 备料，`resolveRouteTool`（`:355`）按 dispatcher 的解析顺序取实例（取不到就 undefined，不抢 dispatcher 的 404），`matchedPrefix`（`:426`）供多租户。
-  - `RpcBearerPolicy.allowAnonymous` 接受 `boolean | (ctx) => boolean`（`src/transports/identity-bearer.ts:32`，实现 `:70` / `:76`）：布尔是全 transport 一刀切，谓词是逐请求/逐 API。工具注册级元数据直接读 `ctx.tool` 上自带的字段（继承 `ServerTools` 加字段即可），字段名是部署与业务的私有约定，框架不读不解释。
+  - 不在 transport 上开逐 API 开关，而是让策略拿到寻址结果与工具实例：`RpcIdentityContext` 新增 `toolId` / `act` / `resId` / `tool`（`src/transports/identity.ts`；曾加过 `builtin`，第三轮删），`server.ts` 的 `resolveRequestIdentity` 备料，`resolveRouteTool`按 dispatcher 的解析顺序取实例（取不到就 undefined，不抢 dispatcher 的 404），`matchedPrefix`供多租户。
+  - `RpcBearerPolicy.allowAnonymous` 接受 `boolean | (ctx) => boolean`（`src/transports/identity-bearer.ts`，实现 /）：布尔是全 transport 一刀切，谓词是逐请求/逐 API。工具注册级元数据直接读 `ctx.tool` 上自带的字段（继承 `ServerTools` 加字段即可），字段名是部署与业务的私有约定，框架不读不解释。
   - 待定（未做）：路由级声明上要不要再开一个显式的「这条前缀必须认证」开关——目前 `ctx.prefix` / `ctx.apiUrl` 已足够策略自己判；工具注册上同理（已有 `tool` 可读，不再加 `requireIdentity` 这类字段）。
 
 - [ ] **客户端侧 `credentialSource` 只有类型，没接线**（未实现，不在 P0/P1 范围）
   - `RpcCredentialSource` 已导出（`src/transports/identity.ts`），但 `ClientToolTransportOptions` 没有这个选项：写进哪个 header 由部署的 transport 定（契约 11），所以上游没定 per-transport 的落点。
-  - 今天能用的写法：`someTool.run(params, { headers: { authorization: 'Bearer …' } })`（`fetchOptions.headers` 透传，`src/transports/client.ts:119-127`）；类级 `ClientTools.fetchOptions` 会被合进每次调用（含发现调用，`src/client-tools.ts:127`、`:190-193`）。
+  - 今天能用的写法：`someTool.run(params, { headers: { authorization: 'Bearer …' } })`（`fetchOptions.headers` 透传，`src/transports/client.ts`）；类级 `ClientTools.fetchOptions` 会被合进每次调用（含发现调用，`src/client-tools.ts`、）。
 
 - [ ] **下游收口：`@isdk/tool-event`**（未实现，排在本包发布之后）
   - 下面 `src/...` 与 `sse-*.ts` 均在 **`@isdk/tool-event` 仓**，不在本仓，行号无法在本仓回核。
-  - 它**已经**从 RPC header 取 clientId：`src/transports/pubsub/sse-server.ts:77` 的 `getSessionFromReq`；客户端把服务端发的 id 回写进 header（`src/event-client.ts:89-94` → 本包 `src/transports/client.ts:124-127`）。收口后 `getSessionFromReq` 改走 identity。
-  - 原实现位置：`src/utils/sse-identity.ts`（172 行，`SSETokenIdentityPolicy` 在 :112）与 `src/utils/sse-channel.ts`（425 行，welcome 帧反查在 :359）。
-  - **默认值不等价**：原实现 `maxUses` 默认 5（`sse-identity.ts:121`），框架侧默认不限 → 收口要显式传 `maxUses: 5` 才与今天同行为。
-  - 它的三张表都以 clientId 为 key（`sse-channel.ts:44` / `:56`、`sse-server.ts:28`），所以 `id` 必须是连接级。
+  - 它**已经**从 RPC header 取 clientId：`src/transports/pubsub/sse-server.ts` 的 `getSessionFromReq`；客户端把服务端发的 id 回写进 header（`src/event-client.ts` → 本包 `src/transports/client.ts`）。收口后 `getSessionFromReq` 改走 identity。
+  - 原实现位置：`src/utils/sse-identity.ts`（172 行，`SSETokenIdentityPolicy`）与 `src/utils/sse-channel.ts`（425 行，welcome 帧反查）。
+  - **默认值不等价**：原实现 `maxUses` 默认 5（`sse-identity.ts`），框架侧默认不限 → 收口要显式传 `maxUses: 5` 才与今天同行为。
+  - 它的三张表都以 clientId 为 key（`sse-channel.ts` / 、`sse-server.ts`），所以 `id` 必须是连接级。
 
 - [ ] **`@isdk/tool-electron`：要在 IPC 上装策略，先给 payload 开凭证字段**（未实现，可选）
   - 下面 `src/...` 均在 **`@isdk/tool-electron` 仓**，不在本仓。
-  - 它的 transport 走共用流水线（`src/ipc-server.ts:60` `extends ServerToolTransport`、:192 `processIncomingCall`），不改也能跑；但 `src/ipc-server.ts:217` 的 `headers` 是空对象、`src/pubsub/electron-client.ts:140` 写 `clientId: ''`，凭证没有承载处。
+  - 它的 transport 走共用流水线（`src/ipc-server.ts` `extends ServerToolTransport`、 `processIncomingCall`），不改也能跑；但 `src/ipc-server.ts` 的 `headers` 是空对象、`src/pubsub/electron-client.ts` 写 `clientId: ''`，凭证没有承载处。
 
-- [ ] **`@isdk/tool-rpc-fastify`：装配时传 `identity` + `credentialReader`**（未实现）
-  - `src/fastify-server.ts` 在 **`@isdk/tool-rpc-fastify` 仓**，不在本仓。
-  - **发现端点在它那里没走流水线**（本仓 issue #4 已核实，2026-10-13）：`src/fastify-server.ts:113-131` 的 `addDiscoveryHandler` 仍是手写 `server.get(prefix)` → `reply.send(handler())`，**不经** `processIncomingCall`，所以没有身份解析、没有策略判定。后果：业务 API 要凭证而工具清单匿名可取（`allowAnonymous: false` 下 `GET /api/secret` → 401，`GET /api` → 200 清单）。
-  - 所以「只传 `identity` + `credentialReader`」不够：得先把那两条手写 `server.get()` 换成按 `getRouteTable()` 驱动的注册（`README.md` 适配器那一节就是这个模式）。代码修复归 **isdk/tool-rpc-fastify.js#1**，本仓只改文档。
-  - `src/fastify-server.ts:340` 那行本身未装策略时就是透传，改它不解决问题。注意它的 `Req` 是 `FastifyRequest`，Node 对象在 `raw._req` / `raw._res`（:345）。
+- [x] **`@isdk/tool-rpc-fastify`：装配时传 `identity` + `credentialReader`**（已在下游仓实现，2026-10-13）
+  - `src/fastify-server.ts` 在 **`@isdk/tool-rpc-fastify` 仓**，不在本仓，行号无法在本仓回核。
+  - 原先的问题坐实了（本仓 issue #4）：它的 `addDiscoveryHandler` 是手写 `server.get(prefix)` → `reply.send(handler())`，
+    **不经** `processIncomingCall`，所以业务 API 要凭证而工具清单匿名可取（`allowAnonymous: false` 下
+    `GET /api/secret` → 401，`GET /api` → 200 清单）。
+  - 现在它按 `getRouteTable()` 驱动注册，发现端点是路由表里的一行（`GET 前缀根` → `rpcApis`），身份策略经
+    transport options 装配，`ctx.res` 拿到 `reply.raw`，注册表按前缀绑定。与「只传 `identity` + `credentialReader`」
+    相比多了一步：先把两条手写 `server.get()` 换成路由表驱动，否则策略管不到清单。
+  - **本轮新增的公开符号就是为它开的**：它的寻址以前从 find-my-way 的 params 反推路径，`%2F` / `//` / 尾斜杠
+    三处与 HTTP transport 答案不同（同一个 URL 寻到不同工具）。改成跑 core 的 `normalizeRoutePath` 后，
+    本包得把它放进公开面（`transports/index.ts` + `browser.ts` + `test/browser-entry.test.ts` 名单）。
+  - **发版顺序**：`workspace:*` 发布时被写成精确版本号，所以 core 必须先 `release`（公开面新增符号，见
+    `CONTRIBUTING.md`「改公开 API 的流程」第 5 条），下游才能装到可用版本。
 
 - [x] **文档：身份策略单开一节**（已实现，2026-10-12）
   - `src/transports/README.cn.md` 新增「§9 身份策略（服务端运行时）」（后面的节次整体后移）；§8.0 那张传输层 helper 表保持两个文件，没动。
@@ -153,9 +160,9 @@
 
 - [x] **废弃项要说清「现在怎么写」：`setTransport` / `mount` + 测试不再用废弃入口**（已实现，2026-10-12 第五轮）
   - 上一轮只给 `addDiscoveryHandler` 标了 `@deprecated`，说明里没写替代写法；顺带查出 `ClientTools.setTransport` 同样只标不指路，
-    而且它的 JSDoc 格式是坏的。现在三处都写清「改用什么」：`src/client-tools.ts:71-90`（两条路径：只有地址 → `connect()`/`apiUrl` + `loadFrom()`；
+    而且它的 JSDoc 格式是坏的。现在三处都写清「改用什么」：`src/client-tools.ts`（两条路径：只有地址 → `connect()`/`apiUrl` + `loadFrom()`；
     已自构实例 → `RpcClientTransportManager.instance.register(transport)` + `Class.apiUrl = transport.apiUrl`）。
-  - `ClientToolTransport.mount(Class)` 也标 `@deprecated`（`src/transports/client.ts:36-52`）：它现在只把 `apiUrl` 写到类上，
+  - `ClientToolTransport.mount(Class)` 也标 `@deprecated`（`src/transports/client.ts`）：它现在只把 `apiUrl` 写到类上，
     所以替代就是那一行赋值。只有 `setTransport` 在调它，无别的调用点。
   - 手写文档补迁移路径：`AGENT.md` 迁移表里 `setTransport` / `addDiscoveryHandler` 两行给出可抄的替代；
     `src/transports/README.cn.md` §12 开头点明废弃并新增 §12.3「预构 transport 实例」（mailbox 要 `clientAddress` 那种只能自构的场景）；

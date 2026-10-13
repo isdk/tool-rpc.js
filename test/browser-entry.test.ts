@@ -106,6 +106,16 @@ const EXPORTED_ADDRESS_HELPERS = [
   'socketAddressFromBind',
   'socketAddressFromListen',
 ]
+// 路径归一化（`route-path.ts`）：插件契约——任何按 URL 寻址的服务端 transport（第一个
+// 下游是 tool-rpc-fastify）都要把请求路径归一到同一个形态，否则 `%2F`、`//`、尾斜杠、
+// `.`/`..` 在各家实现里答案不同。判据见 `src/transports/README.cn.md` 的「公开面判据」。
+const EXPORTED_ROUTE_PATH_HELPERS = ['normalizeRoutePath', 'RoutePathError']
+const INTERNAL_ROUTE_PATH_HELPERS = [
+  // 路由表在基类手里（`ServerToolTransport.routeTable`），覆写者拿不到也不该拿。
+  'routeMatchKey',
+  'matchRoute',
+]
+
 const INTERNAL_ADDRESS_HELPERS = [
   'normalizeNativeAddress',
   // 这三个只是 normalizeSocketAddress / socketAddressFromBind 的内部通道，
@@ -249,6 +259,26 @@ describe('Browser Entry (@isdk/tool-rpc/browser)', () => {
     // 两个入口的地址工具得是同一份：自定义 transport 在浏览器侧也要能算出同一个审计 key
     expect(browser.normalizeSocketAddress, 'entries should share normalizeSocketAddress')
       .toBe(node.normalizeSocketAddress)
+  })
+
+  it('should export the route-path normalizer a custom transport needs, and only that', async () => {
+    const browser = await import('../src/browser')
+    const node = await import('../src/index')
+
+    for (const name of EXPORTED_ROUTE_PATH_HELPERS) {
+      expect(typeof (browser as any)[name], `browser entry should export '${name}'`).toBe('function')
+      expect(typeof (node as any)[name], `node entry should export '${name}'`).toBe('function')
+    }
+
+    // 匹配用的 key 与查表函数不对外：它们读的是基类自己的路由表，不是覆写者能拿到的东西
+    for (const name of INTERNAL_ROUTE_PATH_HELPERS) {
+      expect((browser as any)[name], `browser entry should not export '${name}'`).toBeUndefined()
+      expect((node as any)[name], `node entry should not export '${name}'`).toBeUndefined()
+    }
+
+    // 两个入口是同一份实现：同一个路径在浏览器侧与 Node 侧必须归一化成同一个形态
+    expect(browser.normalizeRoutePath, 'entries should share normalizeRoutePath')
+      .toBe(node.normalizeRoutePath)
   })
 
   it('should export the identity policy classes from both entries', async () => {

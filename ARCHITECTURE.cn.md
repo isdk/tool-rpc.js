@@ -34,7 +34,10 @@
 - **表里是普通行**：`{ path, when?: { method?, act? }, toolId, act?, resId? }`。内置发现端点（`GET 前缀根` 与 `act: 'list' | 'get'` → `rpcApis`）
   也是其中一行，所以发现调用与业务调用走同一条流水线（`validateRpcRequest` / 身份判定 / `globalTimeout` 均管得到），
   第三方用同一路径同条件声明就能换掉它——**没有特权通道**。
-- **规则只有一份**：归一化与最长前缀匹配在 `src/transports/route-path.ts`，注册侧与请求侧共用，插件拿不到裸串。
+- **规则只有一份**：归一化与最长前缀匹配在 `src/transports/route-path.ts`，注册侧与请求侧共用。归一化（`normalizeRoutePath`）
+  是**插件契约**：任何按 URL 寻址的服务端 transport 都得跑同一个函数，否则同一个 URL 在不同 transport 下寻到不同工具
+  （`@isdk/tool-rpc-fastify` 以前从 find-my-way 的 params 反推路径，`%2F` / `//` / 尾斜杠三处答案就与 HTTP 不同）。
+  匹配用的 key 与查表（`routeMatchKey` / `matchRoute`）仍包内：它们读的是基类自己的 `routeTable`，覆写者拿不到也不该拿。
   `path: ''` 与 `'/'` 同义；`/x` 与 `/x/` 默认同义（`strictTrailingSlash: true` 才分两条）。
 - **注册表按前缀分层**：`requestRegistry(rpcReq)` 把「前缀 claim 的 registry → transport 自己的 → dispatcher 的 → 系统保留」
   叠成一个 `get(toolId)` 视图，所以同一个工具 id 在不同前缀下可以解析到不同实例。

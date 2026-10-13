@@ -25,9 +25,9 @@
 
 ### 2.1 能力声明与拦截
 
-- `IServerToolTransport.canStream?: boolean`（`src/transports/server.ts:137`），基类默认 `false`（`:175`），
-  HTTP 服务端置 `true`（`src/transports/http-server.ts:133`）。
-- 拦截发生在 **dispatch 之后**（`src/transports/server.ts:263-272`）：若 `!this.canStream` 且
+- `IServerToolTransport.canStream?: boolean`（`src/transports/server.ts`），基类默认 `false`，
+  HTTP 服务端置 `true`（`src/transports/http-server.ts`）。
+- 拦截发生在 **dispatch 之后**（`src/transports/server.ts`）：若 `!this.canStream` 且
   `rpcRes.data` 是 `ReadableStream`（或鸭子类型 `typeof data.getReader === 'function'`），
   把响应改写成 `400` / `status: 'bad_request'`，并把 `data` 置 `undefined`。
   注意这是**后置**判定，不是预检：流已经产生、工具已经执行，只是不往外发。
@@ -38,30 +38,30 @@
 ### 2.2 生命周期观测（Dispatcher 侧）
 
 - 鸭子类型判定 `typeof result.getReader === 'function' && typeof result.cancel === 'function'`
-  （`src/transports/dispatcher.ts:282`），命中后取 `this.tracker.get(request.requestId)` 拿 Handle（`:283`）。
-- 用 `@isdk/tool-func` 的 `createCallbacksTransformer({ onClose })`（`src/transports/dispatcher.ts:285-293`）
-  包一层 `pipeThrough`（`:295`），再 `handle.setOutputStream(result)`（`:297`）
+  （`src/transports/dispatcher.ts`），命中后取 `this.tracker.get(request.requestId)` 拿 Handle。
+- 用 `@isdk/tool-func` 的 `createCallbacksTransformer({ onClose })`（`src/transports/dispatcher.ts`）
+  包一层 `pipeThrough`，再 `handle.setOutputStream(result)`
   让 Handle 在逻辑中止时能主动 `cancel` 流。
 - 收尾钩子只有 **`onClose(status, reason)`** 一个，`status` 是 `'final' | 'error' | 'cancel'`
   （`@isdk/tool-func` 的 `StreamCloseStatus` / `StreamCallbacksAndOptions`，见
-  `node_modules/@isdk/tool-func/dist/index.d.ts:12` 与 `:63`）。
+  `node_modules/@isdk/tool-func/dist/index.d.ts` 与）。
   `TRANSPORT_REFACTOR_DESIGN.cn.md` §5.2 旧版曾把它拆成「`flush` 钩子」与「`cancel` 钩子」两条，
   已于 2026-10-12 改回单一 `onClose`：`TransformStream` 本身没有 cancel 钩子，
   第三个参数按规范只读 `highWaterMark`/`size`，且 `flush` 在 cancel 时不跑
   （`src/transports/README.cn.md` §流式生命周期处有 Node 22 实测说明）。
-- Handle 侧成员：`isStream` / `streamPending`（`src/transports/task-tracker.ts:39` / `:46`）、
-  `setOutputStream()`（`:91`）、`markStreamFinished()`（`:96`）；retention 的计时从流结束起算（`:99`）。
+- Handle 侧成员：`isStream` / `streamPending`（`src/transports/task-tracker.ts` /）、
+  `setOutputStream()`、`markStreamFinished()`；retention 的计时从流结束起算。
 
 ### 2.3 物理搬运：单通道直传，无分片无序号
 
-- HTTP 侧把 Web 流桥到 Node 网络层：`Readable.fromWeb`（`src/transports/http-server.ts:648`）。
+- HTTP 侧把 Web 流桥到 Node 网络层：`Readable.fromWeb`（`src/transports/http-server.ts`）。
   **一条物理通道从头传到尾，没有分片、没有序号、没有重传。**
 - 因此当前不存在「乱序 / 重复 / 缺口」问题，也就不需要重组器。
   重组器要解决的问题只在**分片型协议**上出现（Mailbox 这类消息型通道、或未来 HTTP 上的分帧续传）。
 - 背压目前完全交给 Web/Node 流自身的队列 + `Readable.fromWeb` 的桥接（`src/transports/README.cn.md` §流式背压），
   **RPC 层没有任何流量反馈**：没有窗口、没有 ack、没有 `rpc-` 前缀的流控头。
 - 客户端侧的取消感知另走一路：自建 `ReadableStream` 的 `underlyingSource.cancel`
-  （`http-client.ts` 的 `cancelAware()`，见 `src/transports/http-client.ts:11-18`），
+  （`http-client.ts` 的 `cancelAware()`，见 `src/transports/http-client.ts`），
   这是规范里唯一保证被调的 cancel 钩子。新 transport 要接 cancel 只有这一条路。
 
 ---
@@ -105,7 +105,7 @@
 3. **背压反馈通道**：窗口/ack 走消息体还是走 header？HTTP 侧没有回传通道（单向响应流），
    Mailbox 侧有——两条路的语义必须能统一，否则又变成 per-transport 特例。
 4. **内存上界与 retention 的相互作用**：后台任务（`keepAliveOnTimeout`）+ 分片保留，
-   最坏情况驻留多少内存；`retention` 的计时起点（现在是流结束，见 `task-tracker.ts:99`）在分片场景下是否仍成立。
+   最坏情况驻留多少内存；`retention` 的计时起点（现在是流结束，见 `task-tracker.ts`）在分片场景下是否仍成立。
 5. **错误传播**：单个分片解码失败是终止整条流还是跳过？终止的话错误码与 `status` 串取什么。
 6. **与 102 轮询的关系**：轮询路径（`client.ts` 的 `pollTaskStatus`）返回的是完整结果对象，
    分片流在轮询模型下如何续传（还是说分片流明确不支持轮询，写进非目标）。
