@@ -27,6 +27,23 @@ describe('MailboxServerTransport Unit', () => {
         expect((transport as any).toPathname('/api/v1')).toBe('/api/v1');
     });
 
+    it('names the missing step when the route table is empty (issue #5)', async () => {
+        // 这个 transport 没调过 addRpcHandler / addRoute：路由表空，连内置发现行都没有。
+        // 只说「缺 rpc-fn」会让人去改头信息，错误要说清下一步。
+        const msg: any = {
+            id: 'msg-empty-table', from: 'client@mbox', to: serverAddr, body: {},
+            headers: { [RPC_HEADERS.REQUEST_ID]: 'req-empty' }
+        };
+        await expect((transport as any).toRpcRequest(msg)).rejects.toThrow(/missing tool identifier/);
+        await expect((transport as any).toRpcRequest(msg)).rejects.toThrow(/no route claimed for this transport/);
+
+        // 声明前缀后提示消失（路由表非空，寻址失败就是真的请求问题），但基本错误不变。
+        transport.addRpcHandler(serverAddr);
+        const err: any = await (transport as any).toRpcRequest(msg).catch((e: any) => e);
+        expect(err.message).toMatch(/missing tool identifier/);
+        expect(err.message).not.toMatch(/addRpcHandler/);
+    });
+
     it('should process incoming call and send response via mailbox.post', async () => {
         const mockMsg = {
             id: 'msg-1',

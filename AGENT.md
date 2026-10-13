@@ -443,6 +443,8 @@ new HttpServerToolTransport({
 ### 5.1 路径规范化
 逻辑路由（`getRoutes()`）以 **canonical 形式**声明：以 `/` 开头、**不带**尾随斜杠（根路由为 `/`），由 `ServerToolTransport.toPathname()` 归一化。前缀匹配与物理路由表的 key 由 `toMatchPrefix()` 补尾随斜杠后派生——**匹配阶段**仍遵循 Trailing Slash Normalization，`/api` 不会误匹配 `/apix`。声明路由请用 `claimRoute()`，不要手写字符串拼接。
 
+**`getRoutes()` 报 `'/'` 是接管声明，不是「那里有发现端点」的保证**：内置路由行（`builtinRouteEntries()`）只由 `claimRoute()` / `addRoute()` 插入，所以从未声明前缀的 transport 路由表为空，`GET /` 回 400（表为空时错误会点名缺的那一步）。内置**工具** `rpcApis` 本身始终在系统注册表里，显式寻址（`rpc-fn: rpcApis`）总能命中。适配器按 `getRouteTable()` 原生注册前，先确认前缀已声明。
+
 **归属登记与路由必须同步**：`claimRoute()` 只改路由表，Manager 的归属表由 `registerServer()` / `unregisterServer()` 维护。框架适配器（Fastify/Electron/Express）应在自己的子类里成对调用 `registerRoutes()` / `unregisterRoutes()`（它们同时做 claim 与归属登记），而不是只调 `claimRoute()`——否则 `close()` 后归属表残留条目，下次 `listen()` 会误报 `Routing Conflict`。
 
 ### 5.2 影子实例隔离

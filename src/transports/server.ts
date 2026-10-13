@@ -593,6 +593,25 @@ export abstract class ServerToolTransport extends ToolTransport implements IServ
     return out;
   }
 
+  /** 路由表里有没有任何条目。空表 = 这个 transport 一个前缀都没声明，寻址不可能命中。 */
+  protected hasRouteEntries(): boolean {
+    for (const rows of this.routeTable.values()) {
+      if (rows.length) {return true;}
+    }
+    return false;
+  }
+
+  /**
+   * 寻址落空时的下一步提示（issue #5）。
+   *
+   * 空表时那句 `Missing routing information: rpc-fn header or valid URL Path` 会让人去改 URL，
+   * 而真正的问题是**这个 transport 还没声明任何前缀**（`addRpcHandler` / `addRoute`）——
+   * 内置发现端点也只在有前缀之后才存在。错误要说清这一步。
+   */
+  protected emptyRouteTableHint(): string {
+    return this.hasRouteEntries() ? '' : ' (no route claimed for this transport: call addRpcHandler(apiUrl) or addRoute(...) first — the built-in discovery endpoint only exists for a claimed prefix)';
+  }
+
   /**
    * 查路由表：本次请求在该前缀内命中哪条声明。
    * 按声明顺序取第一条命中（内置行先铺，所以第三方同 key 的声明会替换它，而不是被它抢）。

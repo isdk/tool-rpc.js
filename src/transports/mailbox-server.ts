@@ -129,7 +129,9 @@ export class MailboxServerTransport extends ServerToolTransport {
     }
 
     if (!toolId) {
-      throw new RpcError(`Invalid request to ${toStr}: missing tool identifier (rpc-fn)`, RpcStatusCode.BAD_REQUEST);
+      // 空路由表时要带上下一步（issue #5）：没声明前缀就没有内置发现行，
+      // 只说「缺 rpc-fn」会让人去改头信息，而真正缺的是 `addRpcHandler` / `addRoute`。
+      throw new RpcError(`Invalid request to ${toStr}: missing tool identifier (rpc-fn)${this.emptyRouteTableHint()}`, RpcStatusCode.BAD_REQUEST);
     }
 
     if (!reqId) {

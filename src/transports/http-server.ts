@@ -567,7 +567,9 @@ export class HttpServerToolTransport extends ServerToolTransport {
       }
 
       if (!toolId) {
-         const err: any = new RpcError("Missing routing information: rpc-fn header or valid URL Path", 400);
+         // 空路由表时这句必须说清缺的是哪一步（issue #5）：不是 URL 写错，是这个 transport
+         // 还没声明前缀——内置发现端点也是前缀的一部分，没前缀就没有它。
+         const err: any = new RpcError(`Missing routing information: rpc-fn header or valid URL Path${this.emptyRouteTableHint()}`, 400);
          throw err;
       }
 

@@ -534,6 +534,7 @@ import { ClientTools } from '@isdk/tool-rpc'
     4. **物理感知 (V2)**: 通过 `getListenAddr()` 和 `getRoutes()` 实现物理端口复用与逻辑路由归属登记。
     5. **路由声明与重复挂载 (V2)**: `addRpcHandler()` / `addDiscoveryHandler()` 会在 `ServerToolTransport` 基类中声明（claim）其路径前缀，因此一个 transport 可同时服务多个前缀，各自绑定独立的注册表与发现处理器。逻辑路由以 canonical 形式上报（以 `/` 开头、不带尾随斜杠），前缀匹配用的尾斜杠形式由 `toMatchPrefix()` 派生。对已声明的前缀再次声明时，默认替换其注册表/处理器并告警；传入 `options.remount = 'throw'` 则改为抛错——自带路由表的后端可覆写 `onDuplicateRoute()` 上报框架原生的重复路由错误。
     6. **路由表 (V2)**: `addRoute(apiUrl, { path, when, toolId, act })` 把前缀内的一个路径映射到一个工具，`getRouteTable()` 返回包内置行的全部条目，适配器可拿去自己框架里原生注册。内置发现端点就是表里的一行——第三方用同一路径同条件声明就能换掉它，没有特权通道。`path: ''` 与 `'/'` 是同一条路由；`/x` 与 `/x/` 默认同义（`strictTrailingSlash: true` 才分成两条）；`when.method` 声明侧大小写不敏感（存进表时归成大写，因为 Node 的请求 method 永远是大写）。
+    - **内置行是「声明前缀」的产物**：那些行只为被声明过的前缀存在。一个从未调过 `addRpcHandler` / `addRoute` 的 transport，`getRoutes()` 仍会报 `'/'`——那是**接管声明**（“这个地址上的每条路径都归我”），不是“那里有个发现端点”的保证。它的路由表是空的，所以隐式寻址会失败：HTTP `GET /` → 400 `Missing routing information`，Mailbox `fetch('', 'list')` → 400 `missing tool identifier`（表为空时错误会点名缺的那一步：声明一个前缀）。内置**工具**本身始终注册（`rpcApis` 一直在系统注册表里），所以显式寻址的客户端（`loadApis()` 会带 `rpc-fn: rpcApis`）即使没有任何声明也能工作。
     7. **路由注册成对方法 (V2)**: `registerRoutes()` / `unregisterRoutes()` 是 `ServerToolTransport` 基类的 **`protected`** 成员，只能在自己的 transport 子类内部调用；它们同步物理路由表与 Manager 的归属表，且可重复调用（先注销再登记）。框架适配器（Fastify、Electron、Express）应调用这一对，而不是只调 `claimRoute()`——只声明路由而不动归属表会留下残留条目，导致下次 `listen()` 报 `Routing Conflict`。Manager 侧对应的一对是 `registerServer()` / `unregisterServer()`（旧名 `addServer()` 已废弃，仅作转发）；`unregisterServer()` 只清理归属与 transport 映射，**不**停底层 server。
 - **`IClientToolTransport`**: 客户端传输必须实现的接口。其核心职责是：
     1. **加载 API 定义**: 调用 `loadApis()` 方法，该方法会访问服务器的发现端点以获取所有工具的定义。
@@ -566,7 +567,7 @@ import { ClientTools } from '@isdk/tool-rpc'
 
 1. 创建一个 `FastifyServerTransport` 类并实现 `IServerToolTransport`。
 2. 在构造函数（以及 `_start()`）中，您不再创建新的 `http` 服务器，而是接收一个现有的 `FastifyInstance` 作为选项。
-3. 读 `transport.getRouteTable()` 并逐条原生注册（`fastify.get(prefix + path, ...)`）——内置发现端点就是其中一行，所以不需要手写 `ServerTools.toJSON()` 的处理器。
+3. 读 `transport.getRouteTable()` 并逐条原生注册（`fastify.get(prefix + path, ...)`）——内置发现端点就是其中一行，所以不需要手写 `ServerTools.toJSON()` 的处理器。注意：表里只有**被声明过的前缀**才有行——先声明一个（`addRpcHandler` / `addRoute`）再去读，否则 `getRoutes()` 只给出接管声明 `'/'`，而根路径上并没有发现端点。
 4. 使用 `fastify.all(apiPrefix + '/:toolId', ...)` 来注册 RPC 路由，其处理器从 `request.body` 或 `request.query` 中提取参数，调用相应的工具，然后使用 `reply` 发送响应。
 5. `start` 和 `stop` 方法可以委托给 Fastify 实例的 `listen` 和 `close`。
 

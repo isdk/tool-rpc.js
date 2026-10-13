@@ -115,6 +115,32 @@ describe('HttpServerToolTransport', () => {
       expect(mockRes.statusCode).toBe(400);
       const output = (mockRes.end as any).mock.calls[0][0];
       expect(output).toContain('Missing routing information');
+      // 路由表非空（beforeEach 调过 addRpcHandler）：不能多嘴提 addRpcHandler
+      expect(output).not.toMatch(/addRpcHandler/);
+   });
+
+   it('names the missing step when the route table is empty: no prefix claimed (issue #5)', async () => {
+      // 故意不调 addRpcHandler：路由表空，连内置发现行都不存在。
+      // 这时只说「缺 rpc-fn header 或有效路径」会让人去改 URL，而真正缺的是声明前缀。
+      const bare = new HttpServerToolTransport({ dispatcher });
+
+      const mockReq = {
+         url: '/', method: 'GET', headers: { host: 'localhost' },
+         on: (event: string, cb: any) => { if (event === 'end') cb(); }
+      } as unknown as http.IncomingMessage;
+
+      const mockRes = {
+         setHeader: vi.fn(),
+         end: vi.fn()
+      } as unknown as http.ServerResponse;
+
+      await (bare as any).processIncomingCall(mockReq, mockRes);
+
+      expect(mockRes.statusCode).toBe(400);
+      const output = (mockRes.end as any).mock.calls[0][0];
+      expect(output).toContain('Missing routing information');
+      expect(output).toMatch(/no route claimed for this transport/);
+      expect(output).toMatch(/addRpcHandler/);
    });
 
    it('should pipe response streams correctly', async () => {
