@@ -141,7 +141,9 @@
 
 - [ ] **`@isdk/tool-rpc-fastify`：装配时传 `identity` + `credentialReader`**（未实现）
   - `src/fastify-server.ts` 在 **`@isdk/tool-rpc-fastify` 仓**，不在本仓。
-  - 不用改 `src/fastify-server.ts:340` 那行（未装策略时就是透传）。注意它的 `Req` 是 `FastifyRequest`，Node 对象在 `raw._req` / `raw._res`（:345）。
+  - **发现端点在它那里没走流水线**（本仓 issue #4 已核实，2026-10-13）：`src/fastify-server.ts:113-131` 的 `addDiscoveryHandler` 仍是手写 `server.get(prefix)` → `reply.send(handler())`，**不经** `processIncomingCall`，所以没有身份解析、没有策略判定。后果：业务 API 要凭证而工具清单匿名可取（`allowAnonymous: false` 下 `GET /api/secret` → 401，`GET /api` → 200 清单）。
+  - 所以「只传 `identity` + `credentialReader`」不够：得先把那两条手写 `server.get()` 换成按 `getRouteTable()` 驱动的注册（`README.md` 适配器那一节就是这个模式）。代码修复归 **isdk/tool-rpc-fastify.js#1**，本仓只改文档。
+  - `src/fastify-server.ts:340` 那行本身未装策略时就是透传，改它不解决问题。注意它的 `Req` 是 `FastifyRequest`，Node 对象在 `raw._req` / `raw._res`（:345）。
 
 - [x] **文档：身份策略单开一节**（已实现，2026-10-12）
   - `src/transports/README.cn.md` 新增「§9 身份策略（服务端运行时）」（后面的节次整体后移）；§8.0 那张传输层 helper 表保持两个文件，没动。

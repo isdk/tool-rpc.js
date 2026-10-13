@@ -372,6 +372,8 @@ class FastifyServerTransport extends ServerToolTransport {
   // 返回 null 表示该前缀已声明，只需替换 registry/handler，不应再注册物理路由。
   // 发现端点不必自己写：claimRoute() 会铺内置路由行（`GET 前缀根 → rpcApis`），
   // 要原生注册就读 getRouteTable()，要换掉它就 addRoute(apiUrl, { path: '/', when: { method: 'GET' }, toolId: 'myRoot' })。
+  // 别为清单手写一条 `server.get(prefix)`：不经 processIncomingCall 就没有身份与校验，
+  // 结果是业务 API 要凭证、工具清单匿名可取（本仓 issue #4，`tool-rpc-fastify` 就踩在这里）。
   // 仅当需要上报框架原生的重复路由错误时才覆写 onDuplicateRoute()
   // 物理底座标识与 apiUrl 不同时才覆写 getListenAddr()
 }

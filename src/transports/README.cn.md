@@ -378,6 +378,10 @@ grep -rn '\b符号名\b' ../tool-rpc-fastify/src ../tool-electron/src ../ai-tool
 `request.identity`。构造选项 `{ identity, credentialReader }`，**没传就是 no-op**，基类不启用任何身份逻辑，
 行为与不装策略的部署逐字节一致。`protected` 可覆写（非 HTTP 协议要换 ctx 备料方式时才需要）。
 
+**适配器要自己把发现端点接进这条流水线**：判定只长在 `processIncomingCall` 里。若适配器为清单手写一条
+`GET <前缀>` 路由（不经它），清单就绕过身份与校验——业务 API 要凭证、工具清单却匿名可取。按
+`getRouteTable()` 逐条注册就不会漏（本仓 issue #4：`tool-rpc-fastify` 就踩在这里，修在 isdk/tool-rpc-fastify.js#1）。
+
 框架侧备的 `ctx`：`credential`（reader 取出的）/ `headers`（已归一化）/ `prefix` / `apiUrl`，加寻址结果 `toolId` / `act` / `resId`、
 注册表里那个**只读工具实例** `tool`，再加 `req`/`res` 逃生口。`tool` 按 dispatcher 的解析顺序取
 （前缀 claim 的 registry → transport 自己的 → dispatcher 的 → 系统保留层），取不到就是 `undefined`——工具不存在由 dispatcher 报 404，
