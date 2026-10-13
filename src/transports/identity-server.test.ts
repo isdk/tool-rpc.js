@@ -169,6 +169,48 @@ describe('identity in the server pipeline', () => {
     expect(disp.seen[0].clientId).toBe('x-proxy-token');
   });
 
+  it('transport 没装 reader 时内置 bearer reader 就是权威：私有 header 不被采信（契约 9）', async () => {
+    // 钉住 `server.ts:322` 那个无条件赋值：transport 没配 `credentialReader` 时，
+    // `:318` 的 `?? readBearerCredential` 就是它的 reader，`ctx.credentialRead` 照样为 true。
+    // 所以「transport 没装 reader」不是一种可观测状态：内置 reader 已在读标准字段，它说没有就是没有。
+    // 私有 header 要配到 transport 上（上一条测试）；策略侧没有可注入的 reader 能把它捡回来。
+    //
+    // `x-auth` 的值故意选成**能过 verify** 的：这样 401 只能来自「那个来路不是 reader 认的」，
+    // 而不是来自 verify 拒了它。
+    const verified: string[] = [];
+    const disp = echoDispatcher();
+    const transport = new HttpServerToolTransport({
+      apiUrl: 'http://localhost/api',
+      dispatcher: disp as any,
+      identity: new RpcBearerPolicy({
+        allowAnonymous: false,
+        verify: (credential) => {
+          verified.push(credential);
+          return { id: `x-${credential}` };
+        },
+      }),
+      // 关键：这里**不**配 transport 的 credentialReader
+    });
+    transport.addRpcHandler('http://localhost/api');
+
+    const res = mockRes();
+    await (transport as any).processIncomingCall(mockReq({ 'x-auth': 'proxy-token' }), res);
+
+    expect(verified).toHaveLength(0);            // 没有任何凭证来路被采信
+    expect(res.statusCode).toBe(401);
+    const body = JSON.parse(res.body);
+    expect(body.error.code).toBe(401);
+    expect(body.error.status).toBe('unauthenticated');
+    expect(disp.seen).toHaveLength(0);           // 拒绝发生在业务之前
+
+    // 同一个 transport、同一个策略：标准字段里的凭证能过——证明跑的就是内置 bearer reader
+    const res2 = mockRes();
+    await (transport as any).processIncomingCall(mockReq({ authorization: 'Bearer std-token' }), res2);
+
+    expect(verified).toEqual(['std-token']);
+    expect(disp.seen[0].clientId).toBe('x-std-token');
+  });
+
   it('会话策略端到端：首次连接签发凭证，带回来续用同一个身份', async () => {
     const policy = new RpcSessionIdentityPolicy();
     const issued: RpcIdentity[] = [];

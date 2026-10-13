@@ -426,10 +426,13 @@ new HttpServerToolTransport({
 - **会话凭证的闭环是四步，默认只做两步**：签发与认。下发要 `deliver: 'header:<name>'`（策略自己经
   `ctx.res` 写头，框架不写），取回要配 `credentialReader`。两者都不配时每次连接都是新身份，
   **不报错也不警告**——别把「续用不上」当成 bug，它是防冒充不是登录流程。
-- **凭证取法可换，且 reader 权威**：`credentialReader` 从原生 req 取字符串，内置默认只读 `authorization`（去 Bearer 前缀）；
-  私有 header 自己写 reader。它返回 `undefined` 就是「这条请求没带我要的凭证」：`RpcBearerPolicy` 不会回头
-  再读 `authorization`（否则部署明确不信的来路仍会被用）。`ctx.credentialRead` 就是用来区分「reader 拒读」与
-  「没人读过」的；要「只认客户端标准 header」那种拓扑就显式写 `fallback: 'authorization'`。
+- **凭证取法可换，且 reader 权威**：transport 的 `credentialReader` 从原生 req 取字符串，内置默认只读
+  `authorization`（去 Bearer 前缀），私有 header 自己写 reader。**任意 reader 只有一个注入点，在构造 ctx
+  的那一层**：策略侧的来路是封闭的（`ctx.credential` + 写死的 `authorization`），没有可注入的 reader，
+  只有 `fallback` 那个枚举开关。transport 的 reader 返回 `undefined` 就是「这条请求没带我要的凭证」：
+  `RpcBearerPolicy` 不会回头再读 `authorization`（否则部署明确不信的来路仍会被用）。`ctx.credentialRead`
+  就是用来区分「reader 拒读」与「没人读过」的；要「只认客户端标准 header」那种拓扑就显式写
+  `fallback: 'authorization'`。
 - **逐 API 的认证判定在策略里，不在 transport 上**：`allowAnonymous` 可以是谓词（`(ctx) => boolean`）。
   `ctx` 带寻址结果与备料：`toolId` / `act` / `resId`、`prefix` / `apiUrl`、`tool`（注册表里那个实例，**只读**，
   按 dispatcher 的解析顺序取，取不到就 `undefined`）。没有 `builtin` 开关——内置端点也是普通工具，

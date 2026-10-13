@@ -114,31 +114,41 @@ describe('RpcBearerPolicy (§5 默认实现 B)', () => {
     await expect(policy.match(ctxOf({ credential: 'x' }))).rejects.toThrow('jwks unreachable');
   });
 
-  it('ctx.credential（transport 的 reader）优先于策略自己的 credentialReader', async () => {
+  it('ctx.credential 优先于标准 header：构造方递进来的凭证说了算', async () => {
     const seen: string[] = [];
     const policy = new RpcBearerPolicy({
-      credentialReader: () => 'from-policy',
       verify: (credential) => {
         seen.push(credential);
         return { id: 'alice' };
       },
     });
 
-    await policy.match(ctxOf({ credential: 'from-transport' }));
+    await policy.match(ctxOf({
+      credential: 'from-transport',
+      req: { headers: { authorization: 'Bearer from-header' } },
+    }));
     expect(seen).toEqual(['from-transport']);
   });
 
-  it('ctx 没备 credential 时退策略自己的 reader（私有 header 归部署）', async () => {
+  it('私有 header 不被策略读：策略侧没有可注入的 reader（契约 9）', async () => {
+    // 策略能 consult 的来路是封闭的：`ctx.credential` 与写死的 `authorization`。
+    // 私有 header（鉴权代理、Electron payload、EventSource 的 query）归**构造 ctx 的那一层**：
+    // transport 配 `credentialReader`，裸用策略的调用方自己备 `ctx.credential`。
     const seen: string[] = [];
     const policy = new RpcBearerPolicy({
-      credentialReader: (req: any) => req?.headers?.['x-proxy-token'],
       verify: (credential) => {
         seen.push(credential);
         return { id: 'alice' };
       },
     });
 
-    const identity = await policy.match({ req: { headers: { 'x-proxy-token': 'proxy-1' } } } as RpcIdentityContext);
+    // 只给 req：私有 header 里的东西不会被读 → 无凭证 → 默认 allowAnonymous 走新会话
+    await expect(policy.match({ req: { headers: { 'x-proxy-token': 'proxy-1' } } } as RpcIdentityContext))
+      .resolves.toBeUndefined();
+    expect(seen).toEqual([]);
+
+    // 调用方自己备上凭证，同一个策略就认了
+    const identity = await policy.match({ credential: 'proxy-1' } as RpcIdentityContext);
     expect(identity).toEqual({ id: 'alice' });
     expect(seen).toEqual(['proxy-1']);
   });
@@ -183,7 +193,7 @@ describe('RpcBearerPolicy (§5 默认实现 B)', () => {
     expect(seen).toEqual(['signed-jwt']);
   });
 
-  it('默认 reader 读 authorization（去 Bearer 前缀）', async () => {
+  it('默认 reader 读 authorization（去 Bearer 前缀）：策略单独用时的默认来路，写死不可配', async () => {
     const seen: string[] = [];
     const policy = new RpcBearerPolicy({
       verify: (credential) => {
@@ -194,6 +204,27 @@ describe('RpcBearerPolicy (§5 默认实现 B)', () => {
 
     await policy.match({ req: { headers: { authorization: 'Bearer signed-jwt' } } } as RpcIdentityContext);
     expect(seen).toEqual(['signed-jwt']);
+  });
+
+  it('单独用时只备 ctx.headers（没有 req）也读标准字段；封闭的是字段不是容器（契约 9）', async () => {
+    const seen: string[] = [];
+    const policy = new RpcBearerPolicy({
+      verify: (credential) => {
+        seen.push(credential);
+        return { id: 'alice' };
+      },
+    });
+
+    // `readCredential` 退到 `ctx.req ?? { headers: ctx.headers }`：框架归一化过的那份 header
+    // 集合也算数，调用方不必为了鉴权去伪造一个 req 形状。
+    const identity = await policy.match({ headers: { Authorization: 'Bearer from-headers' } } as RpcIdentityContext);
+    expect(identity).toEqual({ id: 'alice' });
+    expect(seen).toEqual(['from-headers']);
+
+    // 同一个形状里只放私有 header 就没有凭证：封闭的是「认哪些字段」，不是「读哪种容器」
+    const anonymous = await policy.match({ headers: { 'x-proxy-token': 'proxy-1' } } as RpcIdentityContext);
+    expect(anonymous).toBeUndefined();
+    expect(seen).toEqual(['from-headers']);
   });
 
   it('assign 默认给连接级 uuid，且返回体不带 credential（服务端不签发凭证，契约 5）', () => {

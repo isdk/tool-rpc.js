@@ -2,7 +2,6 @@ import { uuidv4 } from '@isdk/hash';
 import { RpcError, RpcStatusCode } from './models';
 import {
   readBearerCredential,
-  type RpcCredentialReader,
   type RpcIdentity,
   type RpcIdentityContext,
   type RpcIdentityPolicy,
@@ -36,13 +35,6 @@ export interface RpcVerifiedCredentialOptions {
    */
   assign?: (ctx: RpcIdentityContext) => RpcIdentity;
   /**
-   * 凭证取法。默认读 authorization（去 Bearer 前缀）。
-   *
-   * 它只在**没人读过凭证**时生效（策略单独用、或 transport 没装 reader）。
-   * transport 装了 `credentialReader` 时，它的返回值就是凭证（见 `fallback`）。
-   */
-  credentialReader?: RpcCredentialReader;
-  /**
    * transport 的 reader 返回 `undefined` 后，策略要不要自己再读一次凭证（issue #3）。
    *
    * - `'none'`（默认）：reader 权威。它说「这个请求没带我要的凭证」，这条请求就是未认证，
@@ -53,8 +45,11 @@ export interface RpcVerifiedCredentialOptions {
    * 两种都是合法拓扑，所以这里是个开关而不是隐式行为。默认 `'none'`：`identity` 在 1.1.0 后
    * 才引入、尚未发布，没有兼容包被。
    *
-   * 注：它只管「transport 读过但没读到」这一种情况。没人读过（策略单独用）时仍走
-   * `credentialReader`。
+   * 注：它只管「transport 读过但没读到」这一种情况。没人读过（策略单独用 / 测试里直接
+   * `match`）时默认读标准 `authorization`——那是写死的，不是可配置的来路。
+   * 策略侧的凭证来路知识是**封闭**的：只有标准 bearer，不可注入自定义 reader（契约 9）。
+   * 私有 header 归构造 ctx 的那一层：transport 配 `credentialReader`，裸用策略的调用方
+   * 自己备 `ctx.credential`。
    */
   fallback?: 'none' | 'authorization';
 }
@@ -105,32 +100,27 @@ export class RpcBearerPolicy<Req = any> implements RpcIdentityPolicy<Req> {
     return this.options.assign ? this.options.assign(ctx) : this.assignIdentity(ctx);
   }
 
-  /** 凭证取法：选项缺省读 `authorization`（去 Bearer 前缀）。 */
-  protected readerOf(): RpcCredentialReader<Req> {
-    return (this.options.credentialReader ?? readBearerCredential) as RpcCredentialReader<Req>;
-  }
-
   /**
    * 凭证从哪里取（issue #3）。
    *
    * 三种情况必须分得开，而 `ctx.credential === undefined` 本身分不开：
    * 1. transport 的 reader 取到了 → 就用它（它懂这个协议）。
-   * 2. transport 已读过但没取到（`credentialRead`）→ reader 权威：默认不再自己读。
+   * 2. transport 已读过但没取到（`credentialRead`）→ reader 权威：默认不再自己读，
    *    只有显式 `fallback: 'authorization'` 才按标准 header 再读一次。
-   * 3. 没人读过（策略单独用）→ 退策略自己的 `credentialReader`。
+   * 3. 没人读过（策略单独用 / 测试里直接 `match`）→ 默认读标准 `authorization`。
+   *
+   * 三条里策略能 consult 的来路只有两个：构造方递进来的 `ctx.credential`，和写死的
+   * `readBearerCredential`。**没有可注入的 reader**——任意来路只能长在构造 ctx 的那一层
+   * （transport 的 `credentialReader`，或裸用策略时调用方自己备 `ctx.credential`）。
    */
   protected readCredential(ctx: RpcIdentityContext<Req>): string | undefined {
     if (ctx.credential !== undefined && ctx.credential !== null) {return ctx.credential;}
 
-    if (ctx.credentialRead) {
-      // 这里的 `readBearerCredential` 是有意写死的：`fallback: 'authorization'` 说的就是
-      // 「只认客户端自带的标准 header」，不是「再跑一遍某个 reader」。
-      return this.options.fallback === 'authorization'
-        ? readBearerCredential(ctx.req ?? { headers: ctx.headers })
-        : undefined;
-    }
+    // 这里的 `readBearerCredential` 是有意写死的：策略侧只认 RFC 7235 那个标准字段，
+    // 不是「再跑一遍某个 reader」。私有 header 归构造 ctx 的那一层（契约 9）。
+    if (ctx.credentialRead && this.options.fallback !== 'authorization') {return undefined;}
 
-    return this.readerOf()(ctx.req as Req);
+    return readBearerCredential(ctx.req ?? { headers: ctx.headers });
   }
 
   /**

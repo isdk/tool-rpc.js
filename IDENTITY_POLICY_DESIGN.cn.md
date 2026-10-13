@@ -164,7 +164,10 @@ export interface RpcCredentialRegistry {
 8. 两个默认类可继续继承，覆写点一律 `protected`；基类的 `name` 必须声明成
    `readonly name: string = '...'`（写成 `readonly name = 'x'` 会推断成字面量类型，子类换不了 `name`，TS2416）。
 9. 内置 reader 只读标准字段：bearer 默认 reader 读 `authorization`（去 Bearer 前缀）；私有 header 由部署
-   写自己的 reader。`RPC_HEADERS.CLIENT_ID`（`rpc-client-id`）保留，语义是「客户端自报标识」，不是身份。
+   写自己的 reader。**任意凭证读取函数只有一个注入点，在构造 ctx 的那一层**（transport 的
+   `credentialReader`，或裸用策略时调用方自己备 `ctx.credential`）；消费 ctx 的策略只能在框架实现的
+   封闭枚举里选来路（`fallback`），不可注入自定义 reader。`RPC_HEADERS.CLIENT_ID`（`rpc-client-id`）
+   保留，语义是「客户端自报标识」，不是身份。
 10. **钩子可同步可异步，框架侧一律 `await`**（`match`/`assign`/`revoke` 三个都是）。落点已核：
     `ServerToolTransport.processIncomingCall`（`src/transports/server.ts:248`）已 `await this.toRpcRequest(...)`（:250）
     再 `validateRpcRequest`（:256）与 `dispatch`（:261），身份判定插在 :250 与 :256 之间（现已落在 :254），零结构改动（插入位置见 §10）。
@@ -290,11 +293,11 @@ export interface RpcVerifiedCredentialOptions {
    * 无凭证连接的 `assign` 产物就是所谓匿名身份，不再单开一个名字。
    */
   assign?: (ctx: RpcIdentityContext) => RpcIdentity;
-  /**
-   * 凭证取法。默认读 authorization（去 Bearer 前缀）。
-   * 只在**没人读过凭证**时生效（策略单独用）；transport 装了 reader 就以它为准（见 `fallback`）。
-   */
-  credentialReader?: RpcCredentialReader;
+  // 没有策略级 `credentialReader`：策略能 consult 的凭证来路是**封闭**的——构造方递进来的
+  // `ctx.credential`，加上写死的标准 `authorization`（去 Bearer 前缀）。私有 header 归**构造 ctx 的
+  // 那一层**：transport 配 `credentialReader`，裸用策略的调用方自己备 `ctx.credential`（契约 9）。
+  // 曾有过一个策略级 reader 选项，但它在 transport 流水线里永远不可达（`credentialRead` 恒 true），
+  // 只在裸用时生效——一个在主流场景下静默失效的可注入函数，已删（§18）。
   /**
    * transport 的 reader 返回 undefined 后，策略要不要自己再读一次（§18）。
    * `'none'`（默认）= reader 权威；`'authorization'` = 忽略代理那条路，只认客户端自带的标准 header。
@@ -772,7 +775,14 @@ new RpcBearerPolicy({
 
 - `resolveRequestIdentity` 备 `ctx.credential` 的同时标 `ctx.credentialRead = true`，两种情况从此可分。
 - `RpcBearerPolicy.readCredential()` 三段：取到了就用；`credentialRead` 且没取到→默认不自己读；
-  没人读过→退策略自己的 `credentialReader`（策略单独用这条路保留）。
+  没人读过→默认读**写死的**标准 `authorization`（策略单独用这条路保留）。
+- 策略级 `credentialReader` 选项已删（未发布，无兼容包被）。定下的分界：**任意凭证读取函数只有一个
+  注入点，在构造 ctx 的那一层**；消费 ctx 的一方（策略）只能在框架实现的**封闭枚举**里选来路
+  （`fallback: 'none' | 'authorization'`）。枚举成员的可入性判据：框架能在**不认识部署私有名字**
+  的前提下实现该读取（`authorization` 是 RFC 7235 定的，能；`x-auth` / `cookie:NAME` / `query:token`
+  不能，归 transport reader）。保留那次写死的标准读而不是缩成空集，是因为它不引入可配置面，
+  且兑现类名（`RpcBearerPolicy` 默认就认 bearer）；删选项就够了，删读会把封闭知识也一起删掉，
+  并把 `policy.match({ req })` 变成静默匿名（`allowAnonymous` 默认 true）——最难查的那一类失败。
 - 要「只认客户端」那种拓扑就显式写开关：`fallback: 'none'`（默认，reader 权威）| `'authorization'`
   （忽略 transport 的 reader，按标准 `authorization` 再读一次）。两种拓扑都合法，所以它是选项而不是隐式行为。
 - 默认 `'none'` 不带兼容包被：`identity` 在 1.1.0 后才引入、尚未发布。
