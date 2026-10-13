@@ -77,7 +77,7 @@
 
 - [x] **发现端点收进流水线：内置工具 `rpcApis` + 路由表**（已实现，2026-10-12 第三轮，见设计文档 §17）
   - 第二轮的「多一步 `resolveBuiltinIdentity`」已推翻：内置端点不该有特权通道。现在它是 `systemRegistry` 里的普通工具
-    `rpcApis`（`src/transports/rpc-apis.ts`，`timeout: 0`），与 `rpcTask` 同处自动装载（`src/transports/dispatcher.ts:58-59`）。
+    `rpcApis`（`src/transports/rpc-apis.ts`，不声明自己的 `timeout`，因此与业务工具同受 `globalTimeout` 管），与 `rpcTask` 同处自动装载（`src/transports/dispatcher.ts:58-59`）。
   - 路由表：`addRoute()` / `getRouteTable()` / `matchRouteEntry()`（`src/transports/server.ts:490` / `:515` / `:532`）。
     每个前缀自带三行内置声明（`builtinRouteEntries()`，`:456`）：`GET 前缀根`、`act: 'list'`、`act: 'get'`；
     第三方用同一个 `addRoute()` 同路径同条件就能换掉它。

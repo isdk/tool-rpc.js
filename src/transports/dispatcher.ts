@@ -18,6 +18,25 @@ import { RpcTaskResource } from './rpc-task';
 import { RpcApisResource, RPC_APIS_TOOL_ID } from './rpc-apis';
 
 /**
+ * 读 `rpc-timeout` 头：只有「没发」与「读不出」才算 undefined，`0` 是显式值（无死线）。
+ * 以前 `headers[TIMEOUT] ? parseInt(...) : undefined` 对字符串 `'0'` 是真值判断，
+ * 能读到 0，但下一行的 `||` 又把它抹了（issue #8）。
+ */
+function readTimeoutHeader(raw: any): number | undefined {
+  if (raw === undefined || raw === null || raw === '') {return undefined;}
+  const value = Number.parseInt(String(Array.isArray(raw) ? raw[0] : raw), 10);
+  return Number.isNaN(value) ? undefined : value;
+}
+
+/** 取第一个**配了**的值：`undefined` 才算没配，`0` 是显式声明的「无死线」。 */
+function firstConfigured(...values: Array<number | undefined>): number {
+  for (const value of values) {
+    if (value !== undefined && value !== null && !Number.isNaN(value)) {return value;}
+  }
+  return 0;
+}
+
+/**
  * 集中式 RPC 请求分发器。
  * 负责将标准化的 ToolRpcRequest 路由到注册表中的工具函数。
  */
@@ -48,7 +67,8 @@ export class RpcServerDispatcher {
   }) {
     this.registry = options?.registry || ServerTools;
     this.tracker = options?.tracker || new RpcActiveTaskTracker();
-    if (options?.globalTimeout) this.globalTimeout = options.globalTimeout;
+    // `globalTimeout: 0` 是显式「不设全局兵底」（issue #8）：真值判断会把 0 当成没传
+    if (options?.globalTimeout !== undefined) this.globalTimeout = options.globalTimeout;
     if (options?.compat) this.compat = { ...DEFAULT_COMPAT_OPTIONS, ...options.compat };
     if (options?.terminationGraceMs !== undefined) this.terminationGraceMs = options.terminationGraceMs;
     if (options?.maxTaskRuntimeMs !== undefined) this.maxTaskRuntimeMs = options.maxTaskRuntimeMs;
@@ -179,9 +199,13 @@ export class RpcServerDispatcher {
    * [准备阶段] 构建执行上下文与超时策略
    */
   private prepareContext(request: ToolRpcRequest, tool: any, params: any, targetRegistry?: any) {
-    const clientTimeout = request.headers[RPC_HEADERS.TIMEOUT] ? parseInt(request.headers[RPC_HEADERS.TIMEOUT] as string) : undefined;
+    // 逐级取第一个**配了**的值（issue #8）。以前用 `||` ，于是 `0` 与「没配」分不开：
+    // 一个显式写了 `timeout: 0` 的工具会落到 globalTimeout 上被掩掉，而注释与
+    // `RpcDeadlineGuard` 说的都是「0 = 不开死线」。现在 `0` 就是答案：无死线
+    // （与 Node 的 `server.requestTimeout = 0` 同一约定，guard 自己也是 `> 0` 才上弦）。
+    const clientTimeout = readTimeoutHeader(request.headers[RPC_HEADERS.TIMEOUT]);
     const toolTimeoutObj = typeof tool.timeout === 'object' ? tool.timeout : { value: tool.timeout };
-    const finalTimeout = clientTimeout || toolTimeoutObj.value || this.globalTimeout;
+    const finalTimeout = firstConfigured(clientTimeout, toolTimeoutObj.value, this.globalTimeout);
 
     const abortController = new AbortController();
 
@@ -206,6 +230,7 @@ export class RpcServerDispatcher {
       context,
       abortController,
       timeoutConfig: {
+        // 可以是 0：`RpcDeadlineGuard` 对 0 不上弦，即「不要死线」
         finalTimeout,
         keepAliveOnTimeout: !!toolTimeoutObj.keepAliveOnTimeout
       }
@@ -256,6 +281,7 @@ export class RpcServerDispatcher {
     request: ToolRpcRequest,
     promise: Promise<any>,
     aborter: AbortController,
+    /** `finalTimeout` 为 0 时两个定时器都不上弦：本次调用没有死线。 */
     config: { finalTimeout: number; keepAliveOnTimeout: boolean }
   ): Promise<ToolRpcResponse> {
     const { finalTimeout, keepAliveOnTimeout } = config;

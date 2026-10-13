@@ -30,7 +30,8 @@
   - `GET /api/rpcTask/{resId}` — 查询任务状态（处理中 102 / 完成 200 / 不存在 404 / 出错 500 / 被中止 408）
   - `POST /api/rpcTask/{resId}?act=$cancel` — 取消任务（注意 act 带 `$`；客户端代理会自动去 `$`，所以写 `rpcTask.cancel({ resId })`）
 - **`rpcApis`**（`RpcApisResource`，id 常量 `RPC_APIS_TOOL_ID`）：内置发现工具，同样自动注册到 `systemRegistry`。
-  它从执行上下文里拿**本次命中前缀**的注册表（`ctx.registry`）列工具清单，`timeout: 0`。
+  它从执行上下文里拿**本次命中前缀**的注册表（`ctx.registry`）列工具清单；不声明自己的 `timeout`，
+  所以与业务工具同受 `globalTimeout` 管（`timeout: 0` 是显式「不要死线」，不能拿来当「没配」写）。
   列清单不挑注册表形态（`registryEntries()`）：会 `toJSON()` 的层用它，不会的按静态 `items` / `entries()` / 自有键枚举；
   多层按 `get()` 同一套优先级合并——**`get()` 解析得到的工具必须在清单里**，不能回 `200 {}`。
   清单条目默认不带函数体（`manifestItem()` 在副本上剔 `func`，与 `ServerTools.toJSON()` 同一套规则），

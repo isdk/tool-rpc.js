@@ -662,7 +662,8 @@ new RpcBearerPolicy({
 
 **定下的机制：内置端点没有特权通道，它就是普通工具 + 普通路由行**：
 
-- **内置工具 `rpcApis`**（`src/transports/rpc-apis.ts`，`RpcApisResource extends ServerTools`，`timeout: 0`）：
+- **内置工具 `rpcApis`**（`src/transports/rpc-apis.ts`，`RpcApisResource extends ServerTools`，不声明自己的
+  `timeout`，因此与业务工具同受 `globalTimeout` 管）：
   与 `rpcTask` 同在一个 `systemRegistry`，由 `RpcServerDispatcher` 自动装载。它不持有清单，
   只从 `ctx.registry` 拿**本次命中前缀**的注册表，所以多前缀多注册表时各列各自的。
   id 常量 `RPC_APIS_TOOL_ID` 在 `models.ts`（客户端要用它但不能把服务端工具类带进浏览器包）。

@@ -13,7 +13,11 @@ export const RPC_HEADERS = {
   RES_ID: 'rpc-res-id',
   /** 链路追踪 ID */
   TRACE_ID: 'trace-id',
-  /** 业务执行超时声明 (ms) */
+  /**
+   * 业务执行超时声明 (ms)。
+   * `0` 是显式值，意思是「不要死线」（与「不发这个头」不同：不发 = 让服务端自己按
+   * 工具元数据 / `globalTimeout` 定）。
+   */
   TIMEOUT: 'rpc-timeout',
   /** 请求唯一 ID (由客户端生成或传输层补齐，且必须在响应中回显) */
   REQUEST_ID: 'req-id',
@@ -45,7 +49,7 @@ export const RPC_APIS_TOOL_ID = 'rpcApis';
 export const RPC_DEFAULTS = {
   /** 默认后台任务轮询间隔 (ms) */
   RETRY_AFTER_MS: 1000,
-  /** 默认全局硬超时时间 (ms) */
+  /** 默认全局硬超时时间 (ms)。dispatcher 的 `globalTimeout` 设为 `0` 即不设全局兵底 */
   GLOBAL_TIMEOUT_MS: 30000,
   /** 'once' 模式下的物理清理兜底时间 (ms)，默认 1小时 */
   ONCE_FALLBACK_MS: 3600000,

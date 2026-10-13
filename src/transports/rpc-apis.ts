@@ -101,13 +101,16 @@ export function manifestItems(json: any): any {
  * 由 dispatcher 按「前缀 claim → transport → dispatcher」的顺序备好），
  * 所以多前缀多注册表时各前缀列各自的工具，互不串。
  *
- * `timeout: 0`：列清单是纯内存操作，不该占用业务超时预算，也不该被 `globalTimeout` 掐。
+ * 它**不声明自己的超时**（issue #8）：列清单一般是纯内存操作，但它与业务工具受同一套死线管，
+ * `globalTimeout` 兜得到它——没有旁路，也没有豁免。以前这里写 `timeout: 0` 并注释成
+ * 「不被 globalTimeout 掩」，而实现是 `... || globalTimeout`，两边说的不是一回事；
+ * 现在 `0` 真的是「不要死线」，内置工具就更不该拿它当「没配」写。
+ * 要单独定它的死线就传 `options.timeout`。
  */
 export class RpcApisResource extends ServerTools {
   constructor(name: string = RPC_APIS_TOOL_ID, options: any = {}) {
     super(name, {
       ...options,
-      timeout: 0,
       description: 'Built-in discovery endpoint: lists the tools served by the matched route prefix',
     });
   }

@@ -7,6 +7,17 @@ export type { Funcs }
 export interface ClientToolTransportOptions extends ToolTransportOptions {
 }
 
+/**
+ * 超时协商里的一级是不是显式「不要死线」（`timeout: 0`，issue #8）。
+ *
+ * 只有数字 0 算：`undefined`（没配）与 `NaN`（读不出）都不算。
+ * 它不参与「取小」：`Math.min(0, 5000)` 把「无死线」当成「最小的那个超时」，
+ * 而 `rpc-timeout: 0` 到了服务端又被当成「没声明」——两头都不是意图。
+ */
+export function isNoDeadlineTimeout(value: any): boolean {
+  return value !== undefined && value !== null && Number(value) === 0;
+}
+
 export interface IClientToolTransport extends IToolTransport {
   /**
    * 拉取服务端的工具清单（打的是发现端点——框架自有的一个内置 API）。
@@ -88,9 +99,13 @@ export abstract class ClientToolTransport extends ToolTransport implements IClie
       defTimeout = defTimeout.value;
     }
 
-    // 3. Negotiate: min(user, tool) if both exist, else take whichever exists
+    // 3. Negotiate: min(user, tool) if both exist, else take whichever exists.
+    //    `0` 不参与取小（issue #8）：它是显式声明的「不要死线」，不是「最小的那个超时」。
+    //    取小会把「无死线」当成 0ms，也会让服务端把 `rpc-timeout: 0` 读成「没声明」。
     let finalTimeout: number | undefined;
-    if (userTimeout !== undefined && defTimeout !== undefined) {
+    if (isNoDeadlineTimeout(userTimeout) || isNoDeadlineTimeout(defTimeout)) {
+      finalTimeout = 0;
+    } else if (userTimeout !== undefined && defTimeout !== undefined) {
       finalTimeout = Math.min(Number(userTimeout), Number(defTimeout));
     } else if (userTimeout !== undefined) {
       finalTimeout = Number(userTimeout);

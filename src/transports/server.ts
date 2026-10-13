@@ -447,13 +447,13 @@ export abstract class ServerToolTransport extends ToolTransport implements IServ
   }
 
   /**
-   * 把旧的 `addDiscoveryHandler` 处理器包成一个工具（`timeout: 0`，与内置 `rpcApis` 一致）。
+   * 把旧的 `addDiscoveryHandler` 处理器包成一个工具（不声明自己的超时，与内置 `rpcApis`
+   * 一致：它受 `globalTimeout` 管，没有豁免，见 issue #8）。
    * 返回值带 `toJSON()` 就调它（`mount` 传的就是 `() => serverTools.toJSON()`，
    * Mailbox 旧行为也会做这一步归一）。
    */
   protected discoveryTool(handler: () => any): any {
     return {
-      timeout: 0,
       run: async () => {
         const result = await handler();
         return (result && typeof result.toJSON === 'function') ? result.toJSON() : result;

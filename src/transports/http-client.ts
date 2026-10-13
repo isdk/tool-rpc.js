@@ -116,6 +116,8 @@ export class HttpClientToolTransport extends ClientToolTransport {
 
       let timeoutVal = fetchOptions.timeout;
       if (typeof timeoutVal === 'object' && timeoutVal !== null) timeoutVal = timeoutVal.value;
+      // `timeoutVal === 0` 不在此上弦：`0` 是显式「不要死线」（issue #8），
+      // 与「没配」同样不该有本地定时器（区别已在 header 上：`rpc-timeout: 0`）。
       if (timeoutVal) {
          timeoutId = setTimeout(() => {
             const err = new Error('Request Timeout');

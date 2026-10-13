@@ -178,7 +178,8 @@ await manager.stopAll();
 `rpcApis`（`RpcApisResource`，id 常量 `RPC_APIS_TOOL_ID`）：内置发现工具，就是发现端点的实现：
 
 * **列清单**：`GET <前缀根>`（Mailbox 侧是无 `toolId` 且 `act: 'list' | 'get'`）。它从 `ctx.registry` 取
-  **本次命中前缀**的注册表，所以多前缀多注册表时各列各自的工具；`timeout: 0`（纯内存操作，不吃超时预算）。
+  **本次命中前缀**的注册表，所以多前缀多注册表时各列各自的工具；它**不声明** `timeout`，
+  因此和其他工具一样受 `globalTimeout` 管（发现调用该被超时掉，issue #8）。
 * **注册表形态不限**：会 `toJSON()` 的层用它（多层会合并，与 `get()` 同一套优先级），不会的按
   静态 `items`（ToolFunc 家族）/ `entries()`（Map 形状）/ 自有键（普通对象映射）枚举。
   规则只有一套：`get()` 解析得到的工具，清单里就必须有它——不能回 `200 {}`。*   **清单默认不带函数体**：`ToolFunc.toJSON()` 会把 `func` 序列成源码字符串，所以框架在取用条目时

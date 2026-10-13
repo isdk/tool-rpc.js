@@ -48,7 +48,8 @@ export class MailboxClientTransport extends ClientToolTransport {
     }
     this.serverAddress = apiUrl;
     this.clientAddress = options.clientAddress;
-    this.timeout = options.timeout || 30000;
+    // `timeout: 0` 是显式「不要死线」（issue #8）：`||` 会把它当成没传退到 30000
+    this.timeout = options.timeout ?? 30000;
   }
 
   public async start(): Promise<void> {
@@ -91,12 +92,15 @@ export class MailboxClientTransport extends ClientToolTransport {
     }
   }
 
-  /** 构造时声明的默认超时（可以是数字，也可以是 `{ value }` 对象）。 */
+  /**
+   * 构造时声明的默认超时（可以是数字，也可以是 `{ value }` 对象）。
+   * `0` 是合法值，意思是「不要死线」（issue #8），不能退到 30000。
+   */
   protected timeoutValue(): number {
     const declared: any = this.timeout;
     const value = (declared && typeof declared === 'object') ? declared.value : declared;
     const n = Number(value);
-    return Number.isFinite(n) && n > 0 ? n : 30000;
+    return Number.isFinite(n) && n >= 0 ? n : 30000;
   }
 
   public async _fetch(name: string, args?: any, act?: ActionName | string, id?: any, fetchOptions?: any) {
@@ -115,13 +119,22 @@ export class MailboxClientTransport extends ClientToolTransport {
 
     // 超时优先级：本次请求的 fetchOptions.timeout > 构造时的 options.timeout。
     // 以前 `this.timeout` 存下来却从不读，`new MailboxClientTransport({ timeout: 500 })`
-    // 完全无效（实测本地定时器仍是 30200ms）
+    // 完全无效（实测本地定时器仍是 30200ms）。
+    // `0` 要原样传下去（issue #8）：它是「不要死线」，不是「没声明」——header 写 `0`，
+    // 本地定时器不上弦。以前 `if (fetchOptions?.timeout)` 的真值判断会把 0 直接丢掉。
     let timeoutVal: number = this.timeoutValue();
-    if (fetchOptions?.timeout) {
-      timeoutVal = typeof fetchOptions.timeout === 'number' ? fetchOptions.timeout : fetchOptions.timeout.value;
+    const requested = fetchOptions?.timeout;
+    if (requested !== undefined && requested !== null) {
+      const requestedVal = typeof requested === 'number' ? requested : requested.value;
+      if (requestedVal !== undefined && requestedVal !== null && Number.isFinite(Number(requestedVal))) {
+        timeoutVal = Number(requestedVal);
+      }
+    }
+    if (Number.isFinite(timeoutVal)) {
       messageHeaders[RPC_HEADERS.TIMEOUT] = String(timeoutVal);
     }
 
+    const noDeadline = timeoutVal === 0;
     const clientLocalTimeout = timeoutVal + 200;
     return new Promise((resolve, reject) => {
       const abortHandler = () => {
@@ -139,7 +152,8 @@ export class MailboxClientTransport extends ClientToolTransport {
         return abortHandler();
       }
 
-      const timer = setTimeout(() => {
+      // 无死线就不上弦（issue #8）：`clearTimeout(undefined)` 是空操作，下面的收尾不用改
+      const timer = noDeadline ? undefined : setTimeout(() => {
         if (this.pendingRequests.has(reqId)) {
           this.pendingRequests.delete(reqId);
           const err: any = new Error(`Request timeout after ${clientLocalTimeout}ms`);

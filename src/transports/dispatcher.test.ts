@@ -115,6 +115,55 @@ describe('RpcServerDispatcher', () => {
       vi.useRealTimers();
    });
 
+   it('treats tool timeout: 0 as "no deadline", not as "inherit globalTimeout" (issue #8)', async () => {
+      vi.useFakeTimers();
+      dispatcher.globalTimeout = 20;
+
+      registry.get = vi.fn().mockImplementation(() => ({
+         timeout: 0,
+         run: () => new Promise(resolve => setTimeout(() => resolve('done'), 100)),
+      }));
+
+      const p = dispatcher.dispatch({
+         apiUrl: 'http://test', toolId: 'noDeadline', requestId: 'req-no-deadline', params: {}, headers: {}
+      });
+      vi.advanceTimersByTime(500);
+      const res = await p;
+
+      expect(res.status).toBe(RpcStatusCode.OK);
+      expect(res.data).toBe('done');
+
+      vi.useRealTimers();
+   });
+
+   it('treats an rpc-timeout header of "0" as "no deadline" as well (issue #8)', async () => {
+      vi.useFakeTimers();
+      dispatcher.globalTimeout = 20;
+
+      registry.get = vi.fn().mockImplementation(() => ({
+         run: () => new Promise(resolve => setTimeout(() => resolve('done'), 100)),
+      }));
+
+      const p = dispatcher.dispatch({
+         apiUrl: 'http://test', toolId: 'noDeadline', requestId: 'req-header-zero', params: {},
+         headers: { [RPC_HEADERS.TIMEOUT]: '0' },
+      });
+      vi.advanceTimersByTime(500);
+      const res = await p;
+
+      expect(res.status).toBe(RpcStatusCode.OK);
+
+      // 一个正常的 header 值仍然照旧接管工具自己的超时
+      const capped = dispatcher.dispatch({
+         apiUrl: 'http://test', toolId: 'noDeadline', requestId: 'req-header-20', params: {},
+         headers: { [RPC_HEADERS.TIMEOUT]: '20' },
+      });
+      vi.advanceTimersByTime(60);
+      expect((await capped).status).toBe(RpcStatusCode.GATEWAY_TIMEOUT);
+
+      vi.useRealTimers();
+   });
+
    it('should respect non-zero terminationGraceMs and delay 504 response', async () => {
       vi.useFakeTimers();
       dispatcher.terminationGraceMs = 500;

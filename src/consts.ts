@@ -40,6 +40,7 @@ export const RemoteToolFuncSchema = {
   /**
    * The timeout configuration for the remote call.
    * Can be a number (milliseconds) or an object for fine-grained control.
+   * `0` means "no deadline at all" (it does NOT mean "inherit the global timeout").
    */
   timeout: { type: ['number', 'object'] },
   /**
@@ -77,6 +78,8 @@ export interface RemoteFuncItem extends BaseFuncItem {
   fetchOptions?: any
   /**
    * The timeout configuration for the remote call.
+   * `0` (either as the number or as `{ value: 0 }`) disables the deadline entirely;
+   * leave it `undefined` to inherit the dispatcher's `globalTimeout`.
    */
   timeout?: number | {
     /** The hard timeout in milliseconds. */

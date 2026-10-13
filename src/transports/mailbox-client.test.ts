@@ -126,6 +126,33 @@ describe('MailboxClientTransport', () => {
         await expect(fetchPromise).rejects.toThrow(/Request timeout/);
     });
 
+    it('timeout: 0 means no deadline: no local timer, and the header says 0 (issue #8)', async () => {
+        await transport.start();
+        const zero = new MailboxClientTransport({
+            mailbox,
+            apiUrl: 'mem://server/api',
+            clientAddress: 'mem://client/zero',
+            timeout: 0,
+        });
+
+        const pending = zero._fetch('tool', {}, 'act', 'id', { headers: { 'req-id': 'req-zero' } });
+        const swallowed = pending.catch(() => {});
+
+        // 服务端要能读到「不要死线」，而不是把它当成没声明
+        const posted = (mailbox.post as any).mock.calls.at(-1)[0];
+        expect(posted.headers[RPC_HEADERS.TIMEOUT]).toBe('0');
+
+        // 本地定时器也不能存在：推进一分钟仍然 pending（旧实现是 30200ms 后报 504）
+        vi.advanceTimersByTime(60000);
+        let settled = false;
+        swallowed.then(() => { settled = true; });
+        await Promise.resolve();
+        expect(settled).toBe(false);
+
+        await zero.stop();
+        await swallowed;
+    });
+
     it('should handle AbortSignal', async () => {
         const controller = new AbortController();
         const fetchPromise = transport._fetch('tool', {}, 'act', 'id', {

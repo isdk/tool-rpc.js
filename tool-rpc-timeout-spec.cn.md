@@ -75,8 +75,28 @@ export interface RemoteFuncItem extends BaseFuncItem {
 
 1. **客户端**（`ClientToolTransport.fetch()`）：在“调用时手动指定的 `timeout`”与“工具元数据 `timeout`”之间取**较小值**；
    只有一个存在就用那一个。`streamIdleTimeout` 同理。结果通过 `rpc-timeout` 头发出。
-2. **服务端**（`RpcServerDispatcher.prepareContext()`）：`header 值 || 工具元数据 timeout || dispatcher.globalTimeout`（默认 30000ms）。
+2. **服务端**（`RpcServerDispatcher.prepareContext()`）：按优先级取第一个**配了**的值：
+   `header 值 → 工具元数据 timeout → dispatcher.globalTimeout`（默认 30000ms）。
    注意这里是**优先级回退**而非取小：header 一旦存在就直接采用（它已经是客户端算好的 min）。
+
+#### `0` 的语义：明确无死线
+
+每一级的 `0` 都是**显式声明**，与 `undefined`（没配）不同：
+
+| 写法 | 含义 |
+| :--- | :--- |
+| `timeout: undefined` | 继承下一级，最终落到 `globalTimeout`。 |
+| `timeout: 0` | **不要死线**：`globalTimeout` 也不参与。 |
+| `timeout: { value: 0 }` | 同上（长写法）。 |
+| `rpc-timeout: 0`（header） | 客户端明确声明无死线，服务端不拿 `globalTimeout` 兜底。 |
+| `globalTimeout: 0` | dispatcher 不设全局兵底。 |
+
+实现上就是 `readTimeoutHeader()` + `firstConfigured()`：只有 `undefined` / 读不出才算「没配」。
+以前写的是 `clientTimeout || toolTimeoutObj.value || this.globalTimeout`，`0 || x === x`，
+于是显式 `timeout: 0` 被隐式 `globalTimeout` 掉——与 `RpcDeadlineGuard`（`> 0` 才上弦）
+以及注释里「0 = 不开死线」的说法相矛盾（issue #8）。内置发现端点 `rpcApis` 因此不再声明
+`timeout: 0`（那个值以前根本无效，现在真生效了反而会让发现调用无限挂住）：
+**发现调用该被全局超时掩住。** 真的不能被打断的工具自己显式写 `timeout: 0`。
 
 另有两个与工具元数据无关的全局护栏：`dispatcher.globalTimeout`（兵底硬超时）与
 `dispatcher.maxTaskRuntimeMs`（默认 1 小时，后台任务的绝对运行上限）。

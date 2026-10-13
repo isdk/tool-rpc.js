@@ -243,7 +243,8 @@ describe('ServerToolTransport route table', () => {
 
       const tool = t.resolveFor('/a/x', RPC_APIS_TOOL_ID);
       expect(tool).toBeDefined();
-      expect(tool.timeout).toBe(0);
+      // 不自己定超时：它受 `globalTimeout` 管，没有豁免（issue #8）
+      expect(tool.timeout).toBeUndefined();
       expect(await tool.run()).toEqual({ listed: 'a' });
    });
 
@@ -377,15 +378,17 @@ describe('built-in rpcApis tool through the dispatcher', () => {
       expect(optedOut.data.func).toBeUndefined();
    });
 
-   it('is registered as a system tool with timeout 0 (not exempt, not timed out by the default)', () => {
+   it('is registered as a system tool that declares no timeout of its own (issue #8)', () => {
       const dispatcher = new RpcServerDispatcher();
       expect(dispatcher.getSystemTool(RPC_APIS_TOOL_ID)).toBeDefined();
-      expect(dispatcher.getSystemTool(RPC_APIS_TOOL_ID).timeout).toBe(0);
+      // 以前这里写 `timeout: 0` 并注释成「不被 globalTimeout 掩」，而实现是 `|| globalTimeout`。
+      // 现在 `0` 真的是「不要死线」，所以内置工具不拿它当「没配」：不声明，就继承 globalTimeout。
+      expect(dispatcher.getSystemTool(RPC_APIS_TOOL_ID).timeout).toBeUndefined();
    });
 
    it('a slow discovery handler is still cut off by globalTimeout', async () => {
       // 以前发现端点不经 dispatcher，globalTimeout 对它无效。现在它就是一个工具调用，
-      // 所以同一个死线控制器也管得到它（`timeout: 0` 只意味着不自己定一个，不是豁免）。
+      // 所以同一个死线控制器也管得到它（不声明自己的超时 = 继承，不是豁免）。
       const dispatcher = new RpcServerDispatcher({
          globalTimeout: 50,
          terminationGraceMs: 10,

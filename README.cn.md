@@ -305,6 +305,21 @@ V2 架构引入了**影子实例**机制，彻底解决了异步环境下的 `th
 2. **服务端**（`RpcServerDispatcher`）：优先用 header 里的值；没有则用工具自身的 `timeout`；都没有则用
    dispatcher 的 `globalTimeout`（默认 `30000` ms）。
 
+#### `0` 是「明确不要死线」
+
+上面每一级的 `0` 都是**显式值**，与「没配」不同：
+
+| 写法 | 含义 |
+| :--- | :--- |
+| `timeout: undefined`（不写） | 继承下一级，最终落到 `globalTimeout`。 |
+| `timeout: 0` | **完全不要死线**，`globalTimeout` 也管不着它。 |
+| `globalTimeout: 0` | dispatcher 不设全局兵底（未声明超时的工具也不被掩）。 |
+
+这与 Node 的 `server.requestTimeout = 0` 约定一致，`RpcDeadlineGuard` 本来就是「`> 0` 才上弦」。
+以前坏在协商时的 `||` 回退：`0 || globalTimeout` 结果是 `globalTimeout`，于是显式写了 `timeout: 0`
+的工具仍会被全局超时掩掉。客户端侧同理：元数据 `timeout: 0` 会发 `rpc-timeout: 0`，
+客户端无限等待（仍受 `AbortSignal` 与传输层连接限制约束）。
+
 开了 `keepAliveOnTimeout: true` 时，这个死线是**软死线**（任务转后台，客户端收到 `102 Processing`）；
 否则是**硬死线**（中止任务并返回 `408`）。
 

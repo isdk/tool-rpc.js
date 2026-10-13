@@ -344,8 +344,8 @@ describe('Browser Entry (@isdk/tool-rpc/browser)', () => {
     const { RpcApisResource, RPC_APIS_TOOL_ID } = await import('../src/browser')
     const apis = new RpcApisResource()
     expect(apis.name).toBe(RPC_APIS_TOOL_ID)
-    // 列清单是纯内存操作：不吃超时预算（timeout: 0），与 rpcTask 同一套约定
-    expect((apis as any).timeout).toBe(0)
+    // 不声明自己的超时：它与业务工具受同一套死线管（globalTimeout 兜底），没有豁免（issue #8）
+    expect((apis as any).timeout).toBeUndefined()
   })
 
   // ==========================================================

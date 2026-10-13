@@ -309,11 +309,30 @@ Concretely, the deadline is negotiated in two stages:
 With `keepAliveOnTimeout: true` that deadline becomes a *soft* deadline (the task is handed to the
 background and the client gets `102 Processing`); otherwise it is a *hard* deadline (abort + `408`).
 
+### `0` means "no deadline"
+
+`0` is an explicit value at every level of that chain — it is **not** the same as "unset":
+
+| What you write | Meaning |
+| :--- | :--- |
+| `timeout: undefined` (omitted) | Inherit the next level down, ultimately `globalTimeout`. |
+| `timeout: 0` | **No deadline at all.** `globalTimeout` does not apply either. |
+| `globalTimeout: 0` | The dispatcher sets no global backstop for tools that don't declare a timeout. |
+
+This matches Node's own `server.requestTimeout = 0` convention, and it is what
+`RpcDeadlineGuard` already did (`> 0` to arm a timer). What used to be broken was the `||`
+fallback in the negotiation: `0 || globalTimeout` evaluates to `globalTimeout`, so a tool that
+declared `timeout: 0` was silently cut off by the global timeout anyway. Long-running tools
+that genuinely must not be interrupted should declare `timeout: 0`.
+
+The client side mirrors it: a tool whose metadata timeout is `0` sends `rpc-timeout: 0` and the
+client waits indefinitely (subject to `AbortSignal` and the transport's own connection limits).
+
 ### 1. Configuration Format
 
 The `timeout` property accepts a shorthand and a longhand form:
 
-- **Shorthand (number)**: milliseconds, treated as a hard deadline.
+- **Shorthand (number)**: milliseconds, treated as a hard deadline. `0` disables the deadline.
 - **Longhand (object)**:
     - `value`: the hard deadline.
     - `streamIdleTimeout`: idle timeout for streaming (time to first byte, or the gap between chunks).
