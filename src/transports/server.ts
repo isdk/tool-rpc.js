@@ -5,7 +5,7 @@ import { RpcServerDispatcher } from './dispatcher';
 import { RpcTransportManager } from './server-manager';
 import { ToolRpcRequest, ToolRpcResponse } from './models';
 import { readBearerCredential, type RpcCredentialReader, type RpcIdentityContext, type RpcIdentityPolicy } from './identity';
-import { RPC_APIS_TOOL_ID, manifestItem, registryEntries } from './rpc-apis';
+import { RPC_APIS_TOOL_ID, manifestItem, manifestItems, registryEntries } from './rpc-apis';
 
 export interface ServerToolTransportOptions extends ToolTransportOptions {
   dispatcher?: RpcServerDispatcher;
@@ -427,7 +427,9 @@ export abstract class ServerToolTransport extends ToolTransport implements IServ
         const parts = layers.map(registry => {
           if (typeof registry.toJSON === 'function') {
             const json = registry.toJSON();
-            if (json) {return json;}
+            // 清单形态归注册表自己定，但「不导出 `func`」是框架的保证（issue #9）：
+            // 它交的每一条也要过 `manifestItem`，否则自定义注册表能绕过剔除。
+            if (json) {return manifestItems(json);}
           }
           const out: Record<string, any> = {};
           for (const [id, tool] of registryEntries(registry)) {

@@ -225,6 +225,17 @@ describe('ServerToolTransport route table', () => {
       expect(t.resolveFor('/a/shared', 'shared')).toMatchObject({ from: 'prefix' });
    });
 
+   it('a prefix registry\'s own toJSON() goes through the same stripping (issue #9)', () => {
+      const t = new TableProbe();
+      t.addRpcHandler('/a', {
+         registry: {
+            toJSON: () => ({ leaked: { name: 'leaked', func: 'function leaked() { return 1 }' } }),
+         },
+      });
+
+      expect(t.registryViewFor('/a').toJSON().leaked).toEqual({ name: 'leaked' });
+   });
+
    it('a custom discoveryHandler is that prefix\'s rpcApis implementation', async () => {
       const t = new TableProbe();
       t.addRpcHandler('/a');
@@ -309,6 +320,27 @@ describe('built-in rpcApis tool through the dispatcher', () => {
       const missing = await dispatcher.dispatch(request({ act: 'get', resId: 'nope' }));
       expect(missing.status).toBe(404);
       expect(missing.error?.code).toBe(404);
+   });
+
+   it('a registry-provided toJSON() manifest is stripped as well (issue #9)', async () => {
+      // 注册表自带 toJSON() 时，清单是它的返回值原样合并进来的——那就绕过了 issue #2 的剥离，
+      // 「不导出函数体」变成每个注册表自己的自觉，而不是框架保证。
+      const leaked = { name: 'leaked', func: 'function leaked() { return 1 }' };
+      const optedIn = { name: 'shown', func: 'function shown() { return 2 }', allowExportFunc: true };
+
+      const res = await new RpcServerDispatcher({
+         registry: { toJSON: () => ({ leaked, shown: optedIn }) },
+      }).dispatch(request());
+
+      expect(res.data!.leaked).toEqual({ name: 'leaked' });
+      // 清单条目自己标了 allowExportFunc 才算它 opt-in
+      expect(res.data!.shown.func).toContain('function shown');
+
+      // 异步清单同样要过一遍
+      const asyncRes = await new RpcServerDispatcher({
+         registry: { toJSON: async () => ({ leaked }) },
+      }).dispatch(request());
+      expect(asyncRes.data!.leaked.func).toBeUndefined();
    });
 
    it('a manifest entry carries no function body unless the tool opts in (issue #2)', async () => {

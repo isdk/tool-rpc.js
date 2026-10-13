@@ -52,8 +52,8 @@ export function* registryEntries(registry: any): Generator<[string, any]> {
  * 知道这一点（`if (!item.allowExportFunc) delete item.func`）；枚举路径以前不可达，所以从没暴露。
  * 这里与它对齐：默认剥掉 `func`，`allowExportFunc: true` 才导出。
  *
- * 只管**框架自己取用**的条目（枚举出的清单、`act: 'get'` 的单条）；注册表自带 `toJSON()`
- * 的清单形态仍归它自己定，框架不伸手。
+ * 框架取用的每一条都过这里：枚举出的清单、`act: 'get'` 的单条，以及**注册表自带
+ * `toJSON()` 返回来的每一条**（见 `manifestItems`，issue #9）。
  */
 export function manifestItem(tool: any): any {
   const item = (tool && typeof tool.toJSON === 'function') ? tool.toJSON() : tool;
@@ -69,6 +69,29 @@ export function manifestItem(tool: any): any {
   const copy: any = { ...item };
   delete copy.func;
   return copy;
+}
+
+/**
+ * 把注册表自己交的整张清单过一遍 `manifestItem`（issue #9）。
+ *
+ * 为什么需要它：清单合并时，会 `toJSON()` 的那一层是**返回值原样合并**的。只剥枚举路径的话，
+ * 一个自带 `toJSON()` 的注册表（或覆写了 `toJSON()` 的子类）仍然能把函数体发到发现端点——
+ * 于是「不导出 `func`」只是每个注册表的自觉，而不是框架的保证。Core 自己的
+ * `ServerTools.toJSON()` 早就剥了，所以内置路径看上去是安全的，缺口容易看漏。
+ *
+ * 形态不变：只逐条目剥，不改键名、不改顺序、不增删条目。`manifestItem` 对已剥过的条目
+ * 是幂等的，所以内置清单过这一遍不会变样。清单可以是 Promise（异步 `toJSON()`），
+ * 那时返回 Promise，由合并层照原来的方式等。
+ */
+export function manifestItems(json: any): any {
+  if (!json || typeof json !== 'object') {return json;}
+  if (typeof json.then === 'function') {return Promise.resolve(json).then(manifestItems);}
+
+  const out: Record<string, any> = {};
+  for (const [id, item] of Object.entries(json)) {
+    out[id] = manifestItem(item);
+  }
+  return out;
 }
 
 /**
@@ -121,7 +144,8 @@ export class RpcApisResource extends ServerTools {
   private listRegistry(registry: any): Record<string, any> | Promise<Record<string, any>> {
     if (typeof registry.toJSON === 'function') {
       const json = registry.toJSON();
-      if (json) {return json;}
+      // 注册表自带的清单也要剥函数体（issue #9）：形态归它，`func` 不归它
+      if (json) {return manifestItems(json);}
     }
 
     const out: Record<string, any> = {};

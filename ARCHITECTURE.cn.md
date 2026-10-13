@@ -79,6 +79,7 @@ static toJSON() {
 - **作于基类的兜底**：`isBaseApi` 只在 `this === ServerTools` 时生效，目的是让“直接挂在 `ServerTools.items` 上的非实例条目”
   仍能被发现；子类调用时它们会被排除，防止基础客户端尝试调用它无法理解的复杂 API。
 - **函数体默认不外泄**：除非工具声明 `allowExportFunc: true`，`func` 会在序列化前被删掉。
+  注册表自己覆写 `toJSON()` 也绕不过它：框架在合并清单前会把每一层交来的条目再过一遍剔除（`manifestItems`）。
 
 ### 2.2 静态继承与物理隔离 (Property Shadowing)
 

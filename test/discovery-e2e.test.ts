@@ -560,9 +560,19 @@ describe('discovery 不带函数体：allowExportFunc 才是显式导出', () =>
       new (MixedTools as any)('exported', { params: {}, func: () => 'exported body', isApi: true, allowExportFunc: true }).register()
       new (MixedTools as any)('private', { params: {}, func: () => 'private body', isApi: true }).register()
 
+      // 自带 `toJSON()` 的自定义注册表：清单形态它自己定，但函数体不由它决定（issue #9）
+      const customRegistry = {
+         get: (id: string) => (id === 'custom-leak' ? { name: 'custom-leak', run: () => 'ok' } : undefined),
+         toJSON: () => ({
+            'custom-leak': { name: 'custom-leak', func: 'function leak() { return "body" }' },
+            'custom-shown': { name: 'custom-shown', func: 'function shown() {}', allowExportFunc: true },
+         }),
+      }
+
       server = new HttpServerToolTransport()
       server.addRpcHandler('/tf', { registry: PlainToolFunc })
       server.addRpcHandler('/srv', { registry: MixedTools })
+      server.addRpcHandler('/custom', { registry: customRegistry })
 
       const port = await startOnKernelPort(server)
       root = `http://localhost:${port}`
@@ -587,6 +597,14 @@ describe('discovery 不带函数体：allowExportFunc 才是显式导出', () =>
 
       expect((apis.private as any).func).toBeUndefined()
       expect(typeof (apis.exported as any).func).toBe('string')
+   })
+
+   it('注册表自带 toJSON() 交上来的清单也剥函数体（issue #9）', async () => {
+      const apis = await new HttpClientToolTransport(`${root}/custom`).loadApis()
+
+      expect(apis['custom-leak']).toEqual({ name: 'custom-leak' })
+      // 条目自己标了 `allowExportFunc: true` 才算它 opt-in
+      expect(typeof (apis['custom-shown'] as any).func).toBe('string')
    })
 
    it('工具本身不受影响：清单是副本，没把工具的 `func` 抹掉', async () => {
