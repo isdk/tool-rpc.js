@@ -512,7 +512,7 @@ const scopes = ctx.identity?.attributes?.scopes;
 | 期 | 范围 | 对下游的影响 |
 |---|---|---|
 | **P0** | 三个文件 + 单测 + 名单 | 纯新增，零行为变化 |
-| **P1a** | 只加载体：`ToolRpcRequest.identity` / `ToolRpcContext.identity` + `dispatcher.prepareContext`（`private`，`src/transports/dispatcher.ts`，透传） | 零行为变化（基线 44 文件 / 539 测试可直接对照） |
+| **P1a** | 只加载体：`ToolRpcRequest.identity` / `ToolRpcContext.identity` + `dispatcher.prepareContext`（`private`，`src/transports/dispatcher.ts`，透传） | 零行为变化（基线测试可直接对照） |
 | **P1b** | 装调用点：`ServerToolTransport.identity` + `credentialReader` + `resolveRequestIdentity`；HTTP 与 Mailbox 提供 reader；§3 第 3/4 条 | 装了策略才改变行为；未装策略逐字节不变 |
 | **发布** | `release`（13 个新公开符号 = 公开面变化，`CHANGELOG.md` 与 `docs/api/**` 重生成；原定 11 个，另两个见 §18 末） | 下游只看到 dist |
 | **之后** | `tool-event` 收口（§12）+ `tool-rpc-fastify` 装配 `identity` 与它的 `credentialReader`（它已走 `processIncomingCall`，`fastify-server.ts`） | 在下游仓库，各自单独发布 |
@@ -617,7 +617,7 @@ export const createSSEIdentity = (o?: SSETokenIdentityOptions) =>
    （那张表保持两个文件）；`README.md` / `README.cn.md` 加使用者章节
    （先写两个默认实现与 §6 差异表，再写策略接口）；`AGENT.md` 同步。不写 tool-event 的事件协议细节。
 6. 基线（2026-10-12 实测）：`tsc -p tsconfig.release.json` exit 0；`tsc -p tsconfig.json` exit 0；
-   `vitest run` 44 文件 / 539 测试通过。
+   `vitest run` 全部通过。
 
 ---
 
@@ -643,7 +643,7 @@ export const createSSEIdentity = (o?: SSETokenIdentityOptions) =>
 
 新基线（2026-10-12 实测）：`tsc -p tsconfig.release.json` exit 0；`tsc -p tsconfig.json` exit 0；`eslint .` exit 0；
 `tsup --dts --dts-resolve` exit 0（`UNAUTHENTICATED = 401` 进 dist 的 d.ts，运行时 `RpcStatusCode[401] === 'UNAUTHENTICATED'`）；
-`vitest run` 48 文件 / 605 测试通过。
+`vitest run` 全部通过。
 
 ---
 
@@ -756,7 +756,7 @@ new RpcBearerPolicy({
 `RouteClaimOptions` 有它），现在转给 `claimRoute`，所以 mailbox 也能按前缀挂注册表。
 
 新基线（2026-10-12 实测）：`tsc -p tsconfig.json` 与 `tsc -p tsconfig.release.json` exit 0；`eslint .` exit 0；
-`vitest run` 50 文件 / 652 测试通过；`tsup`（含 `--dts --dts-resolve`）exit 0；
+`vitest run` 全部通过；`tsup`（含 `--dts --dts-resolve`）exit 0；
 `typedoc --plugin typedoc-plugin-markdown` 0 errors（16 条外部符号链接 warning，与本轮无关）。
 
 ---
