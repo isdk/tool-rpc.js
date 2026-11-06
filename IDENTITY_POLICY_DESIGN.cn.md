@@ -62,9 +62,7 @@ export type RpcCredentialReader<Req = any> = (req: Req) => string | undefined
  * （凭证协议的实现者是 RpcIdentityPolicy）。
  */
 export type RpcCredentialSource = () =>
-  | string
-  | undefined
-  | Promise<string | undefined>
+  string | undefined | Promise<string | undefined>
 
 /**
  * 交给策略的判定材料：transport 从 req（必要时 res）备出来的输入。req/res 是逃生口，框架侧不解析它们。
