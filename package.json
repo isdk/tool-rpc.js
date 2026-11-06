@@ -108,7 +108,7 @@
     "doc:md": "typedoc --plugin typedoc-plugin-markdown --out docs/api",
     "style": "pnpm run format && pnpm run lint",
     "style:fix": "pnpm run format:fix && pnpm run lint:fix",
-    "format": "prettier --check \"**/*.{json,jsonc,yaml,yml}\"",
+    "format": "prettier --check \"**/*.{json,jsonc,yaml,yml,md}\"",
     "format:fix": "prettier --write \"**/*.{json,jsonc,yaml,yml}\"",
     "format:docs": "prettier --write \"**/*.md\"",
     "format:code": "prettier --write \"**/*.{ts,tsx,js,jsx}\"",
