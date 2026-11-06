@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, unlinkSync, w
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { nanoid } from '@isdk/hash'
-import { Mailbox, MemoryProvider } from '@mboxlabs/mailbox'
+import { Capability, Mailbox, MemoryProvider } from '@mboxlabs/mailbox'
 import type {
   IMailboxProvider,
   MailMessage,
@@ -161,13 +161,23 @@ class FileProvider implements IMailboxProvider {
     return nanoid()
   }
 
+  /**
+   * 这个双件的「认得」= 目录曾被动过，或现在正有人在轮询它。
+   *
+   * `exists` 在契约里是「有过消息 / 订阅 / 活动记录」，所以订阅也算：只报目录不报订阅，
+   * 「订了但还没人来」就会被误报成「没这个地址」。问不到的时候不报 `online` + 0：
+   * 诊断页分不出「地址写错了」与「信箱空着」（内核 issue#4）。
+   */
   async status(address: URL): Promise<MailboxStatus> {
     const dir = this.getAddressDir(address)
-    const unreadCount = existsSync(dir) ? readdirSync(dir).filter(f => f.endsWith('.json')).length : 0
-    return {
-      state: 'online',
-      unreadCount,
+    const dirExists = existsSync(dir)
+    const subscribed = this.subscriptions.has(this.getTopicKey(address))
+    const unreadCount = dirExists ? readdirSync(dir).filter(f => f.endsWith('.json')).length : 0
+
+    if (!dirExists && !subscribed) {
+      return { state: 'unknown', exists: false, unreadCount, message: `No letter or subscription is known for '${this.getTopicKey(address)}'.` }
     }
+    return { state: 'online', exists: true, unreadCount }
   }
 }
 
@@ -176,6 +186,26 @@ let testSeq = 0
 function uniqueAddr(base: string): string {
   testSeq++
   return `${base}-${testSeq}-${Date.now()}`
+}
+
+/**
+ * 一个会答「离线」的 `MemoryProvider`，只为测存活态而存在。
+ *
+ * 为什么测试得自己造一个：`mem:` 是进程内总线，**没有 offline / online 这回事**——它永远连得上。
+ * `MemoryProvider#_status()` 里的 `online` 说的是「这条地址我有活动记录」，不是「broker 可达」。
+ * 所以想测「provider 说离线，运维看到什么」，只能扩展它：存活态是 provider 的判定，内核只转述。
+ */
+class MemoryProviderWithLiveness extends MemoryProvider {
+  /** 模拟 broker 的可达性；`online` 之外的一档让 provider 连「认不认得这条地址」都答不上。 */
+  liveness: 'online' | 'offline' | 'degraded' = 'online'
+
+  protected override async _status(address: URL): Promise<MailboxStatus> {
+    const base = await super._status(address)
+    if (this.liveness === 'online') return base
+    // `exists` 不给：问不到不等于不存在。给了 false 就是替 broker 编一份它没说过的答复。
+    const { exists: _notAnswered, ...rest } = base
+    return { ...rest, state: this.liveness, message: 'broker unreachable' }
+  }
 }
 
 // ── Tests ──
@@ -439,33 +469,116 @@ describe('Mailbox Provider Integration (Memory + File)', () => {
       memAddr1 = uniqueAddr('mem://user@memory/status')
     })
 
-    it('should return online status for both providers', async () => {
-      const memStatus = await mailbox!.status(memAddr1)
-      expect(memStatus.state).toBe('online')
-      expect(memStatus.unreadCount).toBeTypeOf('number')
+    // [语义] 一条地址的完整一生：没人碰过 = unknown + exists:false；一次 post 或一次订阅就把它
+    // 叫醒 = online + exists:true。三段写在同一条用例里，是为了让「online 是谁让地址活起来的」
+    // 与「unknown 不是失败」在同一个镜头里：把 unknown 写成 online，诊断页就只剩猜（内核 issue#4）。
+    it('walks an address from unknown to online, and never pretends before that', async () => {
+      const memBefore = await mailbox!.status(memAddr1)
+      expect(memBefore.state).toBe('unknown')
+      expect(memBefore.exists).toBe(false)
+      expect(memBefore.unreadCount).toBe(0)
 
-      const fileStatus = await mailbox!.status(fileAddr1)
-      expect(fileStatus.state).toBe('online')
-      expect(fileStatus.unreadCount).toBeTypeOf('number')
+      const fileBefore = await mailbox!.status(fileAddr1)
+      expect(fileBefore.state).toBe('unknown')
+      expect(fileBefore.exists).toBe(false)
+      expect(fileBefore.unreadCount).toBe(0)
+
+      // 活起来可以是「有人投过」
+      await mailbox!.post({ from: 'mem://sender@memory/status', to: memAddr1, body: { n: 1 } })
+      await mailbox!.post({ from: 'file:///tmp/s', to: fileAddr1, body: { n: 1 } })
+
+      const memAfter = await mailbox!.status(memAddr1)
+      expect(memAfter.state).toBe('online')
+      expect(memAfter.exists).toBe(true)
+      expect(memAfter.unreadCount).toBe(1)
+
+      const fileAfter = await mailbox!.status(fileAddr1)
+      expect(fileAfter.state).toBe('online')
+      expect(fileAfter.exists).toBe(true)
+      expect(fileAfter.unreadCount).toBe(1)
+
+      // 也可以是「有人在听」——一封都没投过也算活动记录
+      const listenAddr = uniqueAddr('file:///tmp/mailbox/status-listening')
+      expect((await mailbox!.status(listenAddr)).exists).toBe(false)
+      const sub = await mailbox!.subscribe(listenAddr, () => {})
+      try {
+        const listening = await mailbox!.status(listenAddr)
+        expect(listening.state).toBe('online')
+        expect(listening.exists).toBe(true)
+        expect(listening.unreadCount).toBe(0)
+      } finally {
+        await sub.unsubscribe()
+      }
+    })
+
+    // [扩展面] 真正的「离线」是 provider 报上来的，内核既不推导也不改写。
+    // `MemoryProvider` 自己永远答不出 offline（进程内没有可达性这回事），所以这里用的是
+    // 测试里扩展出来的 provider——需要测的东西在谁手里，就扩展谁。
+    it('relays whatever liveness the provider claims', async () => {
+      const flaky = new MemoryProviderWithLiveness()
+      const mbox = new Mailbox()
+      mbox.registerProvider(flaky)
+      mailboxes.push(mbox)
+      const addr = uniqueAddr('mem://liveness@memory/status')
+
+      // 继承来的部分照旧：谁都不认得的地址仍是 unknown
+      expect((await mbox.status(addr)).state).toBe('unknown')
+
+      await mbox.post({ from: 'mem://sender@memory/status', to: addr, body: { n: 1 } })
+      flaky.liveness = 'offline'
+
+      const offline = await mbox.status(addr)
+      expect(offline.state).toBe('offline')
+      expect(offline.message).toBe('broker unreachable')
+      // 内核不许拿活动记录去推翻 provider 的存活答复（该 unknown 的地方不许替它改成 online），
+      // 也不许把「问不到」补成 exists:false
+      expect(offline.exists).toBeUndefined()
+      expect(offline.unreadCount).toBe(1)
+    })
+
+    // [扩展面] 未声明 = 这个操作不存在（D6）：内核不探方法、不猜。撤掉声明后就算地址
+    // 确实活着，答复也只有「这个 provider 不支持状态查询」——而且 `exists` 依旧不给。
+    it('says "does not support status queries" when the status capability is withdrawn', async () => {
+      const blind = new MemoryProvider()
+      // 能力是运行期数据：改集合就是改声明，不需要一个新类
+      blind.supports.delete(Capability.Status)
+      const mbox = new Mailbox()
+      mbox.registerProvider(blind)
+      mailboxes.push(mbox)
+      const addr = uniqueAddr('mem://blind@memory/status')
+
+      // 先让地址真的活着：否则这条绿只是因为「反正也没记录」，测不到「声明压过实现」
+      await mbox.post({ from: 'mem://sender@memory/status', to: addr, body: { n: 1 } })
+
+      const status = await mbox.status(addr)
+      expect(status.state).toBe('unknown')
+      expect(status.exists).toBeUndefined()
+      expect(status.message).toMatch(/does not support status queries/)
     })
 
     it('should return correct unread count for FileProvider', async () => {
-      await mailbox!.post({ from: 'file:///tmp/s', to: fileAddr1, body: { n: 1 } })
-      await mailbox!.post({ from: 'file:///tmp/s', to: fileAddr1, body: { n: 2 } })
+      // 自己开一个地址：上一段已经往 fileAddr1 投过一封，共用地址就是让两条用例互相看账本
+      const countedAddr = uniqueAddr('file:///tmp/mailbox/status-count')
+
+      await mailbox!.post({ from: 'file:///tmp/s', to: countedAddr, body: { n: 1 } })
+      await mailbox!.post({ from: 'file:///tmp/s', to: countedAddr, body: { n: 2 } })
 
       await new Promise(resolve => setTimeout(resolve, 150))
 
-      const status = await fileProvider.status(new URL(fileAddr1))
+      const status = await fileProvider.status(new URL(countedAddr))
       expect(status.unreadCount).toBe(2)
 
-      await fileProvider.fetch(new URL(fileAddr1))
+      await fileProvider.fetch(new URL(countedAddr))
 
-      const afterOne = await fileProvider.status(new URL(fileAddr1))
+      const afterOne = await fileProvider.status(new URL(countedAddr))
       expect(afterOne.unreadCount).toBe(1)
 
-      await fileProvider.fetch(new URL(fileAddr1))
-      const afterAll = await fileProvider.status(new URL(fileAddr1))
+      await fileProvider.fetch(new URL(countedAddr))
+      const afterAll = await fileProvider.status(new URL(countedAddr))
       expect(afterAll.unreadCount).toBe(0)
+      // 队列空了 ≠ 地址不存在：这一格正是 `unknown` 与 `online` 要分开的理由
+      expect(afterAll.state).toBe('online')
+      expect(afterAll.exists).toBe(true)
     })
   })
 })
