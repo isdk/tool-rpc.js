@@ -114,7 +114,7 @@
     "format:code": "prettier --write \"**/*.{ts,tsx,js,jsx}\"",
     "lint": "eslint .",
     "lint:fix": "pnpm run lint --fix",
-    "test": "FORCE_COLOR=1 vitest run",
+    "test": "pnpm run typecheck && FORCE_COLOR=1 vitest run",
     "typecheck": "tsc -p tsconfig.json",
     "release": "pnpm run clean && pnpm run build && git add -f docs/api && git ci -m 'docs: update API docs' && pnpm dlx commit-and-tag-version -s",
     "release.alpha": "npm run release -- --prerelease alpha"
