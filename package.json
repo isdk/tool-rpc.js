@@ -109,7 +109,7 @@
     "style": "pnpm run format && pnpm run lint",
     "style:fix": "pnpm run format:fix && pnpm run lint:fix",
     "format": "prettier --check \"**/*.{json,jsonc,yaml,yml,md}\"",
-    "format:fix": "prettier --write \"**/*.{json,jsonc,yaml,yml}\"",
+    "format:fix": "prettier --write \"**/*.{json,jsonc,yaml,yml,md}\"",
     "format:docs": "prettier --write \"**/*.md\"",
     "format:code": "prettier --write \"**/*.{ts,tsx,js,jsx}\"",
     "lint": "eslint .",
