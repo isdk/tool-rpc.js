@@ -4,12 +4,16 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, unlinkSync, w
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { nanoid } from '@isdk/hash'
-import { Capability, Mailbox, MemoryProvider } from '@mboxlabs/mailbox'
+import { Capability, InvalidFetchOptionsError, Mailbox, MemoryProvider, normalizePeekLimit } from '@mboxlabs/mailbox'
 import type {
+  FetchOptions,
   IMailboxProvider,
   MailMessage,
+  ManualAckFetchOptions,
   AckableMailMessage,
   MailboxStatus,
+  PeekFetchOptions,
+  PlainFetchOptions,
   Subscription,
 } from '@mboxlabs/mailbox'
 
@@ -119,9 +123,48 @@ class FileProvider implements IMailboxProvider {
     }
   }
 
-  async fetch(address: URL, options: { manualAck: true }): Promise<AckableMailMessage | null>
-  async fetch(address: URL, options?: { manualAck?: false }): Promise<MailMessage | null>
-  async fetch(address: URL, options?: { manualAck?: boolean }): Promise<MailMessage | AckableMailMessage | null> {
+  /**
+   * 重载集必须与 `IMailboxProvider#fetch` 对齐——**包括 `{ peek: true }` 那一支**。
+   *
+   * 只补个 `peek?: boolean` 不够：peek 返回的是**副本数组**，与另两支单条的形状不同。
+   * 而“漂了”不是编译洁痑：`{ peek: true }` 落进隐式 ACK 那一支就是把消息**取走**，
+   * 而调用方以为自己在看一眼。基类里那道 peek 入口（能力门 + 矛盾选项 + `limit` 校验）
+   * 直接实现接口的人一行也继承不到，得自己写。
+   */
+  async fetch(address: URL, options: PeekFetchOptions): Promise<MailMessage[]>
+  async fetch(address: URL, options: ManualAckFetchOptions): Promise<AckableMailMessage | null>
+  async fetch(address: URL, options?: PlainFetchOptions): Promise<MailMessage | null>
+  async fetch(address: URL, options?: FetchOptions): Promise<MailMessage | AckableMailMessage | MailMessage[] | null> {
+    if (options?.peek) {
+      // 只读快照：不出队、不建 in-flight、不动活动时间。三样缺一条就不是 peek。
+      // 校验复用内核导出的 `normalizePeekLimit`：基类用的就是它，自己推一份“差不多”的
+      // 规矩只会多一个漂移源。
+      const limit = normalizePeekLimit(options.limit)
+      if (options.manualAck) {
+        throw new InvalidFetchOptionsError(
+          '`fetch({ peek: true, manualAck: true })` is contradictory: a peeked message is never handed to a consumer, ' +
+          'so there is nothing to acknowledge. Drop one of the two options.',
+        )
+      }
+
+      const peekDir = this.getAddressDir(address)
+      // 不 mkdir：为了“看一眼”就把目录建出来，`status()` 就得把「没这个地址」答成
+      // 「有，但是空的」——那正是内核在 issue#4 里拆掉的假承诺。
+      if (!existsSync(peekDir)) return []
+
+      const queue = readdirSync(peekDir).filter(f => f.endsWith('.json')).sort()
+      const seen: MailMessage[] = []
+      for (const file of limit === undefined ? queue : queue.slice(0, limit)) {
+        try {
+          // 每条重新读盘 ⇒ 递出去的大自然是一份副本，摸不到队列本体
+          seen.push(JSON.parse(readFileSync(join(peekDir, file), 'utf-8')))
+        } catch {
+          // 读不动的那一条（可能正在被写）跳过——与轮询循环同一套规矩
+        }
+      }
+      return seen
+    }
+
     const dir = this.getAddressDir(address)
     if (!existsSync(dir)) return null
 
@@ -421,6 +464,91 @@ describe('Mailbox Provider Integration (Memory + File)', () => {
 
       const gone = await fileProvider.fetch(new URL(fileAddr1))
       expect(gone).toBeNull()
+    })
+  })
+
+  /**
+   * `fetch({ peek: true })` 是只读快照（内核 issue#4）：返回**副本数组**，不出队、
+   * 不建 in-flight、不动活动时间。这三条缺一条就不是 peek。
+   *
+   * 这组用例的意义不在 `FileProvider` 本身：它是**直接实现 `IMailboxProvider` 的活样例**。
+   * 上一轮 peek 语义落地时它漏了 `PeekFetchOptions` 重载，而没人看见——因为基类的 peek 入口
+   * （能力门 + 矛盾选项报错 + `limit` 校验）全在 `MailboxProvider#fetch` 里，直接实现接口的人
+   * 一行也继承不到：`{ peek: true }` 会掉进隐式 ACK 那一支，**把消息取走**，而调用方以为自己在看一眼。
+   */
+  describe('FileProvider Peek (只读快照)', () => {
+    beforeAll(() => {
+      mailbox = createFreshMailbox()
+      fileAddr1 = uniqueAddr('file:///tmp/mailbox/peek')
+    })
+
+    it('peek 返回副本数组，一条不取走：unreadCount 不动，紧接着普通 fetch 还能取到同一份', async () => {
+      await mailbox!.post({ from: 'file:///tmp/s', to: fileAddr1, body: { n: 1 } })
+      await mailbox!.post({ from: 'file:///tmp/s', to: fileAddr1, body: { n: 2 } })
+      await new Promise(resolve => setTimeout(resolve, 150))
+
+      const before = await fileProvider.status(new URL(fileAddr1))
+      expect(before.unreadCount).toBe(2)
+
+      const seen = await mailbox!.fetch(fileAddr1, { peek: true })
+      expect(Array.isArray(seen)).toBe(true)
+      expect(seen.map(m => m.body)).toEqual([{ n: 1 }, { n: 2 }])
+      // 只读快照不交付，所以没有东西可以处置：给个句柄就是让人 ack 一条从没送出去的信
+      expect((seen[0] as unknown as AckableMailMessage).ack).toBeUndefined()
+
+      const after = await fileProvider.status(new URL(fileAddr1))
+      expect(after.unreadCount).toBe(before.unreadCount)
+
+      const pulled = await mailbox!.fetch(fileAddr1)
+      expect(pulled!.body).toEqual({ n: 1 })
+    })
+
+    it('空队列的 peek 是 []，不是 null：只读快照没有「取不到」，只有「看到几条」', async () => {
+      const emptyAddr = uniqueAddr('file:///tmp/mailbox/peek-empty')
+      await mailbox!.post({ from: 'file:///tmp/s', to: emptyAddr, body: { n: 1 } })
+      await mailbox!.fetch(emptyAddr)
+
+      expect(await mailbox!.fetch(emptyAddr, { peek: true })).toEqual([])
+    })
+
+    it('limit 限的是「看几条」，不是「取走几条」', async () => {
+      const limitedAddr = uniqueAddr('file:///tmp/mailbox/peek-limit')
+      for (const n of [1, 2, 3]) {
+        await mailbox!.post({ from: 'file:///tmp/s', to: limitedAddr, body: { n } })
+      }
+      await new Promise(resolve => setTimeout(resolve, 150))
+
+      const two = await mailbox!.fetch(limitedAddr, { peek: true, limit: 2 })
+      expect(two.map(m => m.body)).toEqual([{ n: 1 }, { n: 2 }])
+      expect((await fileProvider.status(new URL(limitedAddr))).unreadCount).toBe(3)
+
+      // 非法 limit 得报错：`limit: -1` 静默返回全部，与「看两条」差一个队列那么远
+      await expect(mailbox!.fetch(limitedAddr, { peek: true, limit: -1 })).rejects.toThrow(/limit/i)
+    })
+
+    it('peek + manualAck 是矛盾选项，必须报错而不是默默取走一条', async () => {
+      await mailbox!.post({ from: 'file:///tmp/s', to: fileAddr1, body: { contradictory: true } })
+      await new Promise(resolve => setTimeout(resolve, 150))
+      const unread = (await fileProvider.status(new URL(fileAddr1))).unreadCount
+
+      await expect(
+        fileProvider.fetch(new URL(fileAddr1), { peek: true, manualAck: true }),
+      ).rejects.toThrow(InvalidFetchOptionsError)
+
+      // 报错不算完成：报错了还把东西取走，调用方看到的仍然是个空队列
+      expect((await fileProvider.status(new URL(fileAddr1))).unreadCount).toBe(unread)
+    })
+
+    it('peek 不创造地址：没投过也没订过，问过之后仍然是 unknown / exists:false', async () => {
+      const neverUsed = uniqueAddr('file:///tmp/mailbox/peek-never-used')
+
+      expect(await mailbox!.fetch(neverUsed, { peek: true })).toEqual([])
+
+      // 只为“看一眼”就把目录建出来，`status()` 就会把「没这个地址」答成「有，但是空的」——
+      // 那正是内核在 issue#4 里拆掉的假承诺。
+      const status = await mailbox!.status(neverUsed)
+      expect(status.state).toBe('unknown')
+      expect(status.exists).toBe(false)
     })
   })
 
