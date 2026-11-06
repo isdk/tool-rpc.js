@@ -70,7 +70,7 @@ class FakeMailbox {
     return Promise.resolve(settle());
   }
 
-  /** broker 回话了。 */
+  /** provider 答话了。 */
   public settleSubscribe(): void {
     const release = this.release;
     this.release = null;
@@ -240,7 +240,7 @@ describe('MailboxServerTransport（push 模式）：先订阅，再清积压', (
       transport._start({ address: 'mem://bot@mailbox/api/v1' }),
       transport._start({ address: 'mem://bot@mailbox/api/v1' }),
     ])
-    // 排队：第一次先建立，第二次是重启 —— 两次都要 broker 回话
+    // 排队：第一次先建立，第二次是重启 —— 两次都要等 provider 答话
     await until(() => mailbox.subscribeCalls > 0, '第一次 subscribe 已发起')
     mailbox.settleSubscribe()
     await until(() => mailbox.subscribeCalls > 1, '第二次 subscribe 已发起')
