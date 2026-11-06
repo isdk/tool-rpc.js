@@ -387,13 +387,15 @@ describe('MailboxServerTransport / MailboxClientTransport V2 Test', () => {
   });
 
   it('should reject requests without rpc-fn header', async () => {
-    const responsePromise = new Promise<any>((resolve) => {
-      const sub = mailbox.subscribe(clientAddress, (msg) => {
-        if (msg.headers?.['req-id'] === 'no-fn-id') {
-          sub.unsubscribe();
-          resolve(msg.body);
-        }
-      });
+    // 先建订阅、再发请求：`mem:` 一条消息只走一条路（有订阅者才推送，否则入队）。
+    // 订阅还卡在 await 里时 post，响应就静静躺在队列里，下面的 Promise 永远不 resolve。
+    let resolve!: (value: any) => void;
+    const responsePromise = new Promise<any>((settled) => { resolve = settled });
+    const sub = await mailbox.subscribe(clientAddress, (msg) => {
+      if (msg.headers?.['req-id'] === 'no-fn-id') {
+        sub.unsubscribe();
+        resolve(msg.body);
+      }
     });
 
     await mailbox.post({
@@ -454,13 +456,15 @@ describe('MailboxServerTransport / MailboxClientTransport V2 Test', () => {
       headers: { 'rpc-fn': 'calculator', 'rpc-act': 'post', 'req-id': 'restart-test' }
     });
 
-    const responsePromise = new Promise<any>((resolve) => {
-      const sub = mailbox.subscribe(clientAddress, (msg) => {
-        if (msg.headers?.['req-id'] === 'restart-test') {
-          sub.unsubscribe();
-          resolve(msg.body);
-        }
-      });
+    // 先建订阅、再发请求：`mem:` 一条消息只走一条路（有订阅者才推送，否则入队）。
+    // 订阅还卡在 await 里时 post，响应就静静躺在队列里，下面的 Promise 永远不 resolve。
+    let resolve!: (value: any) => void;
+    const responsePromise = new Promise<any>((settled) => { resolve = settled });
+    const sub = await mailbox.subscribe(clientAddress, (msg) => {
+      if (msg.headers?.['req-id'] === 'restart-test') {
+        sub.unsubscribe();
+        resolve(msg.body);
+      }
     });
 
     await serverTransport.start();
@@ -476,7 +480,7 @@ describe('MailboxServerTransport / MailboxClientTransport V2 Test', () => {
       clientAddress: 'mem://stopper@client/inbox',
       timeout: 5000,
     });
-    (stopTransport as any).subscription = mailbox.subscribe(
+    (stopTransport as any).subscription = await mailbox.subscribe(
       (stopTransport as any).clientAddress,
       (stopTransport as any).onResponse.bind(stopTransport)
     );
@@ -532,14 +536,16 @@ describe('MailboxServerTransport / MailboxClientTransport V2 Test', () => {
 
   describe('Strict Mode and req-id logic', () => {
     it('should reject request without req-id in default Strict Mode', async () => {
-      const responsePromise = new Promise<any>((resolve) => {
-        const sub = mailbox.subscribe(clientAddress, (msg) => {
-          // 在严格模式下，如果没有 req-id，服务端会回传 msg.body.error
-          if (msg.body?.error) {
-            sub.unsubscribe();
-            resolve(msg.body);
-          }
-        });
+      // 先建订阅、再发请求：`mem:` 一条消息只走一条路（有订阅者才推送，否则入队）。
+      // 订阅还卡在 await 里时 post，响应就静静躺在队列里，下面的 Promise 永远不 resolve。
+      let resolve!: (value: any) => void;
+      const responsePromise = new Promise<any>((settled) => { resolve = settled });
+      const sub = await mailbox.subscribe(clientAddress, (msg) => {
+        // 在严格模式下，如果没有 req-id，服务端会回传 msg.body.error
+        if (msg.body?.error) {
+          sub.unsubscribe();
+          resolve(msg.body);
+        }
       });
 
       // 手动构造一个没有 req-id 的请求
@@ -570,14 +576,16 @@ describe('MailboxServerTransport / MailboxClientTransport V2 Test', () => {
       fallbackServer.addRpcHandler(fallbackServerAddress);
       await fallbackServer.start();
 
-      const responsePromise = new Promise<any>((resolve) => {
-        const sub = mailbox.subscribe(clientAddress, (msg) => {
-          // 这里检查 msg.headers['req-id'] 是否等于原始消息的 id
-          if (msg.headers?.['req-id']?.startsWith('msg-')) {
-            sub.unsubscribe();
-            resolve(msg.body);
-          }
-        });
+      // 先建订阅、再发请求：`mem:` 一条消息只走一条路（有订阅者才推送，否则入队）。
+      // 订阅还卡在 await 里时 post，响应就静静躺在队列里，下面的 Promise 永远不 resolve。
+      let resolve!: (value: any) => void;
+      const responsePromise = new Promise<any>((settled) => { resolve = settled });
+      const sub = await mailbox.subscribe(clientAddress, (msg) => {
+        // 这里检查 msg.headers['req-id'] 是否等于原始消息的 id
+        if (msg.headers?.['req-id']?.startsWith('msg-')) {
+          sub.unsubscribe();
+          resolve(msg.body);
+        }
       });
 
       await mailbox.post({
@@ -622,13 +630,15 @@ describe('MailboxServerTransport / MailboxClientTransport V2 Test', () => {
 
     it('should catch RpcError thrown during validation and return structured error response', async () => {
       // Trigger validation error: missing toolId
-      const responsePromise = new Promise<any>((resolve) => {
-        const sub = mailbox.subscribe(clientAddress, (msg) => {
-          if (msg.headers?.['req-id'] === 'bad-req') {
-            sub.unsubscribe();
-            resolve(msg.body);
-          }
-        });
+      // 先建订阅、再发请求：`mem:` 一条消息只走一条路（有订阅者才推送，否则入队）。
+      // 订阅还卡在 await 里时 post，响应就静静躺在队列里，下面的 Promise 永远不 resolve。
+      let resolve!: (value: any) => void;
+      const responsePromise = new Promise<any>((settled) => { resolve = settled });
+      const sub = await mailbox.subscribe(clientAddress, (msg) => {
+        if (msg.headers?.['req-id'] === 'bad-req') {
+          sub.unsubscribe();
+          resolve(msg.body);
+        }
       });
 
       await mailbox.post({

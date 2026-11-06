@@ -1,7 +1,7 @@
 import { ClientToolTransport, ClientToolTransportOptions } from "./client";
 import { ActionName } from "../consts";
 import { RPC_HEADERS } from "./models";
-import { Mailbox, MailMessage } from '@mboxlabs/mailbox';
+import { Mailbox, MailMessage, Subscription } from '@mboxlabs/mailbox';
 import { uuidv4 } from '@isdk/hash';
 
 export interface MailboxClientTransportOptions extends ClientToolTransportOptions {
@@ -27,7 +27,20 @@ export class MailboxClientTransport extends ClientToolTransport {
   protected serverAddress: string;
   protected clientAddress: string;
   protected pendingRequests: Map<string, PendingRequest> = new Map();
-  protected subscription: any;
+  /**
+   * 已生效的订阅。类型不是 `any`：**异步化之后这个类型就是防线**。
+   *
+   * `this.subscription = this.mailbox.subscribe(...)`（漏 `await`）在 `any` 下编译不报错，
+   * 只在 `stop()` 时炸一句 `unsubscribe is not a function`。写回真类型后同一句漏 await 直接编译不过。
+   */
+  protected subscription: Subscription | null = null;
+  /**
+   * `start()` 的幂等锁。`if (!this.subscription)` 那种双检在 await 之后挡不住任何东西：
+   * 并发的第二个 `start()` 看到的仍是 `null`，于是同一个地址上挂两份订阅（每份响应会被处理两次）。
+   */
+  private starting: Promise<void> | null = null;
+  /** `stop()` 的代次：订阅还卡在 await 里时 `stop()` 看不见它，靠这个号让 start() 自己收尾。 */
+  private generation = 0;
   protected timeout: any;
   protected isInternalMailbox = false;
 
@@ -53,10 +66,25 @@ export class MailboxClientTransport extends ClientToolTransport {
   }
 
   public async start(): Promise<void> {
-    await this.mailbox.start?.();
-    if (!this.subscription) {
-      this.subscription = this.mailbox.subscribe(this.clientAddress, this.onResponse.bind(this));
-    }
+    // 并发 start 共享同一次建立过程（而不是各订一份）
+    if (this.starting) { return this.starting }
+    const generation = this.generation;
+    const run = async (): Promise<void> => {
+      await this.mailbox.start?.();
+      if (this.subscription || generation !== this.generation) {
+        return; // 已经订上了，或者 stop() 在 await 里跑过了——别再订
+      }
+      // await 才是「订阅已生效」：之前递出去的只是一个 Promise
+      const subscription = await this.mailbox.subscribe(this.clientAddress, this.onResponse.bind(this));
+      if (generation !== this.generation) {
+        // stop() 就在上面那个 await 里跑过，它无从拆这条还没登记的订阅；由这里收尾。
+        await subscription.unsubscribe();
+        return;
+      }
+      this.subscription = subscription;
+    };
+    this.starting = run().finally(() => { this.starting = null });
+    return this.starting;
   }
 
   protected onResponse(message: MailMessage) {
@@ -187,6 +215,8 @@ export class MailboxClientTransport extends ClientToolTransport {
   }
 
   public async stop(): Promise<void> {
+    // 代次先 +1：正在 await 里的 start() 要能看出「这次启动已经作废了」
+    this.generation++;
     if (this.subscription) {
       await this.subscription.unsubscribe();
       this.subscription = null;

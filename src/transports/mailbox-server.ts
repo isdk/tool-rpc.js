@@ -1,5 +1,5 @@
 import { RouteClaimOptions, ServerToolTransport, ServerToolTransportOptions } from './server';
-import { Mailbox, MailMessage } from '@mboxlabs/mailbox';
+import { Mailbox, MailMessage, Subscription } from '@mboxlabs/mailbox';
 import { ToolRpcRequest, ToolRpcResponse, RPC_HEADERS, RpcStatusCode, RpcError } from './models';
 
 export interface MailboxServerTransportOptions extends ServerToolTransportOptions {
@@ -10,12 +10,27 @@ export interface MailboxServerTransportOptions extends ServerToolTransportOption
   pullInterval?: number;
 }
 
+const noop = (): void => { /* 串行化链上吞掉上一次的结果：失败过一次不该断送后面的启动 */ }
+
 export class MailboxServerTransport extends ServerToolTransport {
   protected mailbox!: Mailbox;
   protected listenAddress: string = '';
   /** 轮询循环只报一次错：服务端挂掉与「没有消息」在外部完全一样，不能静默吞。 */
   protected pullLoopErrored = false;
-  protected subscription: any;
+  /**
+   * 已生效的订阅。类型不是 `any`：**异步化之后这个类型就是防线**——
+   * `this.subscription = this.mailbox.subscribe(...)`（漏 `await`）在 `any` 下编译不报错，
+   * 只会在 `stop()` 时炸一句 `unsubscribe is not a function`，同时默默把「先订阅再 drain」的顺序丢掉。
+   */
+  protected subscription: Subscription | null = null;
+  /**
+   * 「这次启动还算不算」的代次 + `_start` 的串行化链。
+   *
+   * 异步化之前不需要这两样：`subscribe()` 是同步的，所以 `_start` 里「先订阅、再
+   * drainBacklog」的顺序天然成立，`stop()` 也永远看得见已建立的订阅。现在两样都得自己写。
+   */
+  private generation = 0;
+  private startChain: Promise<void> = Promise.resolve();
   protected mode: 'push' | 'pull' = 'push';
   protected pullInterval: number = 1000;
   protected isRunning: boolean = false;
@@ -190,18 +205,38 @@ export class MailboxServerTransport extends ServerToolTransport {
     const address = options?.address || this.listenAddress;
     if (!address) { throw new Error('MailboxServerTransport: address is required to start'); }
 
+    // 并发 `_start` **排队**执行，而不是各订一份；最后一个 `_start` 说话算数（与既有
+    // 「已在跑就先 stop」的重启语义一致）。链上某一次失败不许断送后面的启动。
+    const step = this.startChain.then(() => this.runStart(address))
+    this.startChain = step.then(noop, noop)
+    return step
+  }
+
+  private async runStart(address: string): Promise<void> {
     if (this.isRunning) { await this.stop(); }
     this.isRunning = true;
+    // 在上面的 stop() **之后**取代次：那一次 stop 是本方法自己发起的重启，不该算作废
+    const generation = this.generation;
 
     await this.mailbox.start?.();
 
     this.pullLoopErrored = false;
-    if (this.mode === 'push') {
-      this.subscription = this.mailbox.subscribe(address, this.onReceive.bind(this));
-      await this.drainBacklog(address);
-    } else {
-      this.runPullLoop(address);
+    if (this.mode !== 'push') {
+      this.runPullLoop(address); // 不 await：轮询循环本来就不返回（与旧行为一致）
+      return;
     }
+
+    const subscription = await this.mailbox.subscribe(address, this.onReceive.bind(this));
+    if (generation !== this.generation) {
+      // `stop()` 就在上面那个 await 里跑过：它拆不到这条当时还没登记的订阅，这里补退。
+      // 并且**不再 drain**——这个实例已经在收尾，再喂积压就是给一个不收请求的人派活。
+      await subscription.unsubscribe();
+      return;
+    }
+    this.subscription = subscription;
+    // 顺序写进代码，而不是靠「subscribe 恰好是同步的」：订阅未生效就 drain，
+    // 同一份积压会被 push 回调与 drainBacklog 各执行一遍（副作用重复）。
+    await this.drainBacklog(address);
   }
 
   protected async drainBacklog(address: string) {
@@ -238,6 +273,8 @@ export class MailboxServerTransport extends ServerToolTransport {
   }
 
   public async stop(force?: boolean): Promise<void> {
+    // 代次先 +1：正在 await 里的 _start() 要能看出「这次启动已经作废了」
+    this.generation++;
     this.isRunning = false;
     // 归属登记条目必须跟着释放（与 HttpServerToolTransport.stop 同一份约定）：
     // 不释放的话这个地址上的路由永久占位，下一个实例 registerServer 必报 Routing Conflict

@@ -11,7 +11,7 @@ describe('MailboxClientTransport', () => {
         mailbox = new Mailbox();
         // Mock mailbox methods
         mailbox.start = vi.fn().mockResolvedValue(undefined);
-        mailbox.subscribe = vi.fn().mockReturnValue({ unsubscribe: vi.fn() });
+        mailbox.subscribe = vi.fn().mockResolvedValue({ unsubscribe: vi.fn() }); // 必须是 mockResolvedValue：await 一个非 Promise 合法，mockReturnValue 会让测试绿着建模旧契约
         mailbox.post = vi.fn().mockResolvedValue(undefined);
         
         transport = new MailboxClientTransport({

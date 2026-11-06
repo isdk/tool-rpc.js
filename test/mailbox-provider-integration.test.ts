@@ -73,7 +73,14 @@ class FileProvider implements IMailboxProvider {
     return `${address.protocol}//${address.hostname}${address.pathname}`
   }
 
-  subscribe(address: URL, onReceive: (message: MailMessage) => void | Promise<void>): Subscription {
+  /**
+   * 直接实现 `IMailboxProvider` 的第三方 provider：**订阅必须返回 Promise**。
+   *
+   * 这个 provider 的「已生效」= 目录轮询已挂上（`setInterval` 在返回前就 armed），
+   * 所以 `await subscribe()` 返回后投递就能开始。基类的 await 窗口约定在这里不适用
+   * （没有异步 handle），但「不 await 等于未订阅」同样成立。
+   */
+  async subscribe(address: URL, onReceive: (message: MailMessage) => void | Promise<void>): Promise<Subscription> {
     const topic = this.getTopicKey(address)
     const id = nanoid()
 
@@ -220,7 +227,7 @@ describe('Mailbox Provider Integration (Memory + File)', () => {
     it('should route mem:// messages to MemoryProvider', async () => {
       const received: MailMessage[] = []
 
-      const sub = mailbox!.subscribe(memAddr1, (msg) => {
+      const sub = await mailbox!.subscribe(memAddr1, (msg) => {
         received.push(msg)
       })
 
@@ -257,9 +264,9 @@ describe('Mailbox Provider Integration (Memory + File)', () => {
       const memReceived: MailMessage[] = []
       const fileReceived: MailMessage[] = []
 
-      const memSub = mailbox!.subscribe(memAddr1, (msg) => { memReceived.push(msg) })
+      const memSub = await mailbox!.subscribe(memAddr1, (msg) => { memReceived.push(msg) })
       // Subscribe to fileAddr2 (different from route test's fileAddr1) for isolation
-      const fileSub = mailbox!.subscribe(fileAddr2, (msg) => { fileReceived.push(msg) })
+      const fileSub = await mailbox!.subscribe(fileAddr2, (msg) => { fileReceived.push(msg) })
 
       await mailbox!.post({ from: memAddr2, to: memAddr1, body: { msg: 'mem-only' } })
       await mailbox!.post({ from: 'file:///tmp/s', to: fileAddr2, body: { msg: 'file-only' } })
@@ -289,8 +296,8 @@ describe('Mailbox Provider Integration (Memory + File)', () => {
       const inbox1: MailMessage[] = []
       const inbox2: MailMessage[] = []
 
-      const sub1 = mailbox!.subscribe(memAddr1, (msg) => { inbox1.push(msg) })
-      const sub2 = mailbox!.subscribe(memAddr2, (msg) => { inbox2.push(msg) })
+      const sub1 = await mailbox!.subscribe(memAddr1, (msg) => { inbox1.push(msg) })
+      const sub2 = await mailbox!.subscribe(memAddr2, (msg) => { inbox2.push(msg) })
 
       await mailbox!.post({ from: memAddr1, to: memAddr2, body: { to: '2' } })
       await mailbox!.post({ from: memAddr2, to: memAddr1, body: { to: '1' } })
@@ -399,8 +406,8 @@ describe('Mailbox Provider Integration (Memory + File)', () => {
       const memReceived: MailMessage[] = []
       const fileReceived: MailMessage[] = []
 
-      const memSub = mailbox!.subscribe(memAddr1, (msg) => { memReceived.push(msg) })
-      const fileSub = fileProvider.subscribe(new URL(fileAddr1), (msg) => { fileReceived.push(msg) })
+      const memSub = await mailbox!.subscribe(memAddr1, (msg) => { memReceived.push(msg) })
+      const fileSub = await fileProvider.subscribe(new URL(fileAddr1), (msg) => { fileReceived.push(msg) })
 
       const memPosts = [1, 2, 3].map(i => mailbox!.post({ from: memAddr2, to: memAddr1, body: { src: 'mem', i } }))
       const filePosts = [1, 2, 3].map(i => mailbox!.post({ from: 'file:///tmp/s', to: fileAddr1, body: { src: 'file', i } }))

@@ -113,7 +113,9 @@ const result = await greeter.run({ name: 'World' })
    - 客户端：创建 `Mailbox`；`MailboxClientTransport({ mailbox, apiUrl, clientAddress, timeout? })`。
 
 2. **启动与发现阶段**
-   - 服务端 `start()`：`subscribe(apiUrl)` → `drainBacklog(apiUrl)`。
+   - 服务端 `start()`：`await subscribe(apiUrl)` → `drainBacklog(apiUrl)`。顺序是语义的一部分：
+     订阅未生效就 drain，同一份积压会被 push 回调与 `drainBacklog` 各执行一遍（副作用重复）。
+     `subscribe()` 返回 Promise，所以这个顺序得靠 `await` 写出来，而不是靠它恰好是同步的。
    - 客户端 `ClientTools.loadFrom()` → 发一封**无 `rpc-fn`、`rpc-act: 'get'`** 的信到 `apiUrl`。
    - 服务端命中发现分支，调用 handler，回信 body **直接是 handler 的结果**（`sendRpcResponse` 走 `resultBody = rpcRes.data`）。旧版本文写的 `{ tools, gateways }` 服务地图形状不存在——handler 返回什么，body 就是什么（典型实现是 `ServerTools.toJSON()`，即工具定义表）。
 
