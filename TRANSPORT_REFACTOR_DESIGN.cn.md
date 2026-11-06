@@ -103,22 +103,22 @@
 
 用于定义任务在完成后的保留模式：
 
-* **`None` (0)**: 任务完成后立即从账本移除（默认）。
-* **`Permanent` (-1)**: 永久保留，直到进程结束或手动删除。
-* **`Once` ('once')**: 保留至第一次成功的 `rpcTask.get` 后清理。
-* **`number` (ms)**: 任务完成后保留指定的毫秒数。
-* **配置对象 `RpcTaskRetentionConfig`**: `{ mode, onceFallbackMs?, maxRetentionMs? }`——`mode` 必填（上面四种形式之一），
+- **`None` (0)**: 任务完成后立即从账本移除（默认）。
+- **`Permanent` (-1)**: 永久保留，直到进程结束或手动删除。
+- **`Once` ('once')**: 保留至第一次成功的 `rpcTask.get` 后清理。
+- **`number` (ms)**: 任务完成后保留指定的毫秒数。
+- **配置对象 `RpcTaskRetentionConfig`**: `{ mode, onceFallbackMs?, maxRetentionMs? }`——`mode` 必填（上面四种形式之一），
   `onceFallbackMs` 是 'once' 模式下的清理兜底（默认 1 小时），`maxRetentionMs` 是全模式硬上限。
 
 ### 3.4 RpcError (标准错误类)
 
 为了确保错误能被传输层正确识别并序列化，推荐在工具函数中抛出 `RpcError`。
 
-* **构造函数**: `new RpcError(message, code: number = 500, status?: string, data?: any)`
-* **职责分工 (Status vs. Code)**：
+- **构造函数**: `new RpcError(message, code: number = 500, status?: string, data?: any)`
+- **职责分工 (Status vs. Code)**：
   - **`code` (number)**: 唯一的数字错误码。若在 100-599 范围内，`Dispatcher` 会自动将其映射为响应顶层的 `status`。
   - **`status` (string)**: 可选的语义化标识字符串。如 `'teapot'`, `'missing_field'`。
-* **映射逻辑**：`Dispatcher.handleError` 会根据 `err.code` 自动推导响应的物理状态码，并透传 `err.status` (string) 与 `err.data`。
+- **映射逻辑**：`Dispatcher.handleError` 会根据 `err.code` 自动推导响应的物理状态码，并透传 `err.status` (string) 与 `err.data`。
 
 ---
 
@@ -177,8 +177,8 @@
 ### 4.4 RpcDeadlineGuard (执行死线守卫)
 
 - **两级裁决逻辑**：
-    1. **响应超时 (Soft Deadline)**：触发 `102`。
-    2. **硬死线 (Hard Deadline)**：触及资源保护阈值。触发后立即调用 `AbortSignal.abort()`。
+  1. **响应超时 (Soft Deadline)**：触发 `102`。
+  2. **硬死线 (Hard Deadline)**：触及资源保护阈值。触发后立即调用 `AbortSignal.abort()`。
 - **延迟中止 (Termination Grace Period)**：支持 `dispatcher.terminationGraceMs` 配置（默认 `RPC_DEFAULTS.TERMINATION_GRACE_MS` = 500ms）。
   - 硬死线触发后，Guard 先触发信号中止以通知业务代码进行清理，并**延迟抛出 408 异常**，确保资源回收的平滑性。
   - 在宽限期结束后，若任务仍未自行退出，调度层正式返回 `408 Terminated` 响应（同步路径下会被 `handleError()` 映射为 504）。
@@ -234,23 +234,27 @@ V2 架构通过 `IServerToolTransport` 的扩展接口实现了对底层物理�
 ```typescript
 export abstract class ServerToolTransport extends ToolTransport {
   // 模板方法：定义 RPC 请求的标准执行流水线
-  protected async processIncomingCall(rawReq: any, rawRes: any, registry?: any) {
+  protected async processIncomingCall(
+    rawReq: any,
+    rawRes: any,
+    registry?: any
+  ) {
     try {
       // 1. 物理层翻译：子类将物理报文翻译为归一化对象
-      const rpcReq = await this.toRpcRequest(rawReq);
+      const rpcReq = await this.toRpcRequest(rawReq)
 
       // 2. 架构层校验：调用 Manager 实例进行 SSRF/权限校验
-      this.manager.validateRpcRequest(rpcReq);
+      this.manager.validateRpcRequest(rpcReq)
 
       // 3. 执行分发：交给独立的 Dispatcher 流水线
-      const rpcRes = await this.dispatcher.dispatch(rpcReq, registry);
+      const rpcRes = await this.dispatcher.dispatch(rpcReq, registry)
 
       // 4. 物理层回传与物理中止联动：子类将结果写回物理通道
       // 在传输流时，需监听物理连接的 'close' 事件并调用 handle.abort('Physical connection closed')
-      await this.sendRpcResponse(rpcRes, rawRes);
+      await this.sendRpcResponse(rpcRes, rawRes)
     } catch (err) {
       // 顶级异常防护，确保物理连接不挂起
-      await this.sendRpcResponse(this.dispatcher.handleError(null, err), rawRes);
+      await this.sendRpcResponse(this.dispatcher.handleError(null, err), rawRes)
     }
   }
 }

@@ -28,17 +28,19 @@ export interface RemoteFuncItem extends BaseFuncItem {
   /**
    * 超时配置：硬超时时长或精细化控制对象
    */
-  timeout?: number | {
-    value: number;
-    streamIdleTimeout?: number;
-    keepAliveOnTimeout?: boolean;
-  };
+  timeout?:
+    | number
+    | {
+        value: number
+        streamIdleTimeout?: number
+        keepAliveOnTimeout?: boolean
+      }
 
   /**
    * 预估耗时：统计意义上的正常执行时间（毫秒）
    * 用于客户端 UX 优化和智能调度
    */
-  expectedDuration?: number;
+  expectedDuration?: number
 }
 ```
 

@@ -1,6 +1,7 @@
 # 与 `@isdk/tool-rpc` 的集成
 
 > **先读这段：本文分两类内容。**
+>
 > - **已实现**（第 1–6 节）：逐条对着代码写，附 `文件:行`，可照抄。
 > - **设计约定（未实现）**（第 7 节）：值得实现但代码里还没有，**不要照它写代码**。
 >
@@ -30,12 +31,16 @@
 import { MailboxServerTransport, ServerTools } from '@isdk/tool-rpc'
 
 // 1. 注册与网络无关的服务函数
-new ServerTools({ name: 'greeter', isApi: true, func: (p: {name: string}) => `Hello, ${p.name}!` }).register()
+new ServerTools({
+  name: 'greeter',
+  isApi: true,
+  func: (p: { name: string }) => `Hello, ${p.name}!`,
+}).register()
 
 // 2. 初始化 ServerTransport（apiUrl 是正名；`address` 已 @deprecated，见 mailbox-server.ts）
 const serverTransport = new MailboxServerTransport({
-  mailbox,                      // 可选；不传则 Transport 自建一个并在 stop() 时关闭
-  apiUrl: 'mailto:api@myservice.com' // 物理网关地址
+  mailbox, // 可选；不传则 Transport 自建一个并在 stop() 时关闭
+  apiUrl: 'mailto:api@myservice.com', // 物理网关地址
 })
 
 // 3.（可选）覆盖发现端点。发现已是内置的：无 `rpc-fn` 且 `rpc-act` 为 list/get
@@ -65,9 +70,9 @@ import { MailboxClientTransport, ClientTools } from '@isdk/tool-rpc'
 // `serverAddress` / `apiRoot` 是 apiUrl 的别名（:35），新代码请用 apiUrl
 const clientTransport = new MailboxClientTransport({
   mailbox,
-  apiUrl: 'mailto:api@myservice.com',   // 物理网关地址（必填）
+  apiUrl: 'mailto:api@myservice.com', // 物理网关地址（必填）
   clientAddress: 'mailto:user@myclient.com', // 自己的接收地址（必填，:39-41）
-  timeout: 30000                        // 可选，见第 4 节
+  timeout: 30000, // 可选，见第 4 节
 })
 
 await ClientTools.loadFrom(undefined, { apiUrl: 'mailto:api@myservice.com' })
@@ -240,8 +245,8 @@ sequenceDiagram
 ```typescript
 const serverTransport = new MailboxServerTransport({
   apiUrl: 'mem:api@server/api',
-  mode: 'pull',       // 启用拉取模式
-  pullInterval: 1000  // 拉不到消息时每隔 1 秒再试
+  mode: 'pull', // 启用拉取模式
+  pullInterval: 1000, // 拉不到消息时每隔 1 秒再试
 })
 ```
 

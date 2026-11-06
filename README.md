@@ -6,7 +6,7 @@ This project is built on `@isdk/tool-func`. Before proceeding, please ensure you
 
 ## ✨ Core Features
 
-- **Trinity Architecture (V2.6+):** 
+- **Trinity Architecture (V2.6+):**
   - **RpcTransportManager**: Centralized registry for protocols, logical routing audit, and transport instance lifecycle.
   - **RpcServerDispatcher**: Decoupled execution engine with built-in concurrency isolation (Shadow Instances) and task tracking.
   - **RpcActiveTaskTracker**: Cross-protocol task visibility with retention policies and background execution support (102 Processing).
@@ -15,7 +15,7 @@ This project is built on `@isdk/tool-func`. Before proceeding, please ensure you
 - **🔧 RPC Method Grouping:** Use `RpcMethodsServerTool` to bundle multiple related functions (methods) under a single tool, invoked via an `act` parameter.
 - **🔌 Automatic Client-Side Proxies:** The client (`ClientTools` and its subclasses) can automatically load tool definitions from the server and dynamically generate type-safe proxy functions, making remote calls as simple as local ones.
 - **🌐 Browser Compatible (`@isdk/tool-rpc/browser`):** A dedicated browser entry that includes client modules, abstract server-side classes (`ServerTools`, `RpcMethodsServerTool`, `ResServerTools`), and full transport infrastructure (`RpcServerDispatcher`, `RpcTransportManager`, `RpcActiveTaskTracker`, etc.). It excludes the transports that need a Node runtime or a native module: `HttpServerToolTransport`, `MailboxServerTransport` and `MailboxClientTransport`.
-- **🚀 Built-in HTTP & Mailbox Transport:** 
+- **🚀 Built-in HTTP & Mailbox Transport:**
   - **HTTP**: Comes with `HttpServerToolTransport` (Node.js `http`) and `HttpClientToolTransport` (`fetch`, browser-compatible).
   - **Mailbox**: Native support for internal distributed mailbox protocols, ideal for cross-process or cross-thread communication.
 - **🚀 Multi-Instance Isolation:** Support for multiple transport instances with different `apiUrl`s in a single process without global state collision.
@@ -38,33 +38,33 @@ Create a class that extends `ResServerTools`. Implement standard methods like `g
 
 ```typescript
 // ./tools/UserTool.ts
-import { ResServerTools, ResServerFuncParams } from '@isdk/tool-rpc';
-import { NotFoundError } from '@isdk/common-error';
+import { ResServerTools, ResServerFuncParams } from '@isdk/tool-rpc'
+import { NotFoundError } from '@isdk/common-error'
 
 // In-memory database for demonstration
 const users: Record<string, any> = {
   '1': { id: '1', name: 'Alice' },
   '2': { id: '2', name: 'Bob' },
-};
+}
 
 export class UserTool extends ResServerTools {
   // Standard RESTful method: GET /api/users/:id
   get({ id }: ResServerFuncParams) {
-    const user = users[id as string];
-    if (!user) throw new NotFoundError(id as string, 'user');
-    return user;
+    const user = users[id as string]
+    if (!user) throw new NotFoundError(id as string, 'user')
+    return user
   }
 
   // Standard RESTful method: GET /api/users
   list() {
-    return Object.values(users);
+    return Object.values(users)
   }
 
   // Custom RPC-style method
   $promote({ id }: ResServerFuncParams) {
-    const user = users[id as string];
-    if (!user) throw new NotFoundError(id as string, 'user');
-    return { ...user, role: 'admin' };
+    const user = users[id as string]
+    if (!user) throw new NotFoundError(id as string, 'user')
+    return { ...user, role: 'admin' }
   }
 }
 ```
@@ -75,33 +75,38 @@ In V2, we recommend using `RpcTransportManager` for lifecycle management and exp
 
 ```typescript
 // ./server.ts
-import { HttpServerToolTransport, RpcTransportManager, RpcServerDispatcher, ServerTools } from '@isdk/tool-rpc';
-import { UserTool } from './tools/UserTool';
+import {
+  HttpServerToolTransport,
+  RpcTransportManager,
+  RpcServerDispatcher,
+  ServerTools,
+} from '@isdk/tool-rpc'
+import { UserTool } from './tools/UserTool'
 
 async function startServer() {
   // 1. Register your tool instances in the global registry
-  new UserTool('users').register();
+  new UserTool('users').register()
 
   // 2. Initialize the transport with a dedicated Dispatcher
-  const apiUrl = 'http://localhost:3000/api';
+  const apiUrl = 'http://localhost:3000/api'
   const serverTransport = new HttpServerToolTransport({
     apiUrl,
-    dispatcher: new RpcServerDispatcher({ registry: ServerTools.items })
-  });
+    dispatcher: new RpcServerDispatcher({ registry: ServerTools.items }),
+  })
 
   // 3. Configure the logical routes for this transport
   // Expose the RPC endpoint for tool execution. Service discovery is built in
   // (the `rpcApis` tool answers `GET /api`), so no extra call is needed for it.
-  serverTransport.addRpcHandler(apiUrl);
+  serverTransport.addRpcHandler(apiUrl)
 
   // 4. Register the transport to the Manager and start all services
-  RpcTransportManager.instance.registerServer(serverTransport);
-  await RpcTransportManager.instance.startAll();
+  RpcTransportManager.instance.registerServer(serverTransport)
+  await RpcTransportManager.instance.startAll()
 
-  console.log(`✅ Tool server started at ${apiUrl}`);
+  console.log(`✅ Tool server started at ${apiUrl}`)
 }
 
-startServer();
+startServer()
 ```
 
 ### Step 3: Set Up and Use the Client
@@ -110,45 +115,51 @@ In V2, the client (`ResClientTools.loadFrom`) uses `RpcTransportManager` to auto
 
 ```typescript
 // ./client.ts
-import { HttpClientToolTransport, RpcTransportManager, ResClientTools } from '@isdk/tool-rpc';
+import {
+  HttpClientToolTransport,
+  RpcTransportManager,
+  ResClientTools,
+} from '@isdk/tool-rpc'
 
 // Define a type for full type-safety, including the custom method
 type UserClientTool = ResClientTools & {
-  promote(params: { id: string }): Promise<{ id: string; name: string; role: string }>;
-};
+  promote(params: {
+    id: string
+  }): Promise<{ id: string; name: string; role: string }>
+}
 
 async function main() {
-  const apiUrl = 'http://localhost:3000/api';
+  const apiUrl = 'http://localhost:3000/api'
 
   // 1. Register the HTTP scheme (needed if not globally pre-registered)
-  RpcTransportManager.bindScheme('http', HttpClientToolTransport);
+  RpcTransportManager.bindScheme('http', HttpClientToolTransport)
 
   // 2. Load API definitions from the server.
   // This automatically creates/uses a transport instance for the given apiUrl.
-  await ResClientTools.loadFrom(undefined, { apiUrl });
+  await ResClientTools.loadFrom(undefined, { apiUrl })
 
   // 3. Get the dynamically created proxy for the remote tool.
-  const userTool = ResClientTools.get('users') as UserClientTool;
+  const userTool = ResClientTools.get('users') as UserClientTool
   if (!userTool) {
-    throw new Error('Remote tool "users" not found!');
+    throw new Error('Remote tool "users" not found!')
   }
 
   // 4. Call the remote APIs as if they were local methods!
 
   // Calls GET /api/users/1
-  const user = await userTool.get!({ id: '1' });
-  console.log('Fetched User:', user); // { id: '1', name: 'Alice' }
+  const user = await userTool.get!({ id: '1' })
+  console.log('Fetched User:', user) // { id: '1', name: 'Alice' }
 
   // Calls GET /api/users
-  const allUsers = await userTool.list!();
-  console.log('All Users:', allUsers); // [{...}, {...}]
+  const allUsers = await userTool.list!()
+  console.log('All Users:', allUsers) // [{...}, {...}]
 
   // Calls the custom RPC method $promote
-  const admin = await userTool.promote({ id: '2' });
-  console.log('Promoted User:', admin); // { id: '2', name: 'Bob', role: 'admin' }
+  const admin = await userTool.promote({ id: '2' })
+  console.log('Promoted User:', admin) // { id: '2', name: 'Bob', role: 'admin' }
 }
 
-main();
+main()
 ```
 
 ## Core Concepts: Layered Abstractions
@@ -161,12 +172,12 @@ The architecture of `@isdk/tool-rpc` is built on a core philosophy: **Static cla
 
 ### 1. The Duality Model
 
-* **Container Classes (Plural 'Tools')**: e.g., `ServerTools`, `RpcMethodsServerTool`, `ResServerTools`.
-  * **Role**: They act as static **Registries** and **Discovery Protocol Filters**.
-  * **Responsibility**: Define level specifications, manage tool collections, and implement the `toJSON()` discovery algorithm. At the code level, they maintain global state via static properties (like `items`).
-* **Business Instances (Singular 'Tool'/'Func')**: Instances created via `new ServerTools(...)` or its subclasses.
-  * **Role**: They are the concrete **Functional Units**.
-  * **Responsibility**: Host business logic (via the `func` method or `$`-prefixed RPC methods), and define parameter schemas (`params`) and metadata.
+- **Container Classes (Plural 'Tools')**: e.g., `ServerTools`, `RpcMethodsServerTool`, `ResServerTools`.
+  - **Role**: They act as static **Registries** and **Discovery Protocol Filters**.
+  - **Responsibility**: Define level specifications, manage tool collections, and implement the `toJSON()` discovery algorithm. At the code level, they maintain global state via static properties (like `items`).
+- **Business Instances (Singular 'Tool'/'Func')**: Instances created via `new ServerTools(...)` or its subclasses.
+  - **Role**: They are the concrete **Functional Units**.
+  - **Responsibility**: Host business logic (via the `func` method or `$`-prefixed RPC methods), and define parameter schemas (`params`) and metadata.
 
 > **Naming Convention**: Class names use the plural (Tools) to reflect their container nature, while instances or derived business logic are conceptually singular (Tool/Func).
 
@@ -174,22 +185,22 @@ The architecture of `@isdk/tool-rpc` is built on a core philosophy: **Static cla
 
 To ensure clients load accurate, protocol-matching tool definitions during the Discovery phase, the project implements a **hierarchical isolation mechanism**.
 
-* **Isolation Algorithm**: `toJSON()` is defined **once**, on `ServerTools` (`src/server-tools.ts`); the subclasses inherit it, so what changes is which class `this` is. It walks `this.items` and keeps an entry when either branch matches:
-    1. **Type Check**: `item instanceof this && item.isApi !== false`. Because `instanceof` is satisfied downwards along the inheritance chain, this yields **upward isolation only**: calling it on a subclass excludes the parent's instances, calling it on a parent does *not* exclude the subclasses'.
-    2. **Base `ToolFunc` Check**: `item.isApi && !(item instanceof ServerTools) && this === ServerTools` — a raw `ToolFunc` (never registered through a `ServerTools` subclass) is listed only through `ServerTools` itself, and only when it opts in with `isApi: true`.
+- **Isolation Algorithm**: `toJSON()` is defined **once**, on `ServerTools` (`src/server-tools.ts`); the subclasses inherit it, so what changes is which class `this` is. It walks `this.items` and keeps an entry when either branch matches:
+  1. **Type Check**: `item instanceof this && item.isApi !== false`. Because `instanceof` is satisfied downwards along the inheritance chain, this yields **upward isolation only**: calling it on a subclass excludes the parent's instances, calling it on a parent does _not_ exclude the subclasses'.
+  2. **Base `ToolFunc` Check**: `item.isApi && !(item instanceof ServerTools) && this === ServerTools` — a raw `ToolFunc` (never registered through a `ServerTools` subclass) is listed only through `ServerTools` itself, and only when it opts in with `isApi: true`.
 
   Entries whose tool does not set `allowExportFunc` are exported through their own `toJSON()` with `func` deleted.
 
-* **Export Ranges by Level** (measured: one registry holding `ping` (ServerTools), `userService` (RpcMethodsServerTool), `users` (ResServerTools)):
-  * **`ServerTools.toJSON()`** → `ping`, `userService`, `users`. `instanceof ServerTools` is true for the subclass instances too, so a parent listing **does** include RPC and Resource tools.
-  * **`RpcMethodsServerTool.toJSON()`** → `userService`, `users`. Excludes the plain `ServerTools` instance; keeps its own subclasses (downward compatibility).
-  * **`ResServerTools.toJSON()`** → `users` only. This is the upward isolation the mechanism actually provides.
+- **Export Ranges by Level** (measured: one registry holding `ping` (ServerTools), `userService` (RpcMethodsServerTool), `users` (ResServerTools)):
+  - **`ServerTools.toJSON()`** → `ping`, `userService`, `users`. `instanceof ServerTools` is true for the subclass instances too, so a parent listing **does** include RPC and Resource tools.
+  - **`RpcMethodsServerTool.toJSON()`** → `userService`, `users`. Excludes the plain `ServerTools` instance; keeps its own subclasses (downward compatibility).
+  - **`ResServerTools.toJSON()`** → `users` only. This is the upward isolation the mechanism actually provides.
 
-* **Which registry gets walked matters as much as which class you call**: `toJSON()` reads `this.items`, so a subclass that has called `isolateRegistry()` only sees its own layer. For the same reason, handing the dispatcher a raw `items` object (`new RpcServerDispatcher({ registry: ServerTools.items })`) instead of the container class skips this filter entirely — every entry in that object is listed (each still serialized through its own `toJSON()`). Use the container class when you want the level filter; use `items` when you want the whole registry regardless of level.
+- **Which registry gets walked matters as much as which class you call**: `toJSON()` reads `this.items`, so a subclass that has called `isolateRegistry()` only sees its own layer. For the same reason, handing the dispatcher a raw `items` object (`new RpcServerDispatcher({ registry: ServerTools.items })`) instead of the container class skips this filter entirely — every entry in that object is listed (each still serialized through its own `toJSON()`). Use the container class when you want the level filter; use `items` when you want the whole registry regardless of level.
 
-* **Default Behavior for `isApi`**:
-  * **For Derived Business Instances (Func)**: Since they are designed for remote exposure, they are **auto-exported** by default unless explicitly set to `isApi: false`.
-  * **For Base `ToolFunc` Instances**: For security, they are **hidden** by default. You must explicitly set `isApi: true` to make them discoverable via `ServerTools`.
+- **Default Behavior for `isApi`**:
+  - **For Derived Business Instances (Func)**: Since they are designed for remote exposure, they are **auto-exported** by default unless explicitly set to `isApi: false`.
+  - **For Base `ToolFunc` Instances**: For security, they are **hidden** by default. You must explicitly set `isApi: true` to make them discoverable via `ServerTools`.
 
 ```mermaid
 graph TD
@@ -221,6 +232,7 @@ graph TD
 ### 3. 🛡️ Concurrency Isolation (Shadow Instances)
 
 V2 Architecture introduces **Shadow Instances** to solve `this.ctx` race conditions in asynchronous environments.
+
 - When a request arrives, the `Dispatcher` creates a new instance using `Object.create(tool)`.
 - **Property Shadowing**: `this.ctx = context` only affects the current execution instance, ensuring physical isolation during high concurrency while maintaining access to original tool properties.
 
@@ -262,13 +274,13 @@ You can register a tool with the same name as a parent in an isolated registry t
 
 When a workflow tool depends on other tools via the `depends` property, the binding strategy determines how those dependencies are resolved:
 
-* **`'auto'` (Default - Context-Aware)**: **The most intuitive mode for business logic.**
+- **`'auto'` (Default - Context-Aware)**: **The most intuitive mode for business logic.**
   - **Logic**: Switches to polymorphic late binding only if the caller is a descendant of the tool definer.
   - **Benefit**: Achieves "Local Customization, Global Stability". It allows plugins to modify a middle step of a workflow without breaking the parent system's internal stability.
-* **`'early'` (Early Binding - Contract Protection)**:
+- **`'early'` (Early Binding - Contract Protection)**:
   - **Logic**: Always uses the original dependency locked at registration time.
   - **Benefit**: Used for security-critical or core components (e.g., auth, crypto) to prevent them from being "hijacked" by downstream shadows.
-* **`'late'` (Late Binding - Environment-First)**:
+- **`'late'` (Late Binding - Environment-First)**:
   - **Logic**: Forcefully resolves from the top-level registry of the current caller, ignoring lineage.
   - **Benefit**: Allows complete runtime injection based on the execution environment.
 
@@ -279,24 +291,24 @@ To prevent accidental shadowing, use `allowOverride: false` during registration.
 ## ⚠️ Common Pitfalls
 
 1. **Defining `func()` in `ResServerTools` subclasses**
-    * **Consequence**: `ResServerTools` relies on `func` for REST/RPC dispatching. Overwriting it without calling `super.func` breaks `get/list/$method` routing.
-    * **Best Practice**: Always implement business logic via `get()`, `list()`, or `$`-prefixed methods in the Resource layer.
+   - **Consequence**: `ResServerTools` relies on `func` for REST/RPC dispatching. Overwriting it without calling `super.func` breaks `get/list/$method` routing.
+   - **Best Practice**: Always implement business logic via `get()`, `list()`, or `$`-prefixed methods in the Resource layer.
 
 2. **Treating `isApi: false` as a Firewall**
-    * **Consequence**: `isApi: false` only affects the "Discovery" phase (hiding it from the client). If an attacker guesses the tool name and crafts a request, the transport layer will still execute it.
-    * **Best Practice**: Implement authentication in your business logic or use the `_req` context for authorization.
+   - **Consequence**: `isApi: false` only affects the "Discovery" phase (hiding it from the client). If an attacker guesses the tool name and crafts a request, the transport layer will still execute it.
+   - **Best Practice**: Implement authentication in your business logic or use the `_req` context for authorization.
 
 3. **Missing Isolation in Single-Process Tests**
-    * **Consequence**: Errors like `[ToolName] already registered as ServerTools`.
-    * **Best Practice**: Use `ClientTools.isolateRegistry()` in your `beforeAll` hooks.
+   - **Consequence**: Errors like `[ToolName] already registered as ServerTools`.
+   - **Best Practice**: Use `ClientTools.isolateRegistry()` in your `beforeAll` hooks.
 
 4. **Confusing Static 'Tools' vs. Instance 'Func' Responsibilities**
-    * **Consequence**: Attempting to modify `ServerTools.items` within business logic, leading to global pollution.
-    * **Best Practice**: Static members are for management; business logic should be strictly confined to `this` or `this.ctx` on the instance.
+   - **Consequence**: Attempting to modify `ServerTools.items` within business logic, leading to global pollution.
+   - **Best Practice**: Static members are for management; business logic should be strictly confined to `this` or `this.ctx` on the instance.
 
 ## ⏱️ Timeout Strategy
 
-`@isdk/tool-rpc` tunes timeout control for distributed AI-agent scenarios and follows the *smallest timeout wins* principle.
+`@isdk/tool-rpc` tunes timeout control for distributed AI-agent scenarios and follows the _smallest timeout wins_ principle.
 
 Concretely, the deadline is negotiated in two stages:
 
@@ -306,8 +318,8 @@ Concretely, the deadline is negotiated in two stages:
 2. **Server** (`RpcServerDispatcher`): the header value takes precedence; otherwise the tool's own
    `timeout`; otherwise the dispatcher's `globalTimeout` (default `30000` ms).
 
-With `keepAliveOnTimeout: true` that deadline becomes a *soft* deadline (the task is handed to the
-background and the client gets `102 Processing`); otherwise it is a *hard* deadline (abort + `408`).
+With `keepAliveOnTimeout: true` that deadline becomes a _soft_ deadline (the task is handed to the
+background and the client gets `102 Processing`); otherwise it is a _hard_ deadline (abort + `408`).
 
 ### `0` means "no deadline"
 
@@ -334,9 +346,9 @@ The `timeout` property accepts a shorthand and a longhand form:
 
 - **Shorthand (number)**: milliseconds, treated as a hard deadline. `0` disables the deadline.
 - **Longhand (object)**:
-    - `value`: the hard deadline.
-    - `streamIdleTimeout`: idle timeout for streaming (time to first byte, or the gap between chunks).
-    - `keepAliveOnTimeout`: defaults to `false`. When set to `true`, the server returns the timeout error but lets the task keep running in the background.
+  - `value`: the hard deadline.
+  - `streamIdleTimeout`: idle timeout for streaming (time to first byte, or the gap between chunks).
+  - `keepAliveOnTimeout`: defaults to `false`. When set to `true`, the server returns the timeout error but lets the task keep running in the background.
 
 ### 2. Estimated Duration (expectedDuration)
 
@@ -347,7 +359,7 @@ This is a UX-friendly hint (an advisory signal, not an enforced constraint). Cli
 
 ## 🧠 Execution Context and Shadow Instances
 
-To keep concurrent calls safe while decoupling business logic from environment details, the library uses a *prototype-chain shadow instance* mechanism.
+To keep concurrent calls safe while decoupling business logic from environment details, the library uses a _prototype-chain shadow instance_ mechanism.
 
 ### 1. Accessing `this.ctx`
 
@@ -363,8 +375,8 @@ Inside a tool, read environment details from `this.ctx` instead of mixing them i
 On the client, `.with()` presets the environment for a single call or a series of calls:
 
 ```typescript
-const runner = tool.with({ timeout: 2000, traceId: 'T123' });
-await runner.run(params);
+const runner = tool.with({ timeout: 2000, traceId: 'T123' })
+await runner.run(params)
 ```
 
 ### Layer 1: `ServerTools` / `ClientTools` - The Basic Remote Function
@@ -383,7 +395,7 @@ This is the most fundamental layer, representing a single, remotely callable fun
       name: 'ping',
       isApi: true, // Mark as discoverable
       func: () => 'pong',
-    }).register();
+    }).register()
     ```
 
 - **`ClientTools`**:
@@ -405,14 +417,14 @@ This layer organizes multiple related functions into a collection that resembles
     class UserService extends RpcMethodsServerTool {
       $createUser({ name }) {
         // ... logic to create a user
-        return { id: 'user-1', name };
+        return { id: 'user-1', name }
       }
       $getUser({ id }) {
         // ... logic to get a user
-        return { id, name: 'Test User' };
+        return { id, name: 'Test User' }
       }
     }
-    new UserService('userService').register();
+    new UserService('userService').register()
     ```
 
 - **`RpcMethodsClientTool`**:
@@ -422,8 +434,8 @@ This layer organizes multiple related functions into a collection that resembles
 
     ```typescript
     // client.ts
-    const userService = RpcMethodsClientTool.get('userService');
-    const newUser = await userService.createUser({ name: 'Alice' });
+    const userService = RpcMethodsClientTool.get('userService')
+    const newUser = await userService.createUser({ name: 'Alice' })
     ```
 
 ### Layer 3: `ResServerTools` / `ResClientTools` - The RESTful Resource
@@ -446,9 +458,9 @@ This is the highest-level abstraction, providing a resource-centric, RESTful-sty
 
     ```typescript
     // client.ts
-    const userRes = ResClientTools.get('users');
-    const user = await userRes.get({ id: '1' }); // Sends GET /api/users/1
-    const allUsers = await userRes.list();       // Sends GET /api/users
+    const userRes = ResClientTools.get('users')
+    const user = await userRes.get({ id: '1' }) // Sends GET /api/users/1
+    const allUsers = await userRes.list() // Sends GET /api/users
     ```
 
 ## 🌐 Browser Usage
@@ -533,36 +545,36 @@ The architecture is built around a few key interfaces:
 
 - **`IToolTransport`**: The common base interface for all transports (`src/transports/base.ts`): `apiUrl` (the addressing baseline), `options`, and the optional lifecycle hooks `start()` / `stop()` / `close()`. `mount()` is **not** part of it — it lives on `ClientToolTransport` and is `@deprecated` (it only copies `apiUrl` onto a tools class).
 - **`IServerToolTransport`**: The interface that a server-side transport must implement. Its core responsibilities are:
-    1. **Exposing a Discovery Endpoint**: The route that lists the tools (typically `GET /api`) is served by the framework's built-in `rpcApis` tool, registered automatically for every claimed prefix. **In the transports shipped in core (HTTP / Mailbox)** it is an ordinary tool: it goes through the same identity, validation and timeout pipeline as business calls, and it lists the registry bound to the **matched prefix**. That is not automatic for a third-party adapter: if it registers its own hand-written route for the manifest (a plain `GET <prefix>` handler that replies with the listing), the manifest bypasses identity, validation and timeout — business APIs require a credential while the tool list stays anonymous. Adapters should register rows from `getRouteTable()` instead (see *Creating Your Own Transport*). The listing does not care about the registry's shape: a layer that has `toJSON()` supplies its own entries, any other layer is enumerated by static `items` (ToolFunc family), `entries()` (Map-shaped) or its own keys (plain object map). Layers are merged in the same precedence order `get()` uses, so every tool resolvable at that prefix is listed — a registry that has tools never answers `200 {}`. A manifest entry never carries the tool's `func` body unless the tool opts in with `allowExportFunc: true` (the same rule `ServerTools.toJSON()` applies; the body is stripped from a copy, so the server-side tool keeps working). The rule is enforced by the framework on **every** entry it publishes, including the ones a custom registry hands over through its own `toJSON()` — publishing function source is not something a registry can decide for itself. `addDiscoveryHandler(apiUrl, handler)` is **deprecated** — it only overrides the listing content for that prefix, and the first call logs a one-time migration warning. Keep it only when the listing itself must be customized (or register your own tool with `addRoute(apiUrl, { path: '/', when: { method: 'GET' }, toolId: 'myListing' })`).
-    2. **Handling RPC Calls**: Create a generic RPC route (e.g., `/api/:toolId`) that receives requests, finds the corresponding tool by `toolId`, executes it, and returns the result. This is handled by the `addRpcHandler` method.
-    3. Managing the server lifecycle (`start`, `stop`).
-    4. **Physical Awareness (V2)**: Methods like `getListenAddr()` and `getRoutes()` allow for physical port reuse and logical route ownership registration.
-    5. **Route Claims & Remount (V2)**: `addRpcHandler()` / `addDiscoveryHandler()` claim their path prefix in the `ServerToolTransport` base class, so one transport can serve several prefixes, each with its own registry and discovery handler. Logical routes are reported in canonical form (leading `/`, no trailing slash); the trailing-slash form used for prefix matching is derived by `toMatchPrefix()`. Re-declaring an already claimed prefix replaces its registry/handler and logs a warning; pass `options.remount = 'throw'` to raise an error instead — backends with their own router override `onDuplicateRoute()` to surface a native duplicate-route error.
-    6. **Route Table (V2)**: `addRoute(apiUrl, { path, when, toolId, act })` maps a path inside a prefix to a tool, and `getRouteTable()` returns every row (including the built-in discovery rows) so adapters can register them natively. The built-in discovery endpoint is just a row in that table — a third party overrides it by declaring the same path and condition, with no privileged channel. `path: ''` and `'/'` are the same route; `/x` and `/x/` are the same unless `strictTrailingSlash: true`; `when.method` is case-insensitive on the declaration side (stored upper-cased, because a Node request method always is).
-    - **Rows are a product of a claim**: those built-in rows only exist for prefixes that were claimed. A transport that never called `addRpcHandler` / `addRoute` still reports `'/'` from `getRoutes()` — that is a **takeover declaration** ("I own every path on this address"), not a promise that a discovery endpoint exists there. Its route table is empty, so the implicit addressing forms fail: HTTP `GET /` → 400 `Missing routing information`, Mailbox `fetch('', 'list')` → 400 `missing tool identifier` (when the table is empty the message names the missing step: claim a prefix). The built-in **tool** is registered regardless — `rpcApis` is always in the system registry — so a client that addresses it explicitly (`loadApis()` sends `rpc-fn: rpcApis`) works even with no claim.
-    7. **Route Registration Pair (V2)**: `registerRoutes()` / `unregisterRoutes()` — `protected` members of the `ServerToolTransport` base class, called from inside your own transport subclass — keep the physical route table and the Manager's ownership table in sync, and are re-entrant (they unregister first, then register). Framework adapters (Fastify, Electron, Express) should call this pair rather than `claimRoute()` alone — claiming routes without touching the ownership table leaves stale entries that make the next `listen()` fail with `Routing Conflict`. On the Manager side the matching pair is `registerServer()` / `unregisterServer()` (the old name `addServer()` is deprecated and only forwards); `unregisterServer()` clears ownership and the transport mapping but does **not** stop the underlying server.
+  1. **Exposing a Discovery Endpoint**: The route that lists the tools (typically `GET /api`) is served by the framework's built-in `rpcApis` tool, registered automatically for every claimed prefix. **In the transports shipped in core (HTTP / Mailbox)** it is an ordinary tool: it goes through the same identity, validation and timeout pipeline as business calls, and it lists the registry bound to the **matched prefix**. That is not automatic for a third-party adapter: if it registers its own hand-written route for the manifest (a plain `GET <prefix>` handler that replies with the listing), the manifest bypasses identity, validation and timeout — business APIs require a credential while the tool list stays anonymous. Adapters should register rows from `getRouteTable()` instead (see _Creating Your Own Transport_). The listing does not care about the registry's shape: a layer that has `toJSON()` supplies its own entries, any other layer is enumerated by static `items` (ToolFunc family), `entries()` (Map-shaped) or its own keys (plain object map). Layers are merged in the same precedence order `get()` uses, so every tool resolvable at that prefix is listed — a registry that has tools never answers `200 {}`. A manifest entry never carries the tool's `func` body unless the tool opts in with `allowExportFunc: true` (the same rule `ServerTools.toJSON()` applies; the body is stripped from a copy, so the server-side tool keeps working). The rule is enforced by the framework on **every** entry it publishes, including the ones a custom registry hands over through its own `toJSON()` — publishing function source is not something a registry can decide for itself. `addDiscoveryHandler(apiUrl, handler)` is **deprecated** — it only overrides the listing content for that prefix, and the first call logs a one-time migration warning. Keep it only when the listing itself must be customized (or register your own tool with `addRoute(apiUrl, { path: '/', when: { method: 'GET' }, toolId: 'myListing' })`).
+  2. **Handling RPC Calls**: Create a generic RPC route (e.g., `/api/:toolId`) that receives requests, finds the corresponding tool by `toolId`, executes it, and returns the result. This is handled by the `addRpcHandler` method.
+  3. Managing the server lifecycle (`start`, `stop`).
+  4. **Physical Awareness (V2)**: Methods like `getListenAddr()` and `getRoutes()` allow for physical port reuse and logical route ownership registration.
+  5. **Route Claims & Remount (V2)**: `addRpcHandler()` / `addDiscoveryHandler()` claim their path prefix in the `ServerToolTransport` base class, so one transport can serve several prefixes, each with its own registry and discovery handler. Logical routes are reported in canonical form (leading `/`, no trailing slash); the trailing-slash form used for prefix matching is derived by `toMatchPrefix()`. Re-declaring an already claimed prefix replaces its registry/handler and logs a warning; pass `options.remount = 'throw'` to raise an error instead — backends with their own router override `onDuplicateRoute()` to surface a native duplicate-route error.
+  6. **Route Table (V2)**: `addRoute(apiUrl, { path, when, toolId, act })` maps a path inside a prefix to a tool, and `getRouteTable()` returns every row (including the built-in discovery rows) so adapters can register them natively. The built-in discovery endpoint is just a row in that table — a third party overrides it by declaring the same path and condition, with no privileged channel. `path: ''` and `'/'` are the same route; `/x` and `/x/` are the same unless `strictTrailingSlash: true`; `when.method` is case-insensitive on the declaration side (stored upper-cased, because a Node request method always is).
+  - **Rows are a product of a claim**: those built-in rows only exist for prefixes that were claimed. A transport that never called `addRpcHandler` / `addRoute` still reports `'/'` from `getRoutes()` — that is a **takeover declaration** ("I own every path on this address"), not a promise that a discovery endpoint exists there. Its route table is empty, so the implicit addressing forms fail: HTTP `GET /` → 400 `Missing routing information`, Mailbox `fetch('', 'list')` → 400 `missing tool identifier` (when the table is empty the message names the missing step: claim a prefix). The built-in **tool** is registered regardless — `rpcApis` is always in the system registry — so a client that addresses it explicitly (`loadApis()` sends `rpc-fn: rpcApis`) works even with no claim.
+  7. **Route Registration Pair (V2)**: `registerRoutes()` / `unregisterRoutes()` — `protected` members of the `ServerToolTransport` base class, called from inside your own transport subclass — keep the physical route table and the Manager's ownership table in sync, and are re-entrant (they unregister first, then register). Framework adapters (Fastify, Electron, Express) should call this pair rather than `claimRoute()` alone — claiming routes without touching the ownership table leaves stale entries that make the next `listen()` fail with `Routing Conflict`. On the Manager side the matching pair is `registerServer()` / `unregisterServer()` (the old name `addServer()` is deprecated and only forwards); `unregisterServer()` clears ownership and the transport mapping but does **not** stop the underlying server.
 - **`IClientToolTransport`**: The interface that a client-side transport must implement. Its core responsibilities are:
-    1. **Loading API Definitions**: Call the `loadApis()` method, which accesses the server's discovery endpoint to get the definitions of all tools.
-    2. **Executing Remote Calls**: Implement the `fetch()` method, which is responsible for serializing the client's tool call (function name and parameters), sending it to the server's RPC endpoint, and processing the response.
-    3. **Background Lifecycle (V2)**: Support for **Polling (102 Processing)** and **Logical Cancellation** linked to `AbortSignal`.
+  1. **Loading API Definitions**: Call the `loadApis()` method, which accesses the server's discovery endpoint to get the definitions of all tools.
+  2. **Executing Remote Calls**: Implement the `fetch()` method, which is responsible for serializing the client's tool call (function name and parameters), sending it to the server's RPC endpoint, and processing the response.
+  3. **Background Lifecycle (V2)**: Support for **Polling (102 Processing)** and **Logical Cancellation** linked to `AbortSignal`.
 
 ### Built-in Transports
 
 The library provides plug-and-play transport implementations:
 
 - **`HttpServerToolTransport` (HTTP server)**: Built on Node.js's built-in `http` module. In V2 it supports **Longest Prefix Match** routing, letting several logical instances share one physical port (physical base reuse). It automatically:
-    - Answers `GET /prefix` with the built-in `rpcApis` tool. It is an ordinary tool in the route table, so it
-      passes the same identity, validation and timeout pipeline as business calls (see
-      [Identity Policy](#-identity-policy)); it is public by default, and a policy can require a credential for it.
-    - Creates an RPC route that carries the tool name, resolving arguments from the request body or URL parameters.
+  - Answers `GET /prefix` with the built-in `rpcApis` tool. It is an ordinary tool in the route table, so it
+    passes the same identity, validation and timeout pipeline as business calls (see
+    [Identity Policy](#-identity-policy)); it is public by default, and a policy can require a credential for it.
+  - Creates an RPC route that carries the tool name, resolving arguments from the request body or URL parameters.
 - **`HttpClientToolTransport` (HTTP client)**: Built on the cross-platform `fetch` API. The V2 version polls background-task status automatically.
 - **`Mailbox Transports`**: Native support for the internal distributed mailbox protocol (`MailboxClientTransport` / `MailboxServerTransport`).
-    - **Characteristics**: suited to cross-process or cross-thread communication, with physical isolation built in.
-    - **Advantage**: high-performance tool calls in scenarios that need no HTTP stack.
-    - **Caveats**: `@mboxlabs/mailbox` is a regular dependency but is only loaded when you use these transports, and
-      neither mailbox transport is part of the browser entry. The client requires `clientAddress` (its inbox) and cannot
-      be auto-constructed via `bindScheme` (its constructor takes a single options object) — build it with `new` and then
-      call `RpcClientTransportManager.instance.register(transport)`.
+  - **Characteristics**: suited to cross-process or cross-thread communication, with physical isolation built in.
+  - **Advantage**: high-performance tool calls in scenarios that need no HTTP stack.
+  - **Caveats**: `@mboxlabs/mailbox` is a regular dependency but is only loaded when you use these transports, and
+    neither mailbox transport is part of the browser entry. The client requires `clientAddress` (its inbox) and cannot
+    be auto-constructed via `bindScheme` (its constructor takes a single options object) — build it with `new` and then
+    call `RpcClientTransportManager.instance.register(transport)`.
 
 ### Extending the Functionality: Creating Your Own Transport
 
@@ -591,9 +603,15 @@ identity cannot be spoofed (the server decides, the client cannot self-report), 
 **It does not authenticate** (anyone can connect).
 
 ```typescript
-import { HttpServerToolTransport, RpcSessionIdentityPolicy } from '@isdk/tool-rpc';
+import {
+  HttpServerToolTransport,
+  RpcSessionIdentityPolicy,
+} from '@isdk/tool-rpc'
 
-new HttpServerToolTransport({ apiUrl: '/api', identity: new RpcSessionIdentityPolicy() });
+new HttpServerToolTransport({
+  apiUrl: '/api',
+  identity: new RpcSessionIdentityPolicy(),
+})
 ```
 
 The full round trip is four steps: **issue → deliver → the client carries it back → match**. Bare
@@ -613,7 +631,7 @@ new HttpServerToolTransport({
   identity: new RpcSessionIdentityPolicy({ deliver: 'header:rpc-session' }),
   // carry it back: the reader has to read that same header, since the default one only reads `authorization`
   credentialReader: (r) => r.headers['rpc-session'],
-});
+})
 ```
 
 Delivery stays opt-in (the channel is genuinely topology-specific), it is HTTP-shaped (Mailbox has no
@@ -626,12 +644,12 @@ the server only verifies them. **It does authenticate**; stateless, so it works 
 ```typescript
 const identity = new RpcBearerPolicy({
   verify: async (token) => {
-    const p = await jwt.verify(token, JWKS);
-    return p ? { id: p.sub, attributes: { scopes: p.scopes } } : undefined;
+    const p = await jwt.verify(token, JWKS)
+    return p ? { id: p.sub, attributes: { scopes: p.scopes } } : undefined
   },
-  allowAnonymous: false,   // reject with 401 instead of handing out an anonymous identity
-});
-new HttpServerToolTransport({ apiUrl: '/api', identity });
+  allowAnonymous: false, // reject with 401 instead of handing out an anonymous identity
+})
+new HttpServerToolTransport({ apiUrl: '/api', identity })
 ```
 
 | | `RpcSessionIdentityPolicy` | `RpcBearerPolicy` |
@@ -658,7 +676,7 @@ const identity = new RpcBearerPolicy({
   verify: (token) => verifyToken(token),
   // public by default: only tools carrying an authScope require a credential; discovery is let through
   allowAnonymous: (ctx) => ctx.toolId === 'rpcApis' || !ctx.tool?.authScope,
-});
+})
 ```
 
 The `ctx` the predicate receives is the addressing result for this call: `toolId` / `act` / `resId`,
@@ -669,8 +687,10 @@ tool. So "does this API require a credential" can live where the tool is registe
 
 ```typescript
 class AdminTool extends ServerTools {
-  authScope = 'admin'          // the field name is a private convention between deployment and business code
-  func(params, ctx) { /* … */ }
+  authScope = 'admin' // the field name is a private convention between deployment and business code
+  func(params, ctx) {
+    /* … */
+  }
 }
 ```
 
@@ -696,15 +716,18 @@ Identity lands in exactly one place, `ctx.identity`:
 ```typescript
 ServerTools.register({
   name: 'whoami',
-  func: (params, ctx) => ({ who: ctx.identity?.id, scopes: ctx.identity?.attributes?.scopes }),
-});
+  func: (params, ctx) => ({
+    who: ctx.identity?.id,
+    scopes: ctx.identity?.attributes?.scopes,
+  }),
+})
 ```
 
 The client brings the credential back (which header carries it is the deployment's transport's call; the bearer
 default reads `authorization`):
 
 ```typescript
-await someTool.run({ q: 1 }, { headers: { authorization: `Bearer ${token}` } });
+await someTool.run({ q: 1 }, { headers: { authorization: `Bearer ${token}` } })
 ```
 
 ### The policy interface
@@ -714,20 +737,25 @@ To plug in an auth-proxy header / mTLS certificate mapping / your own auth servi
 
 ```typescript
 class ProxyHeaderPolicy implements RpcIdentityPolicy<IncomingMessage> {
-  readonly name = 'proxy-header';
+  readonly name = 'proxy-header'
   match(ctx: RpcIdentityContext<IncomingMessage>) {
-    const t = ctx.credential;
-    if (!t) return undefined;                       // undefined = start a new session, not a rejection
-    return { id: t.slice(0, 16), attributes: { tenant: ctx.headers?.['x-tenant'] } };
+    const t = ctx.credential
+    if (!t) return undefined // undefined = start a new session, not a rejection
+    return {
+      id: t.slice(0, 16),
+      attributes: { tenant: ctx.headers?.['x-tenant'] },
+    }
   }
-  assign() { return { id: uuidv4() }; }
+  assign() {
+    return { id: uuidv4() }
+  }
 }
 
 new HttpServerToolTransport({
   apiUrl: '/api',
   identity: new ProxyHeaderPolicy(),
-  credentialReader: (r) => r.headers['x-auth'],      // private headers: write your own reader
-});
+  credentialReader: (r) => r.headers['x-auth'], // private headers: write your own reader
+})
 ```
 
 Key rules (the full contract list lives in `IDENTITY_POLICY_DESIGN.cn.md` at the repository root):
@@ -769,20 +797,20 @@ new ServerTools({
   allowExportFunc: true, // Allow this function to be downloaded
   func: () => {
     // This logic will be executed on the client
-    console.log('Generating UUID on the client...');
-    return Math.random().toString(36).substring(2, 15);
+    console.log('Generating UUID on the client...')
+    return Math.random().toString(36).substring(2, 15)
   },
-}).register();
+}).register()
 ```
 
 **Client-Side Usage:**
 
 ```typescript
 // client.ts
-const uuidTool = ClientTools.get('local-uuid');
+const uuidTool = ClientTools.get('local-uuid')
 // This call executes the downloaded function body. No network request is made.
-const uuid = await uuidTool.run();
-console.log('Generated UUID:', uuid);
+const uuid = await uuidTool.run()
+console.log('Generated UUID:', uuid)
 ```
 
 ### Automatic RESTful Method Routing

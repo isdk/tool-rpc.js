@@ -182,16 +182,16 @@ static toJSON() {
 class OrderService extends ClientTools {}
 
 // 1. 业务定义与物理寻址解耦
-const httpApi = OrderService.connect('http://localhost/api');
-const mbxApi = OrderService.connect('mailbox://peer-1/api');
+const httpApi = OrderService.connect('http://localhost/api')
+const mbxApi = OrderService.connect('mailbox://peer-1/api')
 
 // 2. 独立的 Stub 隔离加载
-await httpApi.loadFrom();
-await mbxApi.loadFrom();
+await httpApi.loadFrom()
+await mbxApi.loadFrom()
 
 // 3. 执行时自动匹配正确的 Transport
-await httpApi.createOrder.run({ id: 1 });
-await mbxApi.createOrder.run({ id: 2 });
+await httpApi.createOrder.run({ id: 1 })
+await mbxApi.createOrder.run({ id: 2 })
 ```
 
 ### 6.2 动态绑定调用 (On-demand Binding)
@@ -200,11 +200,15 @@ await mbxApi.createOrder.run({ id: 2 });
 
 ```typescript
 // 1. 获取通用工具存根 (Stub)
-const chatTool = ClientTools.get('chat');
+const chatTool = ClientTools.get('chat')
 
 // 2. 在执行瞬间决定目标集群 (无状态调用)
-const resUS = await chatTool.with({ apiUrl: 'https://us.api/v1' }).run({ text: 'Hello' });
-const resCN = await chatTool.with({ apiUrl: 'https://cn.api/v1' }).run({ text: '你好' });
+const resUS = await chatTool
+  .with({ apiUrl: 'https://us.api/v1' })
+  .run({ text: 'Hello' })
+const resCN = await chatTool
+  .with({ apiUrl: 'https://cn.api/v1' })
+  .run({ text: '你好' })
 ```
 
 - **无状态特性**：Stub 本身不持有寻址状态，状态仅存在于单次调用的上下文中。

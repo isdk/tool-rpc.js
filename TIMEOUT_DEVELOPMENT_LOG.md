@@ -85,7 +85,12 @@
 
 ```typescript
 // ClientTools.fetch() 内部：
-fetchOptions = defaultsDeep(fetchOptions, this.ctx, this.fetchOptions, classDefaults)
+fetchOptions = defaultsDeep(
+  fetchOptions,
+  this.ctx,
+  this.fetchOptions,
+  classDefaults
+)
 // 再交给 transport：
 transport.fetch(this.name, objParam, act, subName, fetchOptions, this.timeout)
 ```

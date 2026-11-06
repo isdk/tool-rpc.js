@@ -70,6 +70,7 @@
 | `raw` | any | 底座原生对象逃生口 |
 
 **常用状态码**：
+
 - 200：成功
 - 102：任务进入后台（`keepAliveOnTimeout` 触发）
 - 400：能力冲突（请求流但工具不支持）
@@ -110,43 +111,50 @@ import {
   RpcActiveTaskTracker,
   HttpServerToolTransport,
   RpcTransportManager,
-} from '@isdk/tool-rpc';
+} from '@isdk/tool-rpc'
 
 // 定义简单工具
 new ServerTools({
   name: 'greet',
   isApi: true,
   func: ({ name }: { name: string }) => `Hello, ${name}!`,
-}).register();
+}).register()
 
 // 创建 Dispatcher（自动注册 rpcTask 到 systemRegistry）
-const tracker = new RpcActiveTaskTracker();
-const dispatcher = new RpcServerDispatcher({ registry: ServerTools.items, tracker });
+const tracker = new RpcActiveTaskTracker()
+const dispatcher = new RpcServerDispatcher({
+  registry: ServerTools.items,
+  tracker,
+})
 
 // 创建 HTTP 传输
-const apiUrl = 'http://localhost:3000/api/';
-const transport = new HttpServerToolTransport({ apiUrl, dispatcher });
+const apiUrl = 'http://localhost:3000/api/'
+const transport = new HttpServerToolTransport({ apiUrl, dispatcher })
 // 发现端点内置（`rpcApis` 回答 `GET /api`），无需 addDiscoveryHandler
-transport.addRpcHandler(apiUrl);
+transport.addRpcHandler(apiUrl)
 
 // 注册到 Manager（自动检测路由冲突）
-RpcTransportManager.instance.registerServer(transport);
-await RpcTransportManager.instance.startAll();
-console.log(`Server ready at ${apiUrl}`);
+RpcTransportManager.instance.registerServer(transport)
+await RpcTransportManager.instance.startAll()
+console.log(`Server ready at ${apiUrl}`)
 ```
 
 ### 3.3 客户端：发现并调用（HTTP 示例）
 
 ```typescript
 // client.ts
-import { HttpClientToolTransport, RpcTransportManager, ClientTools } from '@isdk/tool-rpc';
+import {
+  HttpClientToolTransport,
+  RpcTransportManager,
+  ClientTools,
+} from '@isdk/tool-rpc'
 
-RpcTransportManager.bindScheme('http', HttpClientToolTransport);
-await ClientTools.loadFrom(undefined, { apiUrl: 'http://localhost:3000/api/' });
+RpcTransportManager.bindScheme('http', HttpClientToolTransport)
+await ClientTools.loadFrom(undefined, { apiUrl: 'http://localhost:3000/api/' })
 
-const greet = ClientTools.get('greet');
-const result = await greet.run({ name: 'World' });
-console.log(result); // "Hello, World!"
+const greet = ClientTools.get('greet')
+const result = await greet.run({ name: 'World' })
+console.log(result) // "Hello, World!"
 ```
 
 ## 四、进阶用法
@@ -162,7 +170,7 @@ console.log(result); // "Hello, World!"
 new ServerTools({
   name: 'flexible-output',
   isApi: true,
-  stream: true,                           // 声明支持流式能力
+  stream: true, // 声明支持流式能力
   params: { stream: { type: 'boolean' } }, // 必须在 params 中声明 stream 参数
   func: function (params: any) {
     // 使用内置 isStream 方法判断（注意：必须用 function 声明，不能用箭头函数）
@@ -171,35 +179,41 @@ new ServerTools({
       return new ReadableStream({
         async start(controller) {
           for (let i = 0; i < 5; i++) {
-            controller.enqueue(`块 ${i}\n`);
-            await new Promise(r => setTimeout(r, 100));
+            controller.enqueue(`块 ${i}\n`)
+            await new Promise((r) => setTimeout(r, 100))
           }
-          controller.close();
-        }
-      });
+          controller.close()
+        },
+      })
     }
     // 非流式输出（一次性返回）
-    return '一次性结果';
+    return '一次性结果'
   },
-}).register();
+}).register()
 
 // 客户端：请求流式
-const streamResult = await ClientTools.get('flexible-output').run({ stream: true });
+const streamResult = await ClientTools.get('flexible-output').run({
+  stream: true,
+})
 for await (const chunk of streamResult) {
-  console.log(chunk); // 逐块打印
+  console.log(chunk) // 逐块打印
 }
 
 // 客户端：请求非流式
-const plainResult = await ClientTools.get('flexible-output').run({ stream: false });
-console.log(plainResult); // "一次性结果"
+const plainResult = await ClientTools.get('flexible-output').run({
+  stream: false,
+})
+console.log(plainResult) // "一次性结果"
 ```
 
 **`isStream` 方法逻辑**：
+
 1. 首先检查工具是否具有流式能力（`this.stream` 是否为 `true`）。
 2. 如果是，再检查 `params` 定义中是否声明了 `stream` 参数。
 3. 如果两者都满足，则返回运行时 `params.stream` 的值；否则返回工具的静态 `stream` 属性。
 
 **关键点**：
+
 - 必须使用 `function` 关键字（而非箭头函数），以保证 `this` 指向工具实例。
 - 必须在 `params` 中显式声明 `stream` 参数，否则 `isStream` 会退化为静态 `stream` 属性。
 - 客户端无需特殊处理，根据返回值类型自动识别：`ReadableStream` 则迭代，否则直接使用。
@@ -222,18 +236,18 @@ new ServerTools({
   isApi: true,
   // 软死线 3s：到点服务端回 102，任务继续在后台跑
   timeout: { value: 3000, keepAliveOnTimeout: true },
-  retention: 'once',        // 结果第一次被读走后自动清除
+  retention: 'once', // 结果第一次被读走后自动清除
   func: async function (this: any, params: { data: number[] }) {
-    let total = 0;
+    let total = 0
     for (const v of params.data) {
-      await new Promise(r => setTimeout(r, 1000));
+      await new Promise((r) => setTimeout(r, 1000))
       // 硬死线 / 客户端断开 / rpcTask.$cancel 都会反映到这个 signal
-      if (this.ctx.signal.aborted) throw new Error('Task aborted');
-      total += v * 2;
+      if (this.ctx.signal.aborted) throw new Error('Task aborted')
+      total += v * 2
     }
-    return total;           // 后台完成后结果存入账本，客户端轮询取回
+    return total // 后台完成后结果存入账本，客户端轮询取回
   },
-}).register();
+}).register()
 ```
 
 账本句柄 `RpcActiveTaskHandle` 由 Dispatcher 创建，字段/方法：`status`（`processing`/`completed`/`error`/`aborted`）、
@@ -243,37 +257,38 @@ new ServerTools({
 **客户端**：通过系统内置的 `rpcTask` 工具轮询。
 
 ```typescript
-const rpcTask = ClientTools.get('rpcTask') as any;
-const longTask = ClientTools.get('long-task') as any;
-const init = await longTask.run({ data: [1, 2, 3] });
-const taskId = init.requestId;
+const rpcTask = ClientTools.get('rpcTask') as any
+const longTask = ClientTools.get('long-task') as any
+const init = await longTask.run({ data: [1, 2, 3] })
+const taskId = init.requestId
 
-let finished = false;
+let finished = false
 while (!finished) {
-  await new Promise(r => setTimeout(r, 2000));
+  await new Promise((r) => setTimeout(r, 2000))
   try {
-    const result = await rpcTask.get({ resId: taskId });
-    console.log('Result:', result);
-    finished = true;
+    const result = await rpcTask.get({ resId: taskId })
+    console.log('Result:', result)
+    finished = true
   } catch (err: any) {
     if (err.status === 102) {
       // 继续轮询
     } else if (err.status === 404) {
-      console.log('Task expired');
-      finished = true;
+      console.log('Task expired')
+      finished = true
     } else if (err.status === 408) {
-      console.log('Task terminated');
-      finished = true;
+      console.log('Task terminated')
+      finished = true
     } else {
-      throw err;
+      throw err
     }
   }
 }
 ```
 
 **取消任务**：
+
 ```typescript
-await rpcTask.cancel({ resId: taskId });
+await rpcTask.cancel({ resId: taskId })
 ```
 
 ### 4.3 使用 Mailbox 传输层
@@ -281,54 +296,77 @@ await rpcTask.cancel({ resId: taskId });
 Mailbox 传输层适用于跨进程/线程通信，无需 HTTP 服务器。需要安装 `@mboxlabs/mailbox` 包。
 
 **服务端**：
+
 ```typescript
-import { Mailbox, MemoryProvider } from '@mboxlabs/mailbox';
-import { MailboxServerTransport, RpcServerDispatcher, RpcActiveTaskTracker, ServerTools } from '@isdk/tool-rpc';
+import { Mailbox, MemoryProvider } from '@mboxlabs/mailbox'
+import {
+  MailboxServerTransport,
+  RpcServerDispatcher,
+  RpcActiveTaskTracker,
+  ServerTools,
+} from '@isdk/tool-rpc'
 
-const mailbox = new Mailbox();
-mailbox.registerProvider(new MemoryProvider());
+const mailbox = new Mailbox()
+mailbox.registerProvider(new MemoryProvider())
 
-const serverAddr = 'mem://bot@mailbox/api/v1';
-const tracker = new RpcActiveTaskTracker();
-const dispatcher = new RpcServerDispatcher({ registry: ServerTools.items, tracker });
-const transport = new MailboxServerTransport({ mailbox, apiUrl: serverAddr, dispatcher });
+const serverAddr = 'mem://bot@mailbox/api/v1'
+const tracker = new RpcActiveTaskTracker()
+const dispatcher = new RpcServerDispatcher({
+  registry: ServerTools.items,
+  tracker,
+})
+const transport = new MailboxServerTransport({
+  mailbox,
+  apiUrl: serverAddr,
+  dispatcher,
+})
 
 // 注册工具（同前）
-new ServerTools({ name: 'greet', isApi: true, func: ({ name }: { name: string }) => `Hello, ${name}!` }).register();
+new ServerTools({
+  name: 'greet',
+  isApi: true,
+  func: ({ name }: { name: string }) => `Hello, ${name}!`,
+}).register()
 
 // 注册路由（发现端点内置，无需额外声明）
-transport.addRpcHandler(serverAddr);
+transport.addRpcHandler(serverAddr)
 
 // 启动
-RpcTransportManager.instance.registerServer(transport);
-await RpcTransportManager.instance.startAll();
+RpcTransportManager.instance.registerServer(transport)
+await RpcTransportManager.instance.startAll()
 ```
 
 **客户端**：
-```typescript
-import { Mailbox, MemoryProvider } from '@mboxlabs/mailbox';
-import { MailboxClientTransport, RpcTransportManager, ClientTools } from '@isdk/tool-rpc';
 
-const mailbox = new Mailbox();
-mailbox.registerProvider(new MemoryProvider());
+```typescript
+import { Mailbox, MemoryProvider } from '@mboxlabs/mailbox'
+import {
+  MailboxClientTransport,
+  RpcTransportManager,
+  ClientTools,
+} from '@isdk/tool-rpc'
+
+const mailbox = new Mailbox()
+mailbox.registerProvider(new MemoryProvider())
 
 const transport = new MailboxClientTransport({
   mailbox,
   apiUrl: 'mem://bot@mailbox/api/v1',
   clientAddress: 'mem://client/inbox', // 客户端收件箱地址
-});
+})
 
-await transport.start();
+await transport.start()
 // 按 apiUrl 精确登记实例，`getClient()` 直接命中缓存：
-RpcClientTransportManager.instance.register(transport);
-await ClientTools.loadFrom(undefined, { apiUrl: 'mem://bot@mailbox/api/v1' });
+RpcClientTransportManager.instance.register(transport)
+await ClientTools.loadFrom(undefined, { apiUrl: 'mem://bot@mailbox/api/v1' })
 
-const greet = ClientTools.get('greet');
-const result = await greet.run({ name: 'World' });
-console.log(result); // "Hello, World!"
+const greet = ClientTools.get('greet')
+const result = await greet.run({ name: 'World' })
+console.log(result) // "Hello, World!"
 ```
 
 **注意**：
+
 - 信箱传输**不能走 `bindScheme` 自动构造**：scheme 注册表会执行 `new TransportClass(apiUrl, options)`，
   而 `MailboxClientTransport` 的构造签名是**单个 options 对象**（且 `clientAddress` 必填），因此必须像上面
   那样先 `new` 再 `register(transport)`。
@@ -346,7 +384,7 @@ console.log(result); // "Hello, World!"
 const result = await someTool.run(
   { name: 'World' },
   { clientId: 'my-session-001' }
-);
+)
 ```
 
 - **客户端**：`ClientToolTransport.fetch()` 基类自动将 `fetchOptions.clientId` 注入到 header `rpc-client-id`。
@@ -383,11 +421,16 @@ class FastifyServerTransport extends ServerToolTransport {
 
 ```typescript
 // 创建独立 Manager 实例（非全局单例）
-const manager = new RpcTransportManager();
-const dispatcher = new RpcServerDispatcher({ tracker: new RpcActiveTaskTracker() });
-const transport = new HttpServerToolTransport({ apiUrl: 'http://localhost:3001/', dispatcher });
-manager.registerServer(transport);
-await manager.startAll();
+const manager = new RpcTransportManager()
+const dispatcher = new RpcServerDispatcher({
+  tracker: new RpcActiveTaskTracker(),
+})
+const transport = new HttpServerToolTransport({
+  apiUrl: 'http://localhost:3001/',
+  dispatcher,
+})
+manager.registerServer(transport)
+await manager.startAll()
 ```
 
 ### 4.7 身份策略（Identity Policy）
@@ -402,19 +445,19 @@ new HttpServerToolTransport({
   apiUrl: '/api',
   identity: new RpcSessionIdentityPolicy({ deliver: 'header:rpc-session' }),
   credentialReader: (r) => r.headers['rpc-session'],
-});
+})
 
 // B：JWT / api key（做认证；不认就 401）
 new HttpServerToolTransport({
   apiUrl: '/api',
   identity: new RpcBearerPolicy({
     verify: async (token) => {
-      const p = await jwt.verify(token, JWKS);
-      return p ? { id: p.sub, attributes: { scopes: p.scopes } } : undefined;
+      const p = await jwt.verify(token, JWKS)
+      return p ? { id: p.sub, attributes: { scopes: p.scopes } } : undefined
     },
     allowAnonymous: false,
   }),
-});
+})
 ```
 
 - **业务侧唯一读法**：`ctx.identity?.id` / `ctx.identity?.attributes?.scopes`。不平铺 `ctx.userId` / `ctx.tenantId`。
@@ -448,6 +491,7 @@ new HttpServerToolTransport({
 ## 五、关键注意事项
 
 ### 5.1 路径规范化
+
 逻辑路由（`getRoutes()`）以 **canonical 形式**声明：以 `/` 开头、**不带**尾随斜杠（根路由为 `/`），由 `ServerToolTransport.toPathname()` 归一化。前缀匹配与物理路由表的 key 由 `toMatchPrefix()` 补尾随斜杠后派生——**匹配阶段**仍遵循 Trailing Slash Normalization，`/api` 不会误匹配 `/apix`。声明路由请用 `claimRoute()`，不要手写字符串拼接。
 
 **`getRoutes()` 报 `'/'` 是接管声明，不是「那里有发现端点」的保证**：内置路由行（`builtinRouteEntries()`）只由 `claimRoute()` / `addRoute()` 插入，所以从未声明前缀的 transport 路由表为空，`GET /` 回 400（表为空时错误会点名缺的那一步）。内置**工具** `rpcApis` 本身始终在系统注册表里，显式寻址（`rpc-fn: rpcApis`）总能命中。适配器按 `getRouteTable()` 原生注册前，先确认前缀已声明。
@@ -455,39 +499,48 @@ new HttpServerToolTransport({
 **归属登记与路由必须同步**：`claimRoute()` 只改路由表，Manager 的归属表由 `registerServer()` / `unregisterServer()` 维护。框架适配器（Fastify/Electron/Express）应在自己的子类里成对调用 `registerRoutes()` / `unregisterRoutes()`（它们同时做 claim 与归属登记），而不是只调 `claimRoute()`——否则 `close()` 后归属表残留条目，下次 `listen()` 会误报 `Routing Conflict`。
 
 ### 5.2 影子实例隔离
+
 Dispatcher 在执行时为每个请求创建 `Object.create(tool)` 的影子实例，`this.ctx` 仅属于本次调用。**严禁在工具函数中修改原始对象的属性**。
 
 ### 5.3 物理连接关闭自动清理
+
 传输层（如 `HttpServerToolTransport`）监听 `rawRes.close` 事件，自动调用 `handle.abort('Physical connection closed')`。这适用于流式响应和后台任务，无需手动处理。
 
 ### 5.4 requestId 来源与唯一性
+
 `requestId` 由**传输层**决定，不是 Dispatcher 生成的：HTTP 传输取 header `req-id`，缺失时回退到 `uuidv4()`；
 Mailbox 在严格模式下**必须**带 `req-id` header（否则 400），非严格模式回退到消息 id。业务侧只读
 `this.ctx.requestId`，不要自己生成。同一 `requestId` 重复登记会抛 409（`RpcStatusCode.CONFLICT`）。
 
 ### 5.5 能力协商
+
 - 工具声明 `stream: true` 才支持流式输出。
 - 客户端请求流但工具不支持 → 返回 400。
 - 传输层不支持流（如 Mailbox）但工具返回流 → 返回 400。
 
 ### 5.6 不要手动注册 `RpcTaskResource` / `RpcApisResource`
+
 它们由 `RpcServerDispatcher` 在初始化时自动注册到 `systemRegistry`。手动注册会导致重复注册错误。
 要换掉发现端点，不必删内置项：在自己注册表里注册同名 `rpcApis` 就覆盖它（解析顺序：业务表优先于系统表），
 或者用 `addRoute()` 声明同一路由行把 `GET 前缀根` 指向自己的工具。
 
 ### 5.7 超时与死线
+
 - **软死线**：触发 102 Processing，任务转入后台（需设置 `keepAliveOnTimeout: true`）。
 - **硬死线**：触发 408 Terminated，强制中止任务。
 - 通过 `timeout` 配置对象设置：`{ value: 8000, keepAliveOnTimeout: true }`。
 
 ### 5.8 结果保留策略
+
 - `retention: 'once'` 时，第一次成功 `get` 后任务被逻辑删除（`fetchCount++` 触发清理）。
 - 如需多次查询，使用 `Permanent` 或指定保留时长。
 
 ### 5.9 错误处理
+
 推荐抛出 `RpcError`（`new RpcError(message, code, status?, data?)`），Dispatcher 会自动映射为标准化错误响应。
 
 ### 5.10 `isStream` 的正确使用
+
 - 必须使用 `function` 声明（非箭头函数），以保证 `this` 指向工具实例。
 - 必须在 `params` 定义中显式声明 `stream` 参数，否则 `isStream` 会退化为静态 `stream` 属性。
 - 如果工具始终返回流，可以省略 `params.stream` 声明，此时 `isStream` 返回 `this.stream`（即 `true`）。
@@ -523,6 +576,7 @@ Mailbox 在严格模式下**必须**带 `req-id` header（否则 400），非严
 ### 8.2 导出内容
 
 浏览器入口导出的模块包括：
+
 - **客户端工具**: `ClientTools`, `RpcMethodsClientTool`, `ResClientTools`
 - **客户端传输**: `ClientToolTransport`, `HttpClientToolTransport`, `IClientToolTransport`
 - **抽象服务端类**: `ServerTools`, `RpcMethodsServerTool`, `ResServerTools`
@@ -566,8 +620,11 @@ src/transports/
 ```typescript
 // 浏览器端：完整的内存 RPC 循环
 import {
-  ClientTools, ServerTools, RpcServerDispatcher,
-  HttpClientToolTransport, RpcTransportManager,
+  ClientTools,
+  ServerTools,
+  RpcServerDispatcher,
+  HttpClientToolTransport,
+  RpcTransportManager,
 } from '@isdk/tool-rpc/browser'
 
 // 注册 HTTP 协议
@@ -599,6 +656,7 @@ const result = await greet.run({ name: 'World' })
 ### 8.5 构建产物验证
 
 每次构建后，`test/browser-entry.test.ts` 会自动验证：
+
 - 所有客户端模块正确导出
 - 所有抽象服务端模块和传输基础设施正确导出
 - Node.js 特有模块（`HttpServerToolTransport`, `MailboxServerTransport` 等）不泄漏到 browser 入口
@@ -613,17 +671,21 @@ const result = await greet.run({ name: 'World' })
 
 ```typescript
 interface IServerToolTransport {
-  getListenAddr(): string | string[]; // 物理地址（如 ':3000'）
-  getRoutes(): string[];            // 逻辑路由（canonical 前缀，无尾随斜杠）
-  start(): Promise<void>;
-  stop(): Promise<void>;
+  getListenAddr(): string | string[] // 物理地址（如 ':3000'）
+  getRoutes(): string[] // 逻辑路由（canonical 前缀，无尾随斜杠）
+  start(): Promise<void>
+  stop(): Promise<void>
   // 以下两个在 ServerToolTransport 基类上，内部通过 claimRoute() 登记前缀
-  addRpcHandler(apiUrl: string, options?: RouteClaimOptions): void;             // { registry?, remount? }
+  addRpcHandler(apiUrl: string, options?: RouteClaimOptions): void // { registry?, remount? }
   // 兼容外壳（已 @deprecated，首次调用打一次迁移提示）：它只把自定义清单挂成该前缀的 `rpcApis` 实现；不写也有内置发现端点
-  addDiscoveryHandler(apiUrl: string, handler: Function, options?: RouteClaimOptions): void;
+  addDiscoveryHandler(
+    apiUrl: string,
+    handler: Function,
+    options?: RouteClaimOptions
+  ): void
   // 路由表：声明/读取前缀内的路径 → 工具寻址（内置发现行就在里面，第三方同 key 声明可换掉）
-  addRoute(apiUrl: string, entry: RouteEntry): void;   // { path, when?: { method?, act? }, toolId, act? }
-  getRouteTable(): Array<RouteEntry & { prefix: string }>;
+  addRoute(apiUrl: string, entry: RouteEntry): void // { path, when?: { method?, act? }, toolId, act? }
+  getRouteTable(): Array<RouteEntry & { prefix: string }>
 }
 ```
 
@@ -647,7 +709,7 @@ Manager 侧对应的一对是 `registerServer()` / `unregisterServer()`（旧名
 
 ```typescript
 interface IClientToolTransport {
-  call(request: ToolRpcRequest): Promise<ToolRpcResponse>;
+  call(request: ToolRpcRequest): Promise<ToolRpcResponse>
   // 可选：自动处理 102 轮询
 }
 ```
@@ -656,13 +718,13 @@ interface IClientToolTransport {
 
 ```typescript
 interface RpcActiveTaskHandle {
-  state: 'pending' | 'processing' | 'completed' | 'error' | 'aborted';
-  result: any;
-  error?: Error;
-  signal: AbortSignal;
-  resolve(value: any): void;
-  reject(error: Error): void;
-  abort(reason?: string): void;
-  setOutputStream(stream: ReadableStream): void;
+  state: 'pending' | 'processing' | 'completed' | 'error' | 'aborted'
+  result: any
+  error?: Error
+  signal: AbortSignal
+  resolve(value: any): void
+  reject(error: Error): void
+  abort(reason?: string): void
+  setOutputStream(stream: ReadableStream): void
 }
 ```

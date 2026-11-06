@@ -38,33 +38,33 @@ npm install @isdk/tool-rpc @isdk/tool-func
 
 ```typescript
 // ./tools/UserTool.ts
-import { ResServerTools, ResServerFuncParams } from '@isdk/tool-rpc';
-import { NotFoundError } from '@isdk/common-error';
+import { ResServerTools, ResServerFuncParams } from '@isdk/tool-rpc'
+import { NotFoundError } from '@isdk/common-error'
 
 // 用于演示的内存数据库
 const users: Record<string, any> = {
   '1': { id: '1', name: '爱丽丝' },
   '2': { id: '2', name: '鲍勃' },
-};
+}
 
 export class UserTool extends ResServerTools {
   // 标准 RESTful 方法：GET /api/users/:id
   get({ id }: ResServerFuncParams) {
-    const user = users[id as string];
-    if (!user) throw new NotFoundError(id as string, 'user');
-    return user;
+    const user = users[id as string]
+    if (!user) throw new NotFoundError(id as string, 'user')
+    return user
   }
 
   // 标准 RESTful 方法：GET /api/users
   list() {
-    return Object.values(users);
+    return Object.values(users)
   }
 
   // 自定义 RPC 方法
   $promote({ id }: ResServerFuncParams) {
-    const user = users[id as string];
-    if (!user) throw new NotFoundError(id as string, 'user');
-    return { ...user, role: 'admin' };
+    const user = users[id as string]
+    if (!user) throw new NotFoundError(id as string, 'user')
+    return { ...user, role: 'admin' }
   }
 }
 ```
@@ -75,32 +75,37 @@ export class UserTool extends ResServerTools {
 
 ```typescript
 // ./server.ts
-import { HttpServerToolTransport, RpcTransportManager, RpcServerDispatcher, ServerTools } from '@isdk/tool-rpc';
-import { UserTool } from './tools/UserTool';
+import {
+  HttpServerToolTransport,
+  RpcTransportManager,
+  RpcServerDispatcher,
+  ServerTools,
+} from '@isdk/tool-rpc'
+import { UserTool } from './tools/UserTool'
 
 async function startServer() {
   // 1. 在全局注册表中注册工具实例
-  new UserTool('users').register();
+  new UserTool('users').register()
 
   // 2. 初始化传输层并注入专用的调度器
-  const apiUrl = 'http://localhost:3000/api';
+  const apiUrl = 'http://localhost:3000/api'
   const serverTransport = new HttpServerToolTransport({
     apiUrl,
-    dispatcher: new RpcServerDispatcher({ registry: ServerTools.items })
-  });
+    dispatcher: new RpcServerDispatcher({ registry: ServerTools.items }),
+  })
 
   // 3. 配置该传输层的逻辑路由
   // 暴露 RPC 端点供工具执行。服务发现是内置的（`rpcApis` 工具回答 `GET /api`），无需额外声明。
-  serverTransport.addRpcHandler(apiUrl);
+  serverTransport.addRpcHandler(apiUrl)
 
   // 4. 将传输层注册到管理器并启动所有服务
-  RpcTransportManager.instance.registerServer(serverTransport);
-  await RpcTransportManager.instance.startAll();
+  RpcTransportManager.instance.registerServer(serverTransport)
+  await RpcTransportManager.instance.startAll()
 
-  console.log(`✅ 工具服务器已启动，地址: ${apiUrl}`);
+  console.log(`✅ 工具服务器已启动，地址: ${apiUrl}`)
 }
 
-startServer();
+startServer()
 ```
 
 ### 第 3 步：设置并使用客户端
@@ -109,45 +114,51 @@ startServer();
 
 ```typescript
 // ./client.ts
-import { HttpClientToolTransport, RpcTransportManager, ResClientTools } from '@isdk/tool-rpc';
+import {
+  HttpClientToolTransport,
+  RpcTransportManager,
+  ResClientTools,
+} from '@isdk/tool-rpc'
 
 // 定义一个类型以获得完整的类型提示，包括自定义方法
 type UserClientTool = ResClientTools & {
-  promote(params: { id: string }): Promise<{ id: string; name: string; role: string }>;
-};
+  promote(params: {
+    id: string
+  }): Promise<{ id: string; name: string; role: string }>
+}
 
 async function main() {
-  const apiUrl = 'http://localhost:3000/api';
+  const apiUrl = 'http://localhost:3000/api'
 
   // 1. 注册 HTTP 协议（如果未全局预注册）
-  RpcTransportManager.bindScheme('http', HttpClientToolTransport);
+  RpcTransportManager.bindScheme('http', HttpClientToolTransport)
 
   // 2. 从服务器加载 API 定义
   // 这会自动为给定的 apiUrl 创建或使用传输实例
-  await ResClientTools.loadFrom(undefined, { apiUrl });
+  await ResClientTools.loadFrom(undefined, { apiUrl })
 
   // 3. 获取为远程工具动态创建的代理
-  const userTool = ResClientTools.get('users') as UserClientTool;
+  const userTool = ResClientTools.get('users') as UserClientTool
   if (!userTool) {
-    throw new Error('远程工具 "users" 未找到！');
+    throw new Error('远程工具 "users" 未找到！')
   }
 
   // 4. 像调用本地方法一样调用远程 API！
 
   // 调用 GET /api/users/1
-  const user = await userTool.get!({ id: '1' });
-  console.log('获取用户:', user); // { id: '1', name: '爱丽丝' }
+  const user = await userTool.get!({ id: '1' })
+  console.log('获取用户:', user) // { id: '1', name: '爱丽丝' }
 
   // 调用 GET /api/users
-  const allUsers = await userTool.list!();
-  console.log('所有用户:', allUsers); // [{...}, {...}]
+  const allUsers = await userTool.list!()
+  console.log('所有用户:', allUsers) // [{...}, {...}]
 
   // 调用自定义 RPC 方法 $promote
-  const admin = await userTool.promote({ id: '2' });
-  console.log('提升后的用户:', admin); // { id: '2', name: '鲍勃', role: 'admin' }
+  const admin = await userTool.promote({ id: '2' })
+  console.log('提升后的用户:', admin) // { id: '2', name: '鲍勃', role: 'admin' }
 }
 
-main();
+main()
 ```
 
 ## 核心概念：分层抽象
@@ -160,12 +171,12 @@ main();
 
 ### 1. 双重身份模型 (The Duality)
 
-* **容器类 (Plural 'Tools')**：如 `ServerTools`, `RpcMethodsServerTool`, `ResServerTools`。
-  * **角色**：它们是静态的**注册表 (Registry)** 和 **发现协议过滤器**。
-  * **职责**：定义层级规范，管理工具集合，实现 `toJSON()` 发现算法。在代码层面上，它们通过静态属性（如 `items`）维护全局状态。
-* **业务实例 (Singular 'Tool'/'Func')**：由 `new ServerTools(...)` 或其子类创建的实例。
-  * **角色**：它们是具体的**功能实现单元 (Functional Unit)**。
-  * **职责**：承载业务逻辑（通过 `func` 方法或以 `$` 开头的 RPC 方法），定义具体的参数模式 (`params`) 和元数据。
+- **容器类 (Plural 'Tools')**：如 `ServerTools`, `RpcMethodsServerTool`, `ResServerTools`。
+  - **角色**：它们是静态的**注册表 (Registry)** 和 **发现协议过滤器**。
+  - **职责**：定义层级规范，管理工具集合，实现 `toJSON()` 发现算法。在代码层面上，它们通过静态属性（如 `items`）维护全局状态。
+- **业务实例 (Singular 'Tool'/'Func')**：由 `new ServerTools(...)` 或其子类创建的实例。
+  - **角色**：它们是具体的**功能实现单元 (Functional Unit)**。
+  - **职责**：承载业务逻辑（通过 `func` 方法或以 `$` 开头的 RPC 方法），定义具体的参数模式 (`params`) 和元数据。
 
 > **命名约定**：类名使用复数（Tools）表示其容器属性，实例或其派生业务类逻辑上视为单数（Tool/Func）。
 
@@ -173,22 +184,22 @@ main();
 
 为了确保客户端在自动发现（Discovery）阶段加载到的是精准且协议匹配的工具定义，项目实现了一套**基于层级的发现隔离机制**。
 
-* **隔离算法**：`toJSON()` **只定义一处**——`ServerTools`（`src/server-tools.ts`）；子类不重写，继承过去，变的只是 `this` 是哪个类。它遍历 `this.items`，两个分支任一命中就保留该条目：
-    1. **类型检查**：`item instanceof this && item.isApi !== false`。`instanceof` 只沿继承链向下成立，所以这条只产生**向上隔离**：在子类上调它，会排除父类的实例；在父类上调它，**不会**排除子类的实例。
-    2. **基础 `ToolFunc` 检查**：`item.isApi && !(item instanceof ServerTools) && this === ServerTools`——没经由 `ServerTools` 子类注册的裸 `ToolFunc`，只有从 `ServerTools` 本身才列得出来，且必须自己标 `isApi: true` 才 opt-in。
+- **隔离算法**：`toJSON()` **只定义一处**——`ServerTools`（`src/server-tools.ts`）；子类不重写，继承过去，变的只是 `this` 是哪个类。它遍历 `this.items`，两个分支任一命中就保留该条目：
+  1. **类型检查**：`item instanceof this && item.isApi !== false`。`instanceof` 只沿继承链向下成立，所以这条只产生**向上隔离**：在子类上调它，会排除父类的实例；在父类上调它，**不会**排除子类的实例。
+  2. **基础 `ToolFunc` 检查**：`item.isApi && !(item instanceof ServerTools) && this === ServerTools`——没经由 `ServerTools` 子类注册的裸 `ToolFunc`，只有从 `ServerTools` 本身才列得出来，且必须自己标 `isApi: true` 才 opt-in。
 
   未设 `allowExportFunc` 的条目走工具自己的 `toJSON()`，并删掉 `func`。
 
-* **各层级导出范围**（实测：同一份注册表里有 `ping`（ServerTools）、`userService`（RpcMethodsServerTool）、`users`（ResServerTools））：
-  * **`ServerTools.toJSON()`** → `ping`、`userService`、`users`。子类实例同样 `instanceof ServerTools`，所以父类清单**会**包含 RPC 与 Resource 工具。
-  * **`RpcMethodsServerTool.toJSON()`** → `userService`、`users`。排除了裸 `ServerTools` 实例，保留自己的子类（向下兼容）。
-  * **`ResServerTools.toJSON()`** → 只有 `users`。这才是该机制真正提供的向上隔离。
+- **各层级导出范围**（实测：同一份注册表里有 `ping`（ServerTools）、`userService`（RpcMethodsServerTool）、`users`（ResServerTools））：
+  - **`ServerTools.toJSON()`** → `ping`、`userService`、`users`。子类实例同样 `instanceof ServerTools`，所以父类清单**会**包含 RPC 与 Resource 工具。
+  - **`RpcMethodsServerTool.toJSON()`** → `userService`、`users`。排除了裸 `ServerTools` 实例，保留自己的子类（向下兼容）。
+  - **`ResServerTools.toJSON()`** → 只有 `users`。这才是该机制真正提供的向上隔离。
 
-* **调哪个类之外，遍历哪份注册表同样重要**：`toJSON()` 读的是 `this.items`，所以调过 `isolateRegistry()` 的子类只看得到自己那一层。同理，把裸 `items` 对象交给 dispatcher（`new RpcServerDispatcher({ registry: ServerTools.items })`）而不是容器类，这层过滤就整个跳过——对象里每个条目都会列出（各自仍走自己的 `toJSON()`）。要按层级过滤就传容器类，要不分层级全量列出就传 `items`。
+- **调哪个类之外，遍历哪份注册表同样重要**：`toJSON()` 读的是 `this.items`，所以调过 `isolateRegistry()` 的子类只看得到自己那一层。同理，把裸 `items` 对象交给 dispatcher（`new RpcServerDispatcher({ registry: ServerTools.items })`）而不是容器类，这层过滤就整个跳过——对象里每个条目都会列出（各自仍走自己的 `toJSON()`）。要按层级过滤就传容器类，要不分层级全量列出就传 `items`。
 
-* **`isApi` 的默认行为准则**：
-  * **对于派生自 `ServerTools` 的业务类实例**：由于其设计初衷就是为了远程暴露，因此默认**自动导出**。除非开发者显式设置 `isApi: false` 来实现“包内可见”逻辑。
-  * **对于基础 `ToolFunc` 实例**：出于安全考虑，默认**禁止导出**。必须显式设置 `isApi: true` 才能被 `ServerTools` 容器发现。
+- **`isApi` 的默认行为准则**：
+  - **对于派生自 `ServerTools` 的业务类实例**：由于其设计初衷就是为了远程暴露，因此默认**自动导出**。除非开发者显式设置 `isApi: false` 来实现“包内可见”逻辑。
+  - **对于基础 `ToolFunc` 实例**：出于安全考虑，默认**禁止导出**。必须显式设置 `isApi: true` 才能被 `ServerTools` 容器发现。
 
 ```mermaid
 graph TD
@@ -229,15 +240,15 @@ V2 架构引入了**影子实例**机制，彻底解决了异步环境下的 `th
 `@isdk/tool-rpc` 的核心由三个解耦的组件构成：
 
 1. **RpcTransportManager (管理中心)**:
-    - **物理映射**: 管理 `apiUrl` 到 `IToolTransport` 实例的映射。
-    - **路由归属登记**: 维护 `ListenAddr -> Set<RoutePath>` 归属表并做冲突检测，防止在共享物理端口上发生路由劫持。
+   - **物理映射**: 管理 `apiUrl` 到 `IToolTransport` 实例的映射。
+   - **路由归属登记**: 维护 `ListenAddr -> Set<RoutePath>` 归属表并做冲突检测，防止在共享物理端口上发生路由劫持。
 2. **RpcServerDispatcher (执行调度器)**:
-    - **归一化**: 将协议特定的对象转化为标准的 `ToolRpcContext`。
-    - **死线裁决**: 实现软死线（触发 `102 Processing` 以转入后台执行）和硬死线（以 `408` 终止任务）。
+   - **归一化**: 将协议特定的对象转化为标准的 `ToolRpcContext`。
+   - **死线裁决**: 实现软死线（触发 `102 Processing` 以转入后台执行）和硬死线（以 `408` 终止任务）。
 3. **RpcActiveTaskTracker (任务账本)**:
-    - **可观测性**: 跨协议追踪所有活跃和后台任务。
-    - **结果保留**: 管理任务结果的保留策略（`Once`, `Permanent`, TTL）。
-    - **中止联动**: 将物理连接的 `AbortSignal` 桥接到执行层。
+   - **可观测性**: 跨协议追踪所有活跃和后台任务。
+   - **结果保留**: 管理任务结果的保留策略（`Once`, `Permanent`, TTL）。
+   - **中止联动**: 将物理连接的 `AbortSignal` 桥接到执行层。
 
 ## 🛠️ 进阶架构：分层注册表与多态定制
 
@@ -262,13 +273,13 @@ V2 架构引入了**影子实例**机制，彻底解决了异步环境下的 `th
 
 当一个复杂的“工作流工具”通过 `depends` 属性依赖其他工具时，如何解析这些依赖项决定了系统的灵活性与稳定性。`tool-rpc` 提供了三种绑定策略：
 
-* **`'auto'` (默认 - 智能感知)**：**最符合直觉的业务模式**。
+- **`'auto'` (默认 - 智能感知)**：**最符合直觉的业务模式**。
   - **逻辑**：系统会智能判断“调用者”与“工具定义者”的关系。只有当调用者属于定义者的“后代作用域”时，才会尝试寻找影子遮蔽版本。
   - **意义**：它实现了“局部定制，全局稳定”。它允许插件修改工作流的某个中间环节，而不会破坏父级系统自身的稳定性保护。
-* **`'early'` (早绑定 - 契约保护模式)**：
+- **`'early'` (早绑定 - 契约保护模式)**：
   - **逻辑**：始终使用注册时锁定的原始依赖实例。
   - **意义**：用于安全性或一致性要求极高的核心依赖（如加解密、鉴权、底层存储），防止其被下游影子覆盖所“劫持”。
-* **`'late'` (晚绑定 - 运行环境优先)**：
+- **`'late'` (晚绑定 - 运行环境优先)**：
   - **逻辑**：无视血缘关系，强制从当前最顶层的容器解析依赖。
   - **意义**：允许完全的运行时注入，适用于需要根据执行环境彻底切换逻辑的场景。
 
@@ -279,20 +290,20 @@ V2 架构引入了**影子实例**机制，彻底解决了异步环境下的 `th
 ## ⚠️ 常见误区与坑点 (Common Pitfalls)
 
 1. **误区：在 `ResServerTools` 子类中定义 `func()`**
-    * **后果**：`ResServerTools` 依赖 `func` 来进行 REST/RPC 分发。如果你手动重写了 `func` 且未调用 `super.func`，所有的 `get/list/$method` 调用都将失效。
-    * **正确做法**：在 Res 层级，应始终通过定义 `get()`, `list()` 或以 `$` 为前缀的方法来实现业务。
+   - **后果**：`ResServerTools` 依赖 `func` 来进行 REST/RPC 分发。如果你手动重写了 `func` 且未调用 `super.func`，所有的 `get/list/$method` 调用都将失效。
+   - **正确做法**：在 Res 层级，应始终通过定义 `get()`, `list()` 或以 `$` 为前缀的方法来实现业务。
 
 2. **误区：认为 `isApi: false` 是防火墙**
-    * **后果**：`isApi: false` 目前仅在“发现”阶段起作用（即客户端看不到它）。如果攻击者猜到了工具名称并直接构造请求，服务器传输层默认仍会执行它。
-    * **正确做法**：对于敏感工具，应在业务逻辑内接入鉴权机制，或利用 `_req` 上下文进行权限校验。
+   - **后果**：`isApi: false` 目前仅在“发现”阶段起作用（即客户端看不到它）。如果攻击者猜到了工具名称并直接构造请求，服务器传输层默认仍会执行它。
+   - **正确做法**：对于敏感工具，应在业务逻辑内接入鉴权机制，或利用 `_req` 上下文进行权限校验。
 
 3. **误区：单进程测试时未做隔离**
-    * **后果**：报错 `[ToolName] already registered as ServerTools`。
-    * **正确做法**：在 `beforeAll` 钩子中为 `ClientTools` 开启 `isolateRegistry()`。
+   - **后果**：报错 `[ToolName] already registered as ServerTools`。
+   - **正确做法**：在 `beforeAll` 钩子中为 `ClientTools` 开启 `isolateRegistry()`。
 
 4. **误区：混淆静态 Tools 与 实例 Func 的职责**
-    * **后果**：在业务逻辑中尝试修改 `ServerTools.items`，导致全局污染。
-    * **正确做法**：静态成员仅用于管理和配置，业务逻辑应严格限定在实例的 `this` 或 `this.ctx` 上。
+   - **后果**：在业务逻辑中尝试修改 `ServerTools.items`，导致全局污染。
+   - **正确做法**：静态成员仅用于管理和配置，业务逻辑应严格限定在实例的 `this` 或 `this.ctx` 上。
 
 ## ⏱️ 超时机制 (Timeout Strategy)
 
@@ -358,8 +369,8 @@ V2 架构引入了**影子实例**机制，彻底解决了异步环境下的 `th
 客户端可以通过 `.with()` 为单次或一系列调用预设环境：
 
 ```typescript
-const runner = tool.with({ timeout: 2000, traceId: 'T123' });
-await runner.run(params);
+const runner = tool.with({ timeout: 2000, traceId: 'T123' })
+await runner.run(params)
 ```
 
 ### 第 1 层：`ServerTools` / `ClientTools` - 基础远程函数
@@ -378,7 +389,7 @@ await runner.run(params);
       name: 'ping',
       isApi: true, // 标记为可被发现
       func: () => 'pong',
-    }).register();
+    }).register()
     ```
 
 - **`ClientTools`**:
@@ -400,14 +411,14 @@ await runner.run(params);
     class UserService extends RpcMethodsServerTool {
       $createUser({ name }) {
         // ... 创建用户的逻辑
-        return { id: 'user-1', name };
+        return { id: 'user-1', name }
       }
       $getUser({ id }) {
         // ... 获取用户的逻辑
-        return { id, name: 'Test User' };
+        return { id, name: 'Test User' }
       }
     }
-    new UserService('userService').register();
+    new UserService('userService').register()
     ```
 
 - **`RpcMethodsClientTool`**:
@@ -417,8 +428,8 @@ await runner.run(params);
 
     ```typescript
     // client.ts
-    const userService = RpcMethodsClientTool.get('userService');
-    const newUser = await userService.createUser({ name: 'Alice' });
+    const userService = RpcMethodsClientTool.get('userService')
+    const newUser = await userService.createUser({ name: 'Alice' })
     ```
 
 ### 第 3 层：`ResServerTools` / `ResClientTools` - RESTful 资源
@@ -441,9 +452,9 @@ await runner.run(params);
 
     ```typescript
     // client.ts
-    const userRes = ResClientTools.get('users');
-    const user = await userRes.get({ id: '1' }); // 发送 GET /api/users/1
-    const allUsers = await userRes.list();       // 发送 GET /api/users
+    const userRes = ResClientTools.get('users')
+    const user = await userRes.get({ id: '1' }) // 发送 GET /api/users/1
+    const allUsers = await userRes.list() // 发送 GET /api/users
     ```
 
 ## 🌐 浏览器端使用
@@ -528,18 +539,18 @@ import { ClientTools } from '@isdk/tool-rpc'
 
 - **`IToolTransport`**: 所有传输的通用基础接口（`src/transports/base.ts`）：`apiUrl`（寻址基准）、`options`，以及可选生命周期钩子 `start()` / `stop()` / `close()`。`mount()` **不在**该接口中——它属于 `ClientToolTransport`，且已标 `@deprecated`（仅用于把 `apiUrl` 复制到工具类上）。
 - **`IServerToolTransport`**: 服务器端传输必须实现的接口。其核心职责是：
-    1. **暴露发现端点**: 列出工具的路由（通常为 `GET /api`）由框架内置的 `rpcApis` 工具回答，每个被声明的前缀会自动登记它。**在本包自带的传输（HTTP / Mailbox）里**它是一个普通工具：与业务调用走同一条身份/校验/超时流水线，且列的是**命中前缀**所绑定的注册表。第三方适配器不会自动得到这条保证：若它自己手写一条清单路由（一个直接回清单的 `GET <前缀>` 处理器），清单就绕过了身份、校验与超时——结果是业务 API 要凭证、工具清单却匿名可取。适配器应按 `getRouteTable()` 逐条注册（见「创建您自己的传输」）。清单不挑注册表形态：会 `toJSON()` 的层由它自己交条目，不会的按静态 `items`（ToolFunc 家族）/ `entries()`（Map 形状）/ 自有键（普通对象映射）枚举；多层按 `get()` 同一套优先级合并，所以该前缀能解析到的工具一定在清单里——有工具的注册表不会回 `200 {}`。清单条目默认不带函数体：除非工具用 `allowExportFunc: true` 显式导出（与 `ServerTools.toJSON()` 同一套规则；剔除发生在副本上，服务端工具本身不受影响）。这条规则由框架对**每一条**交出去的条目执行，包括自定义注册表经自己的 `toJSON()` 交上来的那些——要不要发布函数体不是注册表自己能定的。`addDiscoveryHandler(apiUrl, handler)` 已标 **@deprecated**——它只覆盖该前缀的清单内容，首次调用会打一次迁移提示（进程级，不刷屏）。只有需要自定义清单时才保留它（或自己注册一个工具再 `addRoute(apiUrl, { path: '/', when: { method: 'GET' }, toolId: 'myListing' })`）。
-    2. **处理 RPC 调用**: 创建一个通用的 RPC 路由（例如 `/api/:toolId`），它接收请求，根据 `toolId` 查找对应的工具，执行它，然后返回结果。这是通过 `addRpcHandler` 方法实现的。
-    3. 管理服务器生命周期 (`start`, `stop`)。
-    4. **物理感知 (V2)**: 通过 `getListenAddr()` 和 `getRoutes()` 实现物理端口复用与逻辑路由归属登记。
-    5. **路由声明与重复挂载 (V2)**: `addRpcHandler()` / `addDiscoveryHandler()` 会在 `ServerToolTransport` 基类中声明（claim）其路径前缀，因此一个 transport 可同时服务多个前缀，各自绑定独立的注册表与发现处理器。逻辑路由以 canonical 形式上报（以 `/` 开头、不带尾随斜杠），前缀匹配用的尾斜杠形式由 `toMatchPrefix()` 派生。对已声明的前缀再次声明时，默认替换其注册表/处理器并告警；传入 `options.remount = 'throw'` 则改为抛错——自带路由表的后端可覆写 `onDuplicateRoute()` 上报框架原生的重复路由错误。
-    6. **路由表 (V2)**: `addRoute(apiUrl, { path, when, toolId, act })` 把前缀内的一个路径映射到一个工具，`getRouteTable()` 返回包内置行的全部条目，适配器可拿去自己框架里原生注册。内置发现端点就是表里的一行——第三方用同一路径同条件声明就能换掉它，没有特权通道。`path: ''` 与 `'/'` 是同一条路由；`/x` 与 `/x/` 默认同义（`strictTrailingSlash: true` 才分成两条）；`when.method` 声明侧大小写不敏感（存进表时归成大写，因为 Node 的请求 method 永远是大写）。
-    - **内置行是「声明前缀」的产物**：那些行只为被声明过的前缀存在。一个从未调过 `addRpcHandler` / `addRoute` 的 transport，`getRoutes()` 仍会报 `'/'`——那是**接管声明**（“这个地址上的每条路径都归我”），不是“那里有个发现端点”的保证。它的路由表是空的，所以隐式寻址会失败：HTTP `GET /` → 400 `Missing routing information`，Mailbox `fetch('', 'list')` → 400 `missing tool identifier`（表为空时错误会点名缺的那一步：声明一个前缀）。内置**工具**本身始终注册（`rpcApis` 一直在系统注册表里），所以显式寻址的客户端（`loadApis()` 会带 `rpc-fn: rpcApis`）即使没有任何声明也能工作。
-    7. **路由注册成对方法 (V2)**: `registerRoutes()` / `unregisterRoutes()` 是 `ServerToolTransport` 基类的 **`protected`** 成员，只能在自己的 transport 子类内部调用；它们同步物理路由表与 Manager 的归属表，且可重复调用（先注销再登记）。框架适配器（Fastify、Electron、Express）应调用这一对，而不是只调 `claimRoute()`——只声明路由而不动归属表会留下残留条目，导致下次 `listen()` 报 `Routing Conflict`。Manager 侧对应的一对是 `registerServer()` / `unregisterServer()`（旧名 `addServer()` 已废弃，仅作转发）；`unregisterServer()` 只清理归属与 transport 映射，**不**停底层 server。
+  1. **暴露发现端点**: 列出工具的路由（通常为 `GET /api`）由框架内置的 `rpcApis` 工具回答，每个被声明的前缀会自动登记它。**在本包自带的传输（HTTP / Mailbox）里**它是一个普通工具：与业务调用走同一条身份/校验/超时流水线，且列的是**命中前缀**所绑定的注册表。第三方适配器不会自动得到这条保证：若它自己手写一条清单路由（一个直接回清单的 `GET <前缀>` 处理器），清单就绕过了身份、校验与超时——结果是业务 API 要凭证、工具清单却匿名可取。适配器应按 `getRouteTable()` 逐条注册（见「创建您自己的传输」）。清单不挑注册表形态：会 `toJSON()` 的层由它自己交条目，不会的按静态 `items`（ToolFunc 家族）/ `entries()`（Map 形状）/ 自有键（普通对象映射）枚举；多层按 `get()` 同一套优先级合并，所以该前缀能解析到的工具一定在清单里——有工具的注册表不会回 `200 {}`。清单条目默认不带函数体：除非工具用 `allowExportFunc: true` 显式导出（与 `ServerTools.toJSON()` 同一套规则；剔除发生在副本上，服务端工具本身不受影响）。这条规则由框架对**每一条**交出去的条目执行，包括自定义注册表经自己的 `toJSON()` 交上来的那些——要不要发布函数体不是注册表自己能定的。`addDiscoveryHandler(apiUrl, handler)` 已标 **@deprecated**——它只覆盖该前缀的清单内容，首次调用会打一次迁移提示（进程级，不刷屏）。只有需要自定义清单时才保留它（或自己注册一个工具再 `addRoute(apiUrl, { path: '/', when: { method: 'GET' }, toolId: 'myListing' })`）。
+  2. **处理 RPC 调用**: 创建一个通用的 RPC 路由（例如 `/api/:toolId`），它接收请求，根据 `toolId` 查找对应的工具，执行它，然后返回结果。这是通过 `addRpcHandler` 方法实现的。
+  3. 管理服务器生命周期 (`start`, `stop`)。
+  4. **物理感知 (V2)**: 通过 `getListenAddr()` 和 `getRoutes()` 实现物理端口复用与逻辑路由归属登记。
+  5. **路由声明与重复挂载 (V2)**: `addRpcHandler()` / `addDiscoveryHandler()` 会在 `ServerToolTransport` 基类中声明（claim）其路径前缀，因此一个 transport 可同时服务多个前缀，各自绑定独立的注册表与发现处理器。逻辑路由以 canonical 形式上报（以 `/` 开头、不带尾随斜杠），前缀匹配用的尾斜杠形式由 `toMatchPrefix()` 派生。对已声明的前缀再次声明时，默认替换其注册表/处理器并告警；传入 `options.remount = 'throw'` 则改为抛错——自带路由表的后端可覆写 `onDuplicateRoute()` 上报框架原生的重复路由错误。
+  6. **路由表 (V2)**: `addRoute(apiUrl, { path, when, toolId, act })` 把前缀内的一个路径映射到一个工具，`getRouteTable()` 返回包内置行的全部条目，适配器可拿去自己框架里原生注册。内置发现端点就是表里的一行——第三方用同一路径同条件声明就能换掉它，没有特权通道。`path: ''` 与 `'/'` 是同一条路由；`/x` 与 `/x/` 默认同义（`strictTrailingSlash: true` 才分成两条）；`when.method` 声明侧大小写不敏感（存进表时归成大写，因为 Node 的请求 method 永远是大写）。
+  - **内置行是「声明前缀」的产物**：那些行只为被声明过的前缀存在。一个从未调过 `addRpcHandler` / `addRoute` 的 transport，`getRoutes()` 仍会报 `'/'`——那是**接管声明**（“这个地址上的每条路径都归我”），不是“那里有个发现端点”的保证。它的路由表是空的，所以隐式寻址会失败：HTTP `GET /` → 400 `Missing routing information`，Mailbox `fetch('', 'list')` → 400 `missing tool identifier`（表为空时错误会点名缺的那一步：声明一个前缀）。内置**工具**本身始终注册（`rpcApis` 一直在系统注册表里），所以显式寻址的客户端（`loadApis()` 会带 `rpc-fn: rpcApis`）即使没有任何声明也能工作。
+  7. **路由注册成对方法 (V2)**: `registerRoutes()` / `unregisterRoutes()` 是 `ServerToolTransport` 基类的 **`protected`** 成员，只能在自己的 transport 子类内部调用；它们同步物理路由表与 Manager 的归属表，且可重复调用（先注销再登记）。框架适配器（Fastify、Electron、Express）应调用这一对，而不是只调 `claimRoute()`——只声明路由而不动归属表会留下残留条目，导致下次 `listen()` 报 `Routing Conflict`。Manager 侧对应的一对是 `registerServer()` / `unregisterServer()`（旧名 `addServer()` 已废弃，仅作转发）；`unregisterServer()` 只清理归属与 transport 映射，**不**停底层 server。
 - **`IClientToolTransport`**: 客户端传输必须实现的接口。其核心职责是：
-    1. **加载 API 定义**: 调用 `loadApis()` 方法，该方法会访问服务器的发现端点以获取所有工具的定义。
-    2. **执行远程调用**: 实现 `fetch()` 方法，该方法负责将客户端的工具调用（函数名和参数）序列化，发送到服务器的 RPC 端点，并处理响应。
-    3. **后台生命周期 (V2)**: 支持 **102 Processing 轮询** 以及与本地 `AbortSignal` 联动的远程中止。
+  1. **加载 API 定义**: 调用 `loadApis()` 方法，该方法会访问服务器的发现端点以获取所有工具的定义。
+  2. **执行远程调用**: 实现 `fetch()` 方法，该方法负责将客户端的工具调用（函数名和参数）序列化，发送到服务器的 RPC 端点，并处理响应。
+  3. **后台生命周期 (V2)**: 支持 **102 Processing 轮询** 以及与本地 `AbortSignal` 联动的远程中止。
 
 ### 内置传输实现
 
@@ -584,9 +595,15 @@ import { ClientTools } from '@isdk/tool-rpc'
 客户端不能自报），断线可续；**不做认证**（任何人都能连上）。
 
 ```typescript
-import { HttpServerToolTransport, RpcSessionIdentityPolicy } from '@isdk/tool-rpc';
+import {
+  HttpServerToolTransport,
+  RpcSessionIdentityPolicy,
+} from '@isdk/tool-rpc'
 
-new HttpServerToolTransport({ apiUrl: '/api', identity: new RpcSessionIdentityPolicy() });
+new HttpServerToolTransport({
+  apiUrl: '/api',
+  identity: new RpcSessionIdentityPolicy(),
+})
 ```
 
 完整闭环是四步：**签发 → 下发 → 客户端带回来 → 认**。光 `new RpcSessionIdentityPolicy()` 只做第一步与最后一步：
@@ -602,7 +619,7 @@ new HttpServerToolTransport({
   identity: new RpcSessionIdentityPolicy({ deliver: 'header:rpc-session' }),
   // 取回：reader 要读同一个头（内置 reader 只读 `authorization`）
   credentialReader: (r) => r.headers['rpc-session'],
-});
+})
 ```
 
 下发仍是显式选项（通道本质上跟拓扑走），而且是 HTTP 形状的（Mailbox 那时拿不到可写的 `res`，
@@ -614,12 +631,12 @@ new HttpServerToolTransport({
 ```typescript
 const identity = new RpcBearerPolicy({
   verify: async (token) => {
-    const p = await jwt.verify(token, JWKS);
-    return p ? { id: p.sub, attributes: { scopes: p.scopes } } : undefined;
+    const p = await jwt.verify(token, JWKS)
+    return p ? { id: p.sub, attributes: { scopes: p.scopes } } : undefined
   },
-  allowAnonymous: false,   // 不认就 401，不给匿名身份
-});
-new HttpServerToolTransport({ apiUrl: '/api', identity });
+  allowAnonymous: false, // 不认就 401，不给匿名身份
+})
+new HttpServerToolTransport({ apiUrl: '/api', identity })
 ```
 
 | | `RpcSessionIdentityPolicy` | `RpcBearerPolicy` |
@@ -645,7 +662,7 @@ const identity = new RpcBearerPolicy({
   verify: (token) => verifyToken(token),
   // 默认公开：只有带 authScope 的工具必须认证；发现端点单独放行
   allowAnonymous: (ctx) => ctx.toolId === 'rpcApis' || !ctx.tool?.authScope,
-});
+})
 ```
 
 谓词拿到的 `ctx` 就是本次调用的寻址结果：`toolId` / `act` / `resId`、`prefix` / `apiUrl`（多前缀分租户），
@@ -655,8 +672,10 @@ const identity = new RpcBearerPolicy({
 
 ```typescript
 class AdminTool extends ServerTools {
-  authScope = 'admin'          // 字段名是部署与业务的私有约定，框架不读不解释
-  func(params, ctx) { /* … */ }
+  authScope = 'admin' // 字段名是部署与业务的私有约定，框架不读不解释
+  func(params, ctx) {
+    /* … */
+  }
 }
 ```
 
@@ -679,14 +698,17 @@ class AdminTool extends ServerTools {
 ```typescript
 ServerTools.register({
   name: 'whoami',
-  func: (params, ctx) => ({ who: ctx.identity?.id, scopes: ctx.identity?.attributes?.scopes }),
-});
+  func: (params, ctx) => ({
+    who: ctx.identity?.id,
+    scopes: ctx.identity?.attributes?.scopes,
+  }),
+})
 ```
 
 客户端把凭证带回来（写哪个 header 由部署的 transport 定，bearer 默认读 `authorization`）：
 
 ```typescript
-await someTool.run({ q: 1 }, { headers: { authorization: `Bearer ${token}` } });
+await someTool.run({ q: 1 }, { headers: { authorization: `Bearer ${token}` } })
 ```
 
 ### 策略接口
@@ -695,20 +717,25 @@ await someTool.run({ q: 1 }, { headers: { authorization: `Bearer ${token}` } });
 
 ```typescript
 class ProxyHeaderPolicy implements RpcIdentityPolicy<IncomingMessage> {
-  readonly name = 'proxy-header';
+  readonly name = 'proxy-header'
   match(ctx: RpcIdentityContext<IncomingMessage>) {
-    const t = ctx.credential;
-    if (!t) return undefined;                       // undefined = 另起新会话，不是拒绝
-    return { id: t.slice(0, 16), attributes: { tenant: ctx.headers?.['x-tenant'] } };
+    const t = ctx.credential
+    if (!t) return undefined // undefined = 另起新会话，不是拒绝
+    return {
+      id: t.slice(0, 16),
+      attributes: { tenant: ctx.headers?.['x-tenant'] },
+    }
   }
-  assign() { return { id: uuidv4() }; }
+  assign() {
+    return { id: uuidv4() }
+  }
 }
 
 new HttpServerToolTransport({
   apiUrl: '/api',
   identity: new ProxyHeaderPolicy(),
-  credentialReader: (r) => r.headers['x-auth'],      // 私有 header 由部署写自己的 reader
-});
+  credentialReader: (r) => r.headers['x-auth'], // 私有 header 由部署写自己的 reader
+})
 ```
 
 要点（完整契约见根目录 `IDENTITY_POLICY_DESIGN.cn.md`）：
@@ -746,20 +773,20 @@ new ServerTools({
   allowExportFunc: true, // 允许此函数被下载
   func: () => {
     // 这段逻辑将在客户端执行
-    console.log('正在客户端生成 UUID...');
-    return Math.random().toString(36).substring(2, 15);
+    console.log('正在客户端生成 UUID...')
+    return Math.random().toString(36).substring(2, 15)
   },
-}).register();
+}).register()
 ```
 
 **客户端用法:**
 
 ```typescript
 // client.ts
-const uuidTool = ClientTools.get('local-uuid');
+const uuidTool = ClientTools.get('local-uuid')
 // 此调用将执行下载的函数体，不会发起网络请求。
-const uuid = await uuidTool.run();
-console.log('生成的 UUID:', uuid);
+const uuid = await uuidTool.run()
+console.log('生成的 UUID:', uuid)
 ```
 
 ### 自动 RESTful 方法路由
