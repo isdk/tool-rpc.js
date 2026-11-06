@@ -2,7 +2,7 @@
  * 排版卫生：Markdown 表格按原文输出，插件不许把 printer 的能力面写歪
  *
  * `pnpm format` 覆盖所有 `.md`（glob 见 package.json 的 format 脚本），而 prettier 的 mdast printer 会把每栏填充到该列最宽单元格的
- * 长度。包内的设计文档（IDENTITY_POLICY_DESIGN / ARCHITECTURE / 超时规范）单格就 100+ 字符，于是一次 `format:fix` 把整张表的每一行都补成
+ * 长度。包内的设计文档（IDENTITY_POLICY_DESIGN、ARCHITECTURE、超时规范）单格就 100+ 字符，于是一次 `format:fix` 把整张表的每一行都补成
  * 同样宽的长尾空格：diff 全是纯空格，逐字推敲过的正文被冲散，md 在 `git diff` 里彻底没法读。
  * `prettier-plugin-md-raw-table.mjs` 就是关掉这件事——prettier 没有「表格不格式化」的开关。
  *
@@ -15,7 +15,8 @@
  *    等于把 base **没有**的 key 也声明成「我有」。prettier 只要看见 `printPrettierIgnored`
  *    是个函数就调它，拿到 `undefined` 当 doc，直接 `InvalidDocError: Unexpected doc 'undefined'`。
  *    3.8.3 的 mdast printer 没有这个 key，3.9.6 才有——同一份插件就是这样在两个版本之间坏的
- *    （本包吃 3.8.3，plan-executor 吃 3.9.6）。现在的写法是 `...base` 展开，能力面永远等于 base。
+ *    （坏的时候本包吃 3.8.3；现在 mailbox 系四个包都吃 3.9.10，plan-executor 吃 3.9.6）。
+ *    现在的写法是 `...base` 展开，能力面永远等于 base。
  * 3. **内嵌 ```ts / ```yaml 照常按项目配置格式化**：换 parser 不能把内嵌那轮的选项继承弄丢，
  *    否则 README 里的代码示例会被格式化成与代码库相反的引号/分号风格。
  * 4. **幂等**：`format(format(x)) === format(x)`。不幂等 = `pnpm format` 永远红，
@@ -26,8 +27,8 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { existsSync, readFileSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import * as prettier from 'prettier'
 
@@ -191,5 +192,55 @@ describe('format 与 format:fix 必须管同一批文件', () => {
     expect(extensions('prettier --check "**/*.{md,json}"')).toEqual(['json', 'md'])
     expect(extensions('prettier --write "**/*.{json}"')).toEqual(['json'])
     expect(extensions('prettier --check "**/*.md"')).toEqual([])
+  })
+})
+
+/**
+ * 版本漂移：`pnpm format` 红了先问是谁换了口径
+ *
+ * prettier 不守入档的排版：升到 3.9.10 后，列表项里段落续行的缩进口径变了（3.8.3 保留内容
+ * 缩进，3.9.10 顶到第 0 列），于是刚提交不久的 README 又红了。红本身不是错，分不清是谁干的
+ * 才是——插件报错与“prettier 换了口味”在 CLI 里长得一模一样（都是 [warn] + pnpm 的
+ * `[ELIFECYCLE] Command failed`）。
+ *
+ * 所以这里把两者分开：同一份文件**不带插件**再跑 prettier 一次——两边都想改 ⇒ 版本漂移（重排
+ * 就好，别动插件）；只有带插件的那边想改 ⇒ 插件的锅。生成物不参与：docs/ 是 typedoc 的产物、
+ * CHANGELOG.md 是 commit-and-tag-version 的产物，它们的写法不由这份判据管（与 docs 那组守卫同一
+ * 划分）。
+ */
+const SKIP_DIRS = ['node_modules', 'dist', 'docs', 'web', '.cache', 'wiki', 'python', 'rust', 'scratch']
+const SKIP_FILES = ['CHANGELOG.md']
+
+function markdownFiles(dir: string, acc: string[] = []): string[] {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name.startsWith('.') || SKIP_DIRS.includes(entry.name)) continue
+    const p = join(dir, entry.name)
+    if (entry.isDirectory()) markdownFiles(p, acc)
+    else if (entry.name.endsWith('.md') && !SKIP_FILES.includes(entry.name)) acc.push(p)
+  }
+  return acc
+}
+
+describe('仓库里的 md 必须已按当前 prettier 排版', () => {
+  it(`在 prettier ${prettier.version} 下全绿；不绿就把成因说清`, async () => {
+    const files = markdownFiles(ROOT)
+    expect(files.length, '一份 md 都没扫到——扫描坏掉了，不是文档绿了').toBeGreaterThan(3)
+
+    const cfg = await config()
+    const offenders: string[] = []
+    for (const file of files) {
+      const src = readFileSync(file, 'utf8')
+      const formatted = await prettier.format(src, { ...cfg, parser: 'markdown', filepath: file })
+      if (formatted === src) continue
+      const builtin = await prettier.format(src, { ...cfg, plugins: [], parser: 'markdown', filepath: file })
+      offenders.push(
+        `${relative(ROOT, file)} — ${builtin !== src ? '不带插件也想改 ⇒ prettier 换了口径，重排就好' : '只有带插件的想改 ⇒ 插件的锅'}`,
+      )
+    }
+    expect(
+      offenders,
+      `prettier ${prettier.version} 想重排下面这些文档（版本漂移就单独一个重排提交，别去改插件）：\n  ` +
+        offenders.join('\n  '),
+    ).toEqual([])
   })
 })
