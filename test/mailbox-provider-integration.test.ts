@@ -3,28 +3,38 @@ import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { nanoid } from '@isdk/hash'
-import { Capability, InvalidFetchOptionsError, Mailbox, MemoryProvider, normalizePeekLimit } from '@mboxlabs/mailbox'
+import { Capability, InvalidFetchOptionsError, Mailbox, MailboxProvider, MemoryProvider } from '@mboxlabs/mailbox'
 import type {
-  FetchOptions,
-  IMailboxProvider,
-  MailMessage,
-  ManualAckFetchOptions,
   AckableMailMessage,
+  DeliveryResult,
+  FetchOptions,
+  MailMessage,
   MailboxStatus,
-  PeekFetchOptions,
-  PlainFetchOptions,
-  Subscription,
 } from '@mboxlabs/mailbox'
 
 // ── FileProvider: A simple file-based MailboxProvider ──
-class FileProvider implements IMailboxProvider {
-  readonly protocol = 'file'
+/**
+ * **从 `MailboxProvider` 继承**的第三方 provider 形状（规范：内核 `wiki/delivery-semantics.md` §1：
+ * provider 必须继承基类；收尾写 `_close()`，重写 `close()` 必须回基类）。
+ *
+ * 子类只填 `_xxx()` 那一层钩子，`send()` / `subscribe()` / `fetch()` / `close()` / `status()` 归基类。
+ * 于是发送边界发 `mbx-send-id` 与盖 `mbx-sent-at`、peek 的能力门与选项校验、投递级结算，以及
+ * **关闭时拆掉全部订阅**——都是这个 fixture 一行不用写的东西。
+ *
+ * 上一版它写的是 `implements IMailboxProvider`，那正是规范禁掉的形状，而这组用例替它付过账：
+ * `PeekFetchOptions` 那一支重载漏了一整轮没人看见，因为基类那道 peek 入口（能力门 + 矛盾选项 +
+ * `limit` 校验）一行都继承不到——`{ peek: true }` 于是掉进隐式 ACK 那一支，**把消息取走**，
+ * 而调用方以为自己在看一眼。
+ */
+class FileProvider extends MailboxProvider {
   private baseDir: string
-  private subscriptions = new Map<string, { address: URL; onReceive: (msg: MailMessage) => void | Promise<void>; interval: any }>()
+
+  /** 轮询定时器。订阅表归基类，这张表只记 provider 自己的资源（key = 这个 provider 认的 topic）。 */
+  private polls = new Map<string, ReturnType<typeof setInterval>>()
   private addrSeq = new Map<string, number>()
 
   constructor(baseDir: string) {
+    super('file')
     this.baseDir = baseDir
     if (!existsSync(baseDir)) {
       mkdirSync(baseDir, { recursive: true })
@@ -37,11 +47,15 @@ class FileProvider implements IMailboxProvider {
     }
   }
 
-  async close(): Promise<void> {
-    for (const [id, sub] of this.subscriptions) {
-      clearInterval(sub.interval)
-      this.subscriptions.delete(id)
+  /**
+   * 收尾钩子是 `_close()`，不是 `close()`：基类的 `close()` 先退掉每条订阅（每条都走下面的
+   * `_unsubscribe`），跑完才换这里。所以这里只释放 provider 自己的东西——残余的轮询定时器。
+   */
+  protected async _close(): Promise<void> {
+    for (const interval of this.polls.values()) {
+      clearInterval(interval)
     }
+    this.polls.clear()
   }
 
   private getAddressDir(address: URL): string {
@@ -57,7 +71,11 @@ class FileProvider implements IMailboxProvider {
     return String(seq).padStart(10, '0')
   }
 
-  async send(message: MailMessage): Promise<MailMessage> {
+  /**
+   * 发信。`mbx-send-id` 与 `mbx-sent-at` 由基类的发送边界注入（`send()`）：这里既不自己盖，
+   * 也没有「记得注入」这项义务。
+   */
+  protected async _send(message: MailMessage): Promise<void> {
     const dir = this.getAddressDir(message.to)
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true })
@@ -65,12 +83,10 @@ class FileProvider implements IMailboxProvider {
     // Include a sequence number in the filename to preserve creation order on readdir
     const seq = this.nextSeq(message.to)
     const filePath = join(dir, `${seq}-${message.id}.json`)
-    writeFileSync(filePath, JSON.stringify({ ...message, headers: { ...message.headers, 'mbx-sent-at': new Date().toISOString() } }), 'utf-8')
+    writeFileSync(filePath, JSON.stringify(message), 'utf-8')
 
     // Note: Delivery to subscribers is handled by the subscribe polling loop,
     // NOT here. This avoids double-delivery (push via setTimeout + pull via poll).
-
-    return message
   }
 
   private getTopicKey(address: URL): string {
@@ -78,19 +94,18 @@ class FileProvider implements IMailboxProvider {
   }
 
   /**
-   * 直接实现 `IMailboxProvider` 的第三方 provider：**订阅必须返回 Promise**。
-   *
-   * 这个 provider 的「已生效」= 目录轮询已挂上（`setInterval` 在返回前就 armed），
-   * 所以 `await subscribe()` 返回后投递就能开始。基类的 await 窗口约定在这里不适用
-   * （没有异步 handle），但「不 await 等于未订阅」同样成立。
+   * 订阅生效的时刻 = 目录轮询已挂上（`setInterval` 在返回前 armed），所以 `await subscribe()`
+   * 返回后投递就能开始。交出去的是**句柄**（那个定时器）：基类把它存进它自己的订阅表，退订时
+   * 原样交回 `_unsubscribe`。provider 不再自己维护订阅表，也就没有「关闭时忘了退订」那一格。
    */
-  async subscribe(address: URL, onReceive: (message: MailMessage) => void | Promise<void>): Promise<Subscription> {
-    const topic = this.getTopicKey(address)
-    const id = nanoid()
+  protected _subscribe(
+    address: URL,
+    onReceive: (message: MailMessage) => void | Promise<DeliveryResult | void>
+  ): ReturnType<typeof setInterval> {
+    const dir = this.getAddressDir(address)
 
     // Poll the directory for new files
     const interval = setInterval(() => {
-      const dir = this.getAddressDir(address)
       if (!existsSync(dir)) return
 
       const files = readdirSync(dir).filter(f => f.endsWith('.json'))
@@ -110,61 +125,30 @@ class FileProvider implements IMailboxProvider {
       }
     }, 100) // Poll every 100ms
 
-    this.subscriptions.set(topic, { address, onReceive, interval })
+    this.polls.set(this.getTopicKey(address), interval)
+    return interval
+  }
 
-    return {
-      id,
-      address,
-      status: 'active',
-      unsubscribe: async () => {
-        clearInterval(interval)
-        this.subscriptions.delete(topic)
-      },
+  /**
+   * 退订：`close()` 时基类对每条订阅各调一次，句柄就是 `_subscribe` 交出去的那个定时器。
+   */
+  protected async _unsubscribe(
+    _subscriptionId: string,
+    unsubscribeHandle: ReturnType<typeof setInterval>
+  ): Promise<void> {
+    clearInterval(unsubscribeHandle)
+    for (const [topic, interval] of this.polls) {
+      if (interval === unsubscribeHandle) {
+        this.polls.delete(topic)
+      }
     }
   }
 
   /**
-   * 重载集必须与 `IMailboxProvider#fetch` 对齐——**包括 `{ peek: true }` 那一支**。
-   *
-   * 只补个 `peek?: boolean` 不够：peek 返回的是**副本数组**，与另两支单条的形状不同。
-   * 而“漂了”不是编译洁痑：`{ peek: true }` 落进隐式 ACK 那一支就是把消息**取走**，
-   * 而调用方以为自己在看一眼。基类里那道 peek 入口（能力门 + 矛盾选项 + `limit` 校验）
-   * 直接实现接口的人一行也继承不到，得自己写。
+   * 取信（非只读那一支）。基类不会把 `peek: true` 送进这里——只读快照走 `_peek`，那道入口上的
+   * 能力门、`{ peek: true, manualAck: true }` 矛盾校验、`limit` 归一都在基类里。
    */
-  async fetch(address: URL, options: PeekFetchOptions): Promise<MailMessage[]>
-  async fetch(address: URL, options: ManualAckFetchOptions): Promise<AckableMailMessage | null>
-  async fetch(address: URL, options?: PlainFetchOptions): Promise<MailMessage | null>
-  async fetch(address: URL, options?: FetchOptions): Promise<MailMessage | AckableMailMessage | MailMessage[] | null> {
-    if (options?.peek) {
-      // 只读快照：不出队、不建 in-flight、不动活动时间。三样缺一条就不是 peek。
-      // 校验复用内核导出的 `normalizePeekLimit`：基类用的就是它，自己推一份“差不多”的
-      // 规矩只会多一个漂移源。
-      const limit = normalizePeekLimit(options.limit)
-      if (options.manualAck) {
-        throw new InvalidFetchOptionsError(
-          '`fetch({ peek: true, manualAck: true })` is contradictory: a peeked message is never handed to a consumer, ' +
-          'so there is nothing to acknowledge. Drop one of the two options.',
-        )
-      }
-
-      const peekDir = this.getAddressDir(address)
-      // 不 mkdir：为了“看一眼”就把目录建出来，`status()` 就得把「没这个地址」答成
-      // 「有，但是空的」——那正是内核在 issue#4 里拆掉的假承诺。
-      if (!existsSync(peekDir)) return []
-
-      const queue = readdirSync(peekDir).filter(f => f.endsWith('.json')).sort()
-      const seen: MailMessage[] = []
-      for (const file of limit === undefined ? queue : queue.slice(0, limit)) {
-        try {
-          // 每条重新读盘 ⇒ 递出去的大自然是一份副本，摸不到队列本体
-          seen.push(JSON.parse(readFileSync(join(peekDir, file), 'utf-8')))
-        } catch {
-          // 读不动的那一条（可能正在被写）跳过——与轮询循环同一套规矩
-        }
-      }
-      return seen
-    }
-
+  protected async _fetch(address: URL, options?: FetchOptions): Promise<MailMessage | AckableMailMessage | null> {
     const dir = this.getAddressDir(address)
     if (!existsSync(dir)) return null
 
@@ -200,8 +184,31 @@ class FileProvider implements IMailboxProvider {
     return message
   }
 
-  generateId(): string {
-    return nanoid()
+  /**
+   * 只读快照：不出队、不建 in-flight、不动活动时间——三样缺一条就不是 peek。
+   *
+   * `limit` 已由基类经 `normalizePeekLimit` 归一（`undefined` = 整个队列），别再自己推一套规矩。
+   * 实现这个钩子本身就是 peek 的能力声明：不实现还去问 peek，拿到的是 `UnsupportedCapabilityError`，
+   * 而不是被静默降级成取信。
+   */
+  protected async _peek(address: URL, options?: { limit?: number }): Promise<MailMessage[]> {
+    const peekDir = this.getAddressDir(address)
+    // 不 mkdir：为了「看一眼」就把目录建出来，`status()` 就得把「没这个地址」答成
+    // 「有，但是空的」——那正是内核在 issue#4 里拆掉的假承诺。
+    if (!existsSync(peekDir)) return []
+
+    const queue = readdirSync(peekDir).filter(f => f.endsWith('.json')).sort()
+    const limit = options?.limit
+    const seen: MailMessage[] = []
+    for (const file of limit === undefined ? queue : queue.slice(0, limit)) {
+      try {
+        // 每条重新读盘 ⇒ 递出去的天然是一份副本，摸不到队列本体
+        seen.push(JSON.parse(readFileSync(join(peekDir, file), 'utf-8')))
+      } catch {
+        // 读不动的那一条（可能正在被写）跳过——与轮询循环同一套规矩
+      }
+    }
+    return seen
   }
 
   /**
@@ -211,10 +218,10 @@ class FileProvider implements IMailboxProvider {
    * 「订了但还没人来」就会被误报成「没这个地址」。问不到的时候不报 `online` + 0：
    * 诊断页分不出「地址写错了」与「信箱空着」（内核 issue#4）。
    */
-  async status(address: URL): Promise<MailboxStatus> {
+  protected async _status(address: URL): Promise<MailboxStatus> {
     const dir = this.getAddressDir(address)
     const dirExists = existsSync(dir)
-    const subscribed = this.subscriptions.has(this.getTopicKey(address))
+    const subscribed = this.polls.has(this.getTopicKey(address))
     const unreadCount = dirExists ? readdirSync(dir).filter(f => f.endsWith('.json')).length : 0
 
     if (!dirExists && !subscribed) {
@@ -471,10 +478,13 @@ describe('Mailbox Provider Integration (Memory + File)', () => {
    * `fetch({ peek: true })` 是只读快照（内核 issue#4）：返回**副本数组**，不出队、
    * 不建 in-flight、不动活动时间。这三条缺一条就不是 peek。
    *
-   * 这组用例的意义不在 `FileProvider` 本身：它是**直接实现 `IMailboxProvider` 的活样例**。
-   * 上一轮 peek 语义落地时它漏了 `PeekFetchOptions` 重载，而没人看见——因为基类的 peek 入口
-   * （能力门 + 矛盾选项报错 + `limit` 校验）全在 `MailboxProvider#fetch` 里，直接实现接口的人
-   * 一行也继承不到：`{ peek: true }` 会掉进隐式 ACK 那一支，**把消息取走**，而调用方以为自己在看一眼。
+   * 这组用例的意义不在 `FileProvider` 本身：它是**这条规范为什么写死"必须继承基类"的案发现场**。
+   * 上一版这个 fixture 直接实现 `IMailboxProvider`，peek 语义落地那一轮它漏了 `PeekFetchOptions`
+   * 那一支重载，而没人看见——基类的 peek 入口（能力门 + 矛盾选项报错 + `limit` 校验）全在
+   * `MailboxProvider#fetch` 里，直接实现接口的人一行也继承不到：`{ peek: true }` 会掉进隐式 ACK
+   * 那一支，**把消息取走**，而调用方以为自己在看一眼。如今它从基类继承，那三道门是继承来的；
+   * 留在这里的是「只读快照必须同时满足不出队 / 不建 in-flight / 不动活动时间」这三条——
+   * 它们属于 provider，基类代劳不了。
    */
   describe('FileProvider Peek (只读快照)', () => {
     beforeAll(() => {
