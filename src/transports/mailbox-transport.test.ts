@@ -206,7 +206,7 @@ describe('MailboxServerTransport / MailboxClientTransport V2 Test', () => {
   it('should redirect response to mbx-reply-to address', async () => {
     const thirdPartyAddress = 'mem://third-party/inbox';
     const onReceive = vi.fn();
-    mailbox.subscribe(thirdPartyAddress, (msg) => onReceive(msg.body));
+    await mailbox.subscribe(thirdPartyAddress, (msg) => onReceive(msg.body));
 
     await mailbox.post({
       from: clientAddress,
@@ -268,16 +268,22 @@ describe('MailboxServerTransport / MailboxClientTransport V2 Test', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { });
 
     const brokenAddress = 'mem://broken-pull/api';
-    const brokenMailbox = {
+    const fetchDown = vi.fn<() => Promise<never>>(async () => { throw new Error('mailbox backend down'); });
+    // 替身按 transport 真正用到的那几样方法定型（transport 收的是整个 `Mailbox`，所以只在
+    // 交给它那一行 cast 一次）：`subscribe` 的返回形状于是由类型管，而不是靠注释提醒——
+    // pull 模式从头到尾不问 `subscribe`，这里放个空替身就够了，但它得是**契约形状**的空替身。
+    const brokenMailbox: Pick<Mailbox, 'start' | 'stop' | 'subscribe' | 'fetch'> = {
       start: vi.fn(),
       stop: vi.fn(),
-      subscribe: vi.fn(),
-      // 每次都抛：轮询循环会转很多轮，但只应该报一次
-      fetch: vi.fn(async () => { throw new Error('mailbox backend down'); }),
-    } as any;
+      subscribe: vi.fn<Mailbox['subscribe']>(),
+      // 每次都抛：轮询循环会转很多轮，但只应该报一次。
+      // 拿出来命名是因为 `fetch` 在内核那边是重载方法，`brokenMailbox.fetch.mock` 编译不过；
+      // 拿这个具名替身数调用次数，类型上也诚实。
+      fetch: fetchDown,
+    };
 
     const server = new V2MailboxServerTransport({
-      mailbox: brokenMailbox,
+      mailbox: brokenMailbox as Mailbox,
       apiUrl: brokenAddress,
       mode: 'pull',
       pullInterval: 5
@@ -295,7 +301,7 @@ describe('MailboxServerTransport / MailboxClientTransport V2 Test', () => {
     expect(loopWarnings).toHaveLength(1);
     expect(loopWarnings[0]).toContain('mailbox backend down');
     // 循环本身不能死：stop 前它还在跑（fetch 被调了多轮）
-    expect(brokenMailbox.fetch.mock.calls.length).toBeGreaterThan(1);
+    expect(fetchDown.mock.calls.length).toBeGreaterThan(1);
 
     warnSpy.mockRestore();
   });
@@ -417,7 +423,7 @@ describe('MailboxServerTransport / MailboxClientTransport V2 Test', () => {
 
   it('should fallback to "from" address when mbx-reply-to is missing', async () => {
     const onReceive = vi.fn();
-    mailbox.subscribe(clientAddress, (msg) => onReceive(msg.body));
+    await mailbox.subscribe(clientAddress, (msg) => onReceive(msg.body));
 
     await mailbox.post({
       from: clientAddress,
