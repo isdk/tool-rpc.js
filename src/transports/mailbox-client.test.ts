@@ -1,7 +1,23 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { MailboxClientTransport } from './mailbox-client';
-import { Mailbox } from '@mboxlabs/mailbox';
+import { Mailbox, type MailMessage } from '@mboxlabs/mailbox';
 import { RPC_HEADERS } from './models';
+
+/**
+ * 递给回调的信必须是完整形状。
+ *
+ * 以前取回调用的是 `(mailbox.subscribe as any).mock.calls`，参数类型被抹成 `any`，
+ * 于是这些测试一直递的是半封信（没有 id / from / to）——而 transport 的回复路由靠的就是
+ * `from` 与 `mbx-reply-to`。替身按类型造之后，半封信编译不过，就补这个夹具。
+ */
+const inboundReply = (over: Partial<MailMessage>): MailMessage => ({
+    id: 'reply-1',
+    from: new URL('mem://server/api'),
+    to: new URL('mem://client/inbox'),
+    headers: {},
+    body: null,
+    ...over,
+});
 
 describe('MailboxClientTransport', () => {
     let mailbox: Mailbox;
@@ -11,7 +27,14 @@ describe('MailboxClientTransport', () => {
         mailbox = new Mailbox();
         // Mock mailbox methods
         mailbox.start = vi.fn().mockResolvedValue(undefined);
-        mailbox.subscribe = vi.fn().mockResolvedValue({ unsubscribe: vi.fn() }); // 必须是 mockResolvedValue：await 一个非 Promise 合法，mockReturnValue 会让测试绿着建模旧契约
+        // 按契约类型造替身：交回的得是完整的 `Subscription`，不是只有 unsubscribe 的半个句柄。
+        // 退回 mockReturnValue、或返回半个句柄，都编译不过（`pnpm test` 先跑 tsc）。
+        mailbox.subscribe = vi.fn<Mailbox['subscribe']>().mockResolvedValue({
+            id: 'sub-1',
+            address: new URL('mem://client/inbox'),
+            status: 'active',
+            unsubscribe: vi.fn(),
+        });
         mailbox.post = vi.fn().mockResolvedValue(undefined);
         
         transport = new MailboxClientTransport({
@@ -66,11 +89,11 @@ describe('MailboxClientTransport', () => {
         });
 
         // Simulate response
-        const onResponse = (mailbox.subscribe as any).mock.calls[0][1];
-        onResponse({
+        const onResponse = vi.mocked(mailbox.subscribe).mock.calls[0][1];
+        await onResponse(inboundReply({
             headers: { 'req-id': 'req-1' },
             body: { result: 'success' }
-        });
+        }));
 
         const result = await fetchPromise;
         expect(result).toEqual({ result: 'success' });
@@ -82,11 +105,11 @@ describe('MailboxClientTransport', () => {
             headers: { 'req-id': 'req-102' }
         });
 
-        const onResponse = (mailbox.subscribe as any).mock.calls[0][1];
-        onResponse({
+        const onResponse = vi.mocked(mailbox.subscribe).mock.calls[0][1];
+        await onResponse(inboundReply({
             headers: { 'req-id': 'req-102' },
             body: { status: 102, message: 'Processing' }
-        });
+        }));
 
         const result: any = await fetchPromise;
         expect(result.status).toBe(102);
@@ -98,13 +121,13 @@ describe('MailboxClientTransport', () => {
             headers: { 'req-id': 'req-err' }
         });
 
-        const onResponse = (mailbox.subscribe as any).mock.calls[0][1];
-        onResponse({
+        const onResponse = vi.mocked(mailbox.subscribe).mock.calls[0][1];
+        await onResponse(inboundReply({
             headers: { 'req-id': 'req-err' },
             body: { 
                 error: { message: 'Server Fail', code: 5001, status: 'internal_error' }
             }
-        });
+        }));
 
         await expect(fetchPromise).rejects.toThrow('Server Fail');
         try {

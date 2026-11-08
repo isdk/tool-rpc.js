@@ -12,7 +12,14 @@ describe('MailboxServerTransport Unit', () => {
     beforeEach(() => {
         mailbox = new Mailbox();
         mailbox.post = vi.fn().mockResolvedValue(undefined);
-        mailbox.subscribe = vi.fn().mockResolvedValue({ unsubscribe: vi.fn() }); // 必须是 mockResolvedValue：await 一个非 Promise 合法，mockReturnValue 会让测试绿着建模旧契约
+        // 按契约类型造替身：交回的得是完整的 `Subscription`。退回 mockReturnValue、
+        // 或只给半个句柄，都编译不过（`pnpm test` 先跑 tsc）。
+        mailbox.subscribe = vi.fn<Mailbox['subscribe']>().mockResolvedValue({
+            id: 'sub-1',
+            address: new URL(serverAddr),
+            status: 'active',
+            unsubscribe: vi.fn(),
+        });
         mailbox.start = vi.fn().mockResolvedValue(undefined);
         mailbox.stop = vi.fn().mockResolvedValue(undefined);
         mailbox.fetch = vi.fn().mockResolvedValue(null);
