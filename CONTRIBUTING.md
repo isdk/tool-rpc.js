@@ -70,6 +70,18 @@ npx tsup --dts --dts-resolve                                # 构建 dist（下�
 - `pnpm typecheck` = `tsc -p tsconfig.json`（那份 config 已 `noEmit: true`，`include` 是 `src/**/*` 与 `test/**/*`），并且**已经在 `pnpm test` 的必经之路上**：`vitest` 只做转译、不做类型检查，`subscription: any` 那种漏 `await` 编译不报错，只在 `stop()` 时炸一句 `unsubscribe is not a function`。接线由 `test/typecheck-runs-before-tests.test.ts` 钉住，别为了快几秒把它改回 `FORCE_COLOR=1 vitest run`。`tsconfig.release.json` 是发布面那份（`extends` 前者，但 `exclude` 掉 `test/` 与 `**/*.test.ts`），**不要 `tsc -p` 它**：那份 `noEmit: false` 且没有 `outDir`，跑一次就把 JS 就地吐进 `src/`（实测 32 个文件）；发布面跟着 `pnpm build`（tsup `--dts` 用的就是那份配置）过。
 - `eslint .`（flat config 在 `eslint.config.mjs`，基于 @antfu 的 base）只管「正确性」：风格类层整体关闭——`stylistic`、`regexp`、`unicorn`、`test`、`imports`、`jsonc`、`yaml`、`toml`、`markdown` 写死 `false`，另有 `perfectionist/`、`jsdoc/`、`node/`、`import/` 四组按前缀关。代码风格交给 prettier。当前配置下 `eslint .` 干净（2026-10-12 实测：exit 0，0 条）。**不要打开那些层再跑 `lint:fix`**：@antfu 默认配置下历史实测报 10886 处，`lint:fix` 会把整个 `src` 重写，diff 不可读。想重新启用某一层，把对应的 `false` 改成 `true`。
 - `format` / `format:fix` 只覆盖 json/jsonc/yaml/yml（脚本里的 glob，不是配置文件）。markdown 与代码是 opt-in：`format:docs`（`**/*.md`）、`format:code`（`**/*.{ts,tsx,js,jsx}`）——prettier 的表格对齐与代码重排会让 diff 变噪音，所以不进默认路径。
+- 被依赖包的**类型界面来自它的产物**（`dist/index.d.ts`，即发布面那份），不是它的 `src`。这是刻意的：
+  这些包是各自独立的仓库，pnpm workspace 只是本地开发方便，所以本包的类型检查就该钉在它实际会买到
+  （也会发出去）的那个界面上。代价是这份产物可变、会陈旧，所以**改过被依赖包的 `src` 就必须先重出它的
+  产物**，再跑本包的 `pnpm test` / `pnpm typecheck`：
+  `pnpm --filter '@mboxlabs/mailbox' run build`，或者一条命令连依赖按拓扑序一起建：
+  `pnpm --filter '@isdk/tool-rpc...' run build`。注意 `build` 走 tsup `--dts`，**`build-fast` 不出 d.ts**——
+  用它等于没修。
+  两种失效只有一种是吵的：缺产物时 `tsc` 会红（实测把 `mailbox/dist` 移开 → 本包 17 条错，15 条 `TS2307`），
+  但产物**陈旧**时 `tsc` 全绿——内核把 `subscribe()` 改成返回 `Promise` 那一轮，本包一直绿到把内核的
+  `dist` 重建出来才红（`58de9e2`）。所以这一半由 `test/workspace-deps-must-be-built.test.ts` 钉住：
+  每个 `workspace:` 依赖，它给 TS 的那份 d.ts 必须存在且不比它自己的源旧。别摘它，也别把被依赖包的
+  开发态 `types` 改指 `src`（那等于让本包检查一个没建过、没发过的形状）。
 - 跨包行为要跑**真实包入口**（`dist` / `require('@isdk/tool-rpc')`），只跑测试桩会漏掉导出与 bundle 层的问题。
 
 ## 测试
