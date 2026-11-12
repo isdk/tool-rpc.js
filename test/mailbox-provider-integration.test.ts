@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, unlinkSync, w
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { Capability, InvalidFetchOptionsError, Mailbox, MailboxProvider } from '@mboxlabs/mailbox'
+import type { Disposition } from '@mboxlabs/mailbox'
 import { MemoryProvider } from '@mboxlabs/mailbox-memory'
 import type {
   AckableMailMessage,
@@ -169,11 +170,12 @@ class FileProvider extends MailboxProvider {
       // In manual mode, don't delete the file — return ackable wrapper
       const ackable: AckableMailMessage = {
         ...message,
-        ack: async () => {
-          if (existsSync(filePath)) unlinkSync(filePath)
-        },
-        nack: async (requeue = false) => {
-          // For simplicity, just delete on nack (no requeue in this basic implementation)
+        // 处置感知的句柄：**不带 `nack`**，于是内核把处置值原样递进 `ack(where)`（3.0.0 的默认形状）。
+        // 这个 fixture 的账就是文件本身：结束这一份 = 删掉；`unhandled` = 退回队首 = 原地留着，
+        // 下一次 `fetch` 还会取到它。旧写法靠 `nack(requeue)` 且两种情况都删文件，
+        // 那等于把「退回」这件事删掉。
+        ack: async (where?: Disposition) => {
+          if (where === 'unhandled') return
           if (existsSync(filePath)) unlinkSync(filePath)
         },
       }
