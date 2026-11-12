@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { Mailbox, MemoryProvider } from '@mboxlabs/mailbox';
+import { Mailbox } from '@mboxlabs/mailbox';
+import { MemoryProvider } from '@mboxlabs/mailbox-memory';
 import { Readable } from 'stream';
 
 import { ServerTools } from '../server-tools';

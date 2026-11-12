@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import { Mailbox, MemoryProvider } from '@mboxlabs/mailbox';
+import { Mailbox } from '@mboxlabs/mailbox';import { MemoryProvider } from '@mboxlabs/mailbox-memory';;
 import { ToolFunc } from '@isdk/tool-func';
 import { ServerTools } from '../src/server-tools';
 import { ClientTools } from '../src/client-tools';

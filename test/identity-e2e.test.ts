@@ -2,7 +2,9 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { withReservedPort } from './helpers/ports'
 import { ToolFunc } from '@isdk/tool-func'
-import { Mailbox, MemoryProvider } from '@mboxlabs/mailbox'
+import { Mailbox } from '@mboxlabs/mailbox';
+
+import { MemoryProvider } from '@mboxlabs/mailbox-memory';
 
 import { HttpClientToolTransport } from '../src/transports/http-client'
 import { HttpServerToolTransport } from '../src/transports/http-server'

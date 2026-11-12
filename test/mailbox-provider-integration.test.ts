@@ -3,7 +3,8 @@ import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { Capability, InvalidFetchOptionsError, Mailbox, MailboxProvider, MemoryProvider } from '@mboxlabs/mailbox'
+import { Capability, InvalidFetchOptionsError, Mailbox, MailboxProvider } from '@mboxlabs/mailbox'
+import { MemoryProvider } from '@mboxlabs/mailbox-memory'
 import type {
   AckableMailMessage,
   DeliveryResult,

@@ -359,7 +359,7 @@ grep -rn '\b符号名\b' ../tool-rpc-fastify/src ../tool-electron/src ../ai-tool
 
 ### 8.4 transport 测试与环境坑
 
-- **改 `packages/mailbox` 的源码后要先重建 `dist`**。本包测试里 `import { Mailbox, MemoryProvider } from '@mboxlabs/mailbox'` 解析到的是 `packages/mailbox/dist/index.js`（workspace 软链 + `main` 字段），不是 `src`。只改源码不跑 `tsup`，下游测试看到的仍是旧行为（会误判「修复无效」或「测试假绿」）。
+- **改 `packages/mailbox` 的源码后要先重建 `dist`**。本包测试里 `import { Mailbox } from '@mboxlabs/mailbox'` 与 `import { MemoryProvider } from '@mboxlabs/mailbox-memory'` 解析到的是各自包的 `dist/`（workspace 软链 + `main` 字段），不是 `src`。只改源码不跑那个包的 `tsup`，下游测试看到的仍是旧行为（会误判「修复无效」或「测试假绿」）。
 - **端口不要先探测再 bind**。`findPort()` 是「探测 → 关闭 → 交给被测代码 bind」，中间有 TOCTOU 窗口；它内部的串行与递增重试只在**单进程**内有效，而 vitest 每个测试文件跑在独立 worker 里，两个套件从同一个起始端口出发就会同时认为它空闲，后 bind 的那个随机 `EADDRINUSE`。
   - 只需要「一个可用端口」时：用 `test/helpers/ports.ts` 的 `startOnKernelPort()`——`port: 0` 由内核在 listen 时原子分配，没有窗口；端口从 `getListenAddr()` 读。路由要在 start 前声明，所以用**裸 path 前缀**（`/api`）声明路由，端口等监听后再拼给客户端。
   - 确实需要预先知道端口时（例如两个 transport 要在 apiUrl 里写同一个 authority 才能落到同一底座）：用 `test/helpers/ports.ts` 的 `withReservedPort(from, factory, host?)`。它把探测与 bind 之间的窗口压到 factory 自己的 setup，且窗口内真被抢走时**换下一个号码重跑 factory**。
