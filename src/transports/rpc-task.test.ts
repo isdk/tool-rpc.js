@@ -45,7 +45,12 @@ describe('RpcTaskResource', () => {
       expect(handle.status).toBe('aborted');
       expect(aborter.signal.aborted).toBe(true);
       expect(cleaned).toBe(true);
-      
+
+      // issue #11 验收第 1 条：取消之后账本要清。
+      // `handle.abort()` 只调 cleanup 钩子，注销账本条目是 `$cancel` 这一端的责任——
+      // 已 aborted 的任务 GET 只会回 TERMINATED，留着没有任何取回价值，只能等 60s 兜底扫描。
+      expect(tracker.get('kill-me'), '取消后账本不该残留').toBeUndefined();
+
       tracker.stop();
    });
 

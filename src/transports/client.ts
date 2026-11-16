@@ -165,6 +165,24 @@ export abstract class ClientToolTransport extends ToolTransport implements IClie
   }
 
   /**
+   * 为「取消通知」（`$cancel`）准备一份自己的 options（issue #11）。
+   *
+   * 这个 abortListener 是在调用方的 signal **已经 abort 之后**才跑的，所以它复用的那份
+   * fetchOptions 里带着一个已 abort 的 signal：
+   * - HTTP 会把它接到请求的 AbortController 上（见 `http-client.ts`）；
+   * - mailbox 见到 aborted 的 signal 直接拒绝（见 `mailbox-client.ts`）；
+   * 外面那层 `.catch(() => {})` 又把 rejection 吞掉——于是服务端什么都不知道，后台任务照跑。
+   * 这就是 SPEC §5.2 要求的「曾收到 102 → 发 `$cancel`」静默失效的根因。
+   *
+   * 同样不能继承本次调用的 `timeout`：进后台态意味着软超时已到，拿那点时间再赌一次网络往返，
+   * 等于把这条通知的生死交给一个已经过期的死线。signal 与 timeout 都交回传输层自己的默认值。
+   */
+  private cancelNotificationOptions(fetchOptions: any) {
+    const { signal: _cancelSignal, timeout: _cancelTimeout, ...rest } = fetchOptions;
+    return { ...rest, act: '$cancel' };
+  }
+
+  /**
    * 处理服务端通过 102 信号引发的客户端后台循环轮询逻辑
    */
   private async executeWithPolling(name: string, args: any, act: any, subName: any, fetchOptions: any): Promise<any> {
@@ -178,7 +196,7 @@ export abstract class ClientToolTransport extends ToolTransport implements IClie
       }
       abortListener = () => {
         // 当本地信号触发时，尝试通知服务端注销后台任务 (Fire and forget)
-        this.pollTaskStatus(reqId, { ...fetchOptions, act: '$cancel' }).catch(() => {});
+        this.pollTaskStatus(reqId, this.cancelNotificationOptions(fetchOptions)).catch(() => {});
       };
       signal.addEventListener('abort', abortListener);
     }

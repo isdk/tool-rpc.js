@@ -102,6 +102,35 @@ describe('Cross-Transport Integration (HTTP + Mailbox)', () => {
       isApi: true,
     })
 
+    // 后台任务探针（issue #11）：把「服务端到底停没停」写到 globalThis 上，
+    // 让断言不必依赖连接断开——取消是逻辑的，传输层必须还在线。
+    ;(globalThis as any).__BgProbe = {}
+    ServerTools.register({
+      name: 'bg-probe',
+      timeout: { value: 100, keepAliveOnTimeout: true },
+      func: async function(this: any) {
+        const key = (this as any).ctx?.requestId
+        const state = ((globalThis as any).__BgProbe[key] ||= { started: true, aborted: false, finished: false })
+        return new Promise<string>((resolve, reject) => {
+          const timer = setTimeout(() => {
+            state.finished = true
+            resolve('bg-done')
+          }, 2000)
+          const signal = this.ctx?.signal
+          if (signal) {
+            signal.addEventListener('abort', () => {
+              clearTimeout(timer)
+              state.aborted = true
+              const err = new Error('Aborted by signal')
+              err.name = 'AbortError'
+              reject(err)
+            }, { once: true })
+          }
+        })
+      } as any,
+      isApi: true,
+    })
+
     // ── Mailbox Transport ──
     mailbox = new Mailbox()
     mailbox.registerProvider(new MemoryProvider())
@@ -458,6 +487,62 @@ describe('Cross-Transport Integration (HTTP + Mailbox)', () => {
       } catch (err: any) {
         expect(err.name).toMatch(/AbortError|Error/)
       }
+    })
+  })
+
+  describe('Cross-Transport Background Cancellation (issue #11)', () => {
+    const settle = (ms: number) => new Promise(r => setTimeout(r, ms))
+
+    // 取消一个已进后台态的任务：客户端 abort 之后，服务端必须真的停下来，
+    // 而且账本要清掉。两边都不能靠「连接断了」碰巧成立。
+    async function expectBackgroundCancelWasNotSilent(
+      label: string,
+      start: (reqId: string, signal: AbortSignal) => Promise<unknown>,
+      transportStillWorks: () => Promise<unknown>,
+    ) {
+      const reqId = `${label}-cancel-${Date.now().toString(36)}`
+      const controller = new AbortController()
+      const call = start(reqId, controller.signal)
+      call.catch(() => {}) // 取消的 rejection 由断言那侧负责
+
+      // 让调用确实落到 102 轮询里（软超时 100ms，retry-after 1000ms）
+      await settle(250)
+      const pending = (RpcServerDispatcher.instance.tracker as any).tasks as Map<string, unknown>
+      expect(pending.has(reqId), `${label}: 取消前任务应在后台账本里`).toBe(true)
+
+      controller.abort()
+      await settle(500)
+
+      const state = (globalThis as any).__BgProbe[reqId]
+      expect(state?.started, `${label}: 任务已开始`).toBe(true)
+      expect(state?.aborted, `${label}: 服务端任务必须被中止（不能静默失效）`).toBe(true)
+      expect(state?.finished, `${label}: 中止后不该再跑完`).toBe(false)
+      expect(pending.has(reqId), `${label}: 取消后账本不该残留`).toBe(false)
+
+      // 取消是逻辑的：传输层仍在线，同一条通道上的其它调用照走
+      expect(await transportStillWorks()).toBeTruthy()
+    }
+
+    it('HTTP: aborting a 102 background task stops it on the server and clears the ledger', async () => {
+      await expectBackgroundCancelWasNotSilent(
+        'http',
+        (reqId, signal) => httpClient.fetch('bg-probe', {}, 'run', undefined, {
+          signal,
+          headers: { 'req-id': reqId },
+        }),
+        async () => await httpClient.fetch('echo', { msg: 'alive-after-cancel' }) === 'alive-after-cancel',
+      )
+    })
+
+    it('Mailbox: aborting a 102 background task stops it on the server and clears the ledger', async () => {
+      await expectBackgroundCancelWasNotSilent(
+        'mailbox',
+        (reqId, signal) => mailboxClient.fetch('bg-probe', {}, 'run', undefined, {
+          signal,
+          headers: { 'req-id': reqId },
+        }),
+        async () => await mailboxClient.fetch('echo', { msg: 'alive-after-cancel' }) === 'alive-after-cancel',
+      )
     })
   })
 

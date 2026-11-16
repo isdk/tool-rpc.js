@@ -63,6 +63,15 @@ export class RpcTaskResource extends ResServerTools {
     }
 
     task.abort("Client requested cancellation via rpcTask API");
+
+    // 取消之后账本就得清（issue #11）：`handle.abort()` 只跑工具的 cleanup 钩子，
+    // 不注销条目；而原来那次 dispatch 早在返回 102 时就结束，`checkImmediateCleanup` 不会再跑，
+    // 残留条目只能等 tracker 的 60s 兜底扇描。
+    // 已 aborted 的任务被 GET 只会回 TERMINATED，留着没有任何取回价值。
+    // （不是所有 abort 都能这么删：硬死线 / Background Guard 中止的任务，客户端还要靠轮询
+    // 读到终态，所以这条只在“客户端显式取消”这个入口上生效。）
+    dispatcher.tracker.remove(resId);
+
     return { success: true };
   }
 }
