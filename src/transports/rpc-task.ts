@@ -35,7 +35,11 @@ export class RpcTaskResource extends ResServerTools {
        throw new RpcError("Keep Polling", RpcStatusCode.PROCESSING);
     } else if (task.status === 'error' || task.status === 'aborted') {
        const errMessage = task.error ? (task.error.message || String(task.error)) : "Task aborted";
-       throw new RpcError(errMessage, task.status === 'error' ? RpcStatusCode.INTERNAL_ERROR : RpcStatusCode.TERMINATED);
+       const stateErr = new RpcError(errMessage, task.status === 'error' ? RpcStatusCode.INTERNAL_ERROR : RpcStatusCode.TERMINATED);
+       // 这是账本里的终态，不是这次轮询调用自己的失败——不带这个标记，`handleError` 会把 408
+       // 折成 504「响应超时」，客户端就分不清「任务被掐了」与「服务端没及时回」（issue #13）。
+       stateErr.isTaskState = true;
+       throw stateErr;
     }
 
     // 关键：增加获取计数，可能会触发 'once' 策略的逻辑删除
@@ -64,13 +68,15 @@ export class RpcTaskResource extends ResServerTools {
 
     task.abort("Client requested cancellation via rpcTask API");
 
-    // 取消之后账本就得清（issue #11）：`handle.abort()` 只跑工具的 cleanup 钩子，
-    // 不注销条目；而原来那次 dispatch 早在返回 102 时就结束，`checkImmediateCleanup` 不会再跑，
-    // 残留条目只能等 tracker 的 60s 兜底扇描。
-    // 已 aborted 的任务被 GET 只会回 TERMINATED，留着没有任何取回价值。
-    // （不是所有 abort 都能这么删：硬死线 / Background Guard 中止的任务，客户端还要靠轮询
-    // 读到终态，所以这条只在“客户端显式取消”这个入口上生效。）
-    dispatcher.tracker.remove(resId);
+    // 账本去留交给工具自己的 retention 策略（issue #13）。
+    // 以前这里是无条件 `tracker.remove(resId)`，那会绕开 `shouldCleanup()`：
+    // `Permanent` 或数值保留期里的条目被取消就当场蒸发，客户端再也问不到「这次取消到底停住了没有」
+    // （对比：硬死线 / Background Guard 中止的条目是留着的，GET 回 408——同一个终态两种可见性）。
+    // `abort()` 已经把 `completedAt` 打在取消那一刻，所以保留期是从取消时开始计时。
+    // 默认（None）依旧当场注销——#11 的残留问题就在那条路径上，不回归。
+    if (task.shouldCleanup(Date.now())) {
+      dispatcher.tracker.remove(resId);
+    }
 
     return { success: true };
   }

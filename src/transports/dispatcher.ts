@@ -392,6 +392,19 @@ export class RpcServerDispatcher {
       };
     }
 
+    // 账本终态原样返回（issue #13）：`rpcTask.get` 读到的 408/500 是「躺在账本里的状态」，
+    // 不是本次轮询调用被掐。下面那条 AbortError/408 → 504 的折算只属于同步调用（规范 §状态码）。
+    if (err.isTaskState) {
+      return {
+        status: err.code,
+        error: {
+          code: err.code,
+          status: err.status || (err.code === RpcStatusCode.TERMINATED ? 'terminated' : 'error'),
+          message: err.message || "Task State"
+        }
+      };
+    }
+
     if (err.name === 'AbortError' || err.code === 'ETIMEDOUT' || err.code === 20 || err.code === RpcStatusCode.TERMINATED) {
       return {
         status: RpcStatusCode.GATEWAY_TIMEOUT,

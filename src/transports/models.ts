@@ -190,6 +190,12 @@ export class RpcError extends Error {
   public status?: string;
   /** 额外的业务负载数据 */
   public data?: any;
+  /**
+   * 这条错误是「账本里已经躺着的终态」，不是本次调用自己的失败（issue #13）。
+   * `handleError()` 见到它就不再做 408 → 504 的折算：那折算是给「同步调用被硬死线掐掉」用的，
+   * 而规范 §状态码 写明 408 只出现在轮询路径（`rpcTask.get` 读到 aborted 条目）上。
+   */
+  public isTaskState?: boolean;
 
   constructor(message: string, code: number = 500, status?: string, data?: any) {
     super(message);

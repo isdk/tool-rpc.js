@@ -360,7 +360,8 @@ This is a UX-friendly hint (an advisory signal, not an enforced constraint). Cli
 ### 3. Cancelling a Call
 
 Two entry points; both end up on the same transport path (in flight → the connection is cut and the
-server sees the physical close; after a `102` → `POST /rpcTask/:req-id?act=$cancel`):
+server sees the physical close; and **as soon as the task is in the ledger** — no `102` needed →
+`POST /rpcTask/:req-id?act=$cancel`):
 
 ```typescript
 // 1) Bring your own signal — works on any ClientTools, nothing to enable
@@ -374,8 +375,13 @@ const p2 = MyApi.get('generate').run(params)
 p2.task.abort('user stopped') // → POST /rpcTask/:req-id?act=$cancel
 ```
 
-- Either way the call rejects with an `AbortError`, and the server drops the ledger entry as soon as
-  `$cancel` lands — no background burn, no residue waiting for the 60s sweep.
+- Either way the call rejects with an `AbortError`, and the server stops the task as soon as `$cancel` lands —
+  no background burn.
+- **When the ledger entry goes away depends on that tool's own retention policy** (spec §5.2.2): under the default
+  (`None`) it is dropped on the spot, so a later poll only gets **404** — that is the expected endgame, not a failed
+  cancellation. With a numeric retention window or `Permanent`, the cancelled record stays until the window ends and
+  polling reads its **408** terminal state meanwhile. The retention window is measured **from the moment of
+  cancellation**.
 - The cancel notification deliberately carries **no** caller signal and **no** business deadline: it is
   issued _after_ the caller's signal has already aborted, and reusing either one kills the notification
   in transit. That is the silent failure this path used to have — the caller believed the task stopped.

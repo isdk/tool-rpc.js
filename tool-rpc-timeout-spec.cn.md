@@ -117,6 +117,7 @@ export interface RemoteFuncItem extends BaseFuncItem {
   - **408 Terminated**: **硬死线 (Hard Deadline) 触发**。任务运行时间超过服务端设定的物理上限（如 `maxTaskRuntimeMs`），被强制终止。
     **注意区分两条路径**：同步调用里硬死线会被 `handleError()` 再映射为 **504**（`status: 'timeout'`）；
     408 只出现在**轮询路径**（`rpcTask.get` 读到 `aborted` 任务）和账本内部的 `RpcError` 上。
+    轮询路径上读到的 408 必须**原样返回**：它已是任务终态，客户端需要它来区分「被掐了」与「服务端没及时回」（§5.2.2）。
   - **409 Conflict**: `requestId` 冲突。表示该 ID 的任务已在账本中激活。
   - **504 Gateway Timeout**: 客户端等待超时，且任务不具备后台维持能力。
   - **错误负载**: 返回标准响应对象 `{ status: 504, error: { code: 504, message: 'TIMEOUT', ... } }`。
@@ -138,8 +139,17 @@ export interface RemoteFuncItem extends BaseFuncItem {
 - **逻辑中止**:
   - **客户端取消**: 当用户在客户端触发 `AbortSignal` 时：
     1. 传输层立即尝试物理切断当前连接。
-    2. 若任务已在后台执行（曾收到过 102），传输层必须向服务端发送 `POST /rpcTask/:requestId?act=$cancel`。
-  - **服务端响应**: `RpcActiveTaskTracker` 接收到取消请求后，立即强制终止对应任务并清理账本记录。
+    2. 只要任务**已登记账本**，传输层就必须向服务端发送 `POST /rpcTask/:requestId?act=$cancel`。
+       **判据是「已登记账本」，不是「曾收到过 102」**：账本在 `dispatch` 一进来就登记，所以 pre-102
+       （调用还在连接态）的取消也得能到服务端——不能拿物理断连兼这个：HTTP 的 `rawRes.close` 只覆盖部分分支，
+       mailbox 根本没有断连概念。
+    3. **取消通知不得复用本次调用的 `signal` 与 `timeout`**：监听器是在调用方 signal **已经 abort 之后**才跑的，
+       复用等于拿着一个已 abort 的 signal 发请求（HTTP 直接接到请求上、mailbox 直接拒），而外层 `.catch(() => {})`
+       会把 rejection 吞掉——服务端什么都不知道，后台任务照跑。进后台态也意味着本次调用的软超时已到，
+       不能再拿那条已过期的死线赌一次网络往返。所以这份通知自己准备 options：不带 `signal`、不带 `timeout`，
+       交回传输层默认值。
+  - **服务端响应**: `RpcActiveTaskTracker` 收到取消请求后强制终止对应任务（对已 aborted 的条目幂等），
+    **账本条目的去留由该工具自己的 retention 策略决定**（§5.2.2）。
     任务真的停下来，前提是工具自己监听 `this.ctx.signal`（§5.1）。
 
 ### 5.2.1 资源释放：`cleanup` / `onClose` 属工具自己，RPC 不代调
@@ -156,6 +166,30 @@ export interface RemoteFuncItem extends BaseFuncItem {
 - **流式工具**的释放走它建流时挂的 `onClose(status, reason)`（`'final' | 'error' | 'cancel'`）：账本中止时
   `RpcActiveTaskHandle` 会 `outputStream.cancel(reason)`，取消沿流链上传到工具那层，`status` 为 `'cancel'`。
   这条与 lifecycle ability 无关，不需要 `makeToolFuncLifecycle`。
+
+### 5.2.2 取消后的账本条目：去留由 retention 决定，注销后的 404 属预期
+
+- `$cancel` **不得**无条件注销账本条目：`tracker.remove()` 绕开 `shouldCleanup()`，于是 `Permanent` 或数值保留期里的
+  取消记录当场消失，客户端只能问到一个 404，分不清「这次取消到底停住了没有」——而同一个任务被硬死线掐掉时
+  条目是留着的（轮询回 408）。同一个终态不该有两种可见性。
+- **取消时刻就是保留期的起点**：`RpcActiveTaskHandle.abort()` 把 `completedAt` 打在 `abort()` 那一刻，
+  所以数值保留期是从取消时开始计时，不是从登记时。
+- 各策略下的结果：
+
+  | retention | 取消后账本 | 之后再 GET |
+  | --- | --- | --- |
+  | 默认（`None`） | 当场注销 | **404** |
+  | 数值 `N` ms | 保留至 `取消时刻 + N` | 期内 **408**（终态），期后 404 |
+  | `'once'` | 保留至被读到一次（或 `onceFallbackMs` 兜底） | **408** |
+  | `Permanent` | 保留（§6.1「永不淘汰」） | **408** |
+
+- **条目注销之后再收到 `GET` 或 `$cancel` 应回 404；客户端必须把它当成「服务端已经收下、这事翻篇了」，
+  不得当成取消失败**：取消通知是 fire-and-forget，而默认策略下条目当场注销。
+- **轮询读到的终态不得被折算成 504**：`RpcTaskResource.get` 抛的 408 是「账本里躺着的状态」，不是本次轮询调用超时
+  （实现上用 `RpcError.isTaskState` 标记），与 §4.2 「408 只出现在轮询路径」一致。
+- `retention` 是**实例字段**：`ServerTools.register({ retention: 5000, ... })` 会被 tool-func 的 schema 过滤掉
+  （`tool.retention` 始终 `undefined`）。要生效得注册实例（自己 `new` 一个带 `retention = 5000` 类字段的
+  `ServerTools` 子类，再 `ServerTools.register(inst)`），或在注册后直接写到实例上。
 
 ### 5.3 资源释放
 

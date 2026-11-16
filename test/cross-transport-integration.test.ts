@@ -602,6 +602,90 @@ describe('Cross-Transport Integration (HTTP + Mailbox)', () => {
     })
   })
 
+  // issue #13：`$cancel` 曾在账本上无条件 `remove()`，那绕开了工具自己的 retention 策略：
+  // `Permanent` / 数值保留期里的取消记录当场消失，客户端只能看到一个 404，问不出「这次取消到底停住了没有」。
+  describe('Cancellation honors retention (issue #13)', () => {
+    const settle = (ms: number) => new Promise(r => setTimeout(r, ms))
+
+    beforeAll(() => {
+      // 同 bg-probe，只多了数值保留期。
+      // 注意：`retention` 必须在实例上（类字段 + `register(instance)`）——
+      // `register({ retention })` 会被 tool-func 的 schema 过滤掉，`tool.retention` 始终 undefined。
+      class RetainedProbe extends ServerTools {
+        retention = 5000
+        timeout = { value: 100, keepAliveOnTimeout: true }
+        isApi = true
+        func = async function(this: any) {
+          const key = (this as any).ctx?.requestId
+          const state = ((globalThis as any).__BgProbe[key] ||= { started: true, aborted: false, finished: false })
+          return new Promise<string>((resolve, reject) => {
+            const timer = setTimeout(() => {
+              state.finished = true
+              resolve('bg-done')
+            }, 2000)
+            const signal = this.ctx?.signal
+            if (signal) {
+              signal.addEventListener('abort', () => {
+                clearTimeout(timer)
+                state.aborted = true
+                const err = new Error('Aborted by signal')
+                err.name = 'AbortError'
+                reject(err)
+              }, { once: true })
+            }
+          })
+        }
+      }
+      ServerTools.register(new RetainedProbe('bg-probe-retained'))
+    })
+
+    it('HTTP: 默认 retention（None）下取消→条目当场注销，再 GET → 404（#14 建议第 3 条）', async () => {
+      const reqId = `http-gone-${Date.now().toString(36)}`
+      const controller = new AbortController()
+      const call = httpClient.fetch('bg-probe', {}, 'run', undefined, {
+        signal: controller.signal,
+        headers: { 'req-id': reqId },
+      })
+      call.catch(() => {})
+
+      await settle(250)
+      controller.abort()
+      await settle(300)
+
+      expect(((RpcServerDispatcher.instance.tracker as any).tasks as Map<string, unknown>).has(reqId),
+        '默认策略下取消就该注销').toBe(false)
+      expect(await pollStatus(httpClient, reqId), '注销之后只能问到 404').toBe(404)
+    })
+
+    it('HTTP: 数值保留期里的取消记录仍在账上，GET 问得到 408 终态而不是 404', async () => {
+      const reqId = `http-retained-${Date.now().toString(36)}`
+      const controller = new AbortController()
+      const call = httpClient.fetch('bg-probe-retained', {}, 'run', undefined, {
+        signal: controller.signal,
+        headers: { 'req-id': reqId },
+      })
+      call.catch(() => {})
+
+      await settle(250)
+      controller.abort()
+      await settle(300)
+
+      expect(((RpcServerDispatcher.instance.tracker as any).tasks as Map<string, unknown>).has(reqId),
+        '保留期里的取消记录不该当场消失').toBe(true)
+      expect(await pollStatus(httpClient, reqId), '取消的终态要问得到（408 TERMINATED），不是“查无此任”').toBe(408)
+    })
+
+    /** 轮询任务状态，不论客户端把错误抛出来还是返响应，都归一成一个状态码 */
+    async function pollStatus(client: any, reqId: string): Promise<number | undefined> {
+      try {
+        const res: any = await client.pollTaskStatus(reqId)
+        return res?.status ?? res?.code
+      } catch (err: any) {
+        return err?.code ?? err?.status
+      }
+    }
+  })
+
   describe('Cross-Transport Lifecycle Independence', () => {
     it('should continue serving HTTP requests after Mailbox transport stops', async () => {
       // Stop mailbox server

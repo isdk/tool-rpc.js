@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { RpcServerDispatcher } from './dispatcher';
-import { RpcActiveTaskTracker } from './task-tracker';
+import { RpcActiveTaskTracker, RpcActiveTaskHandle } from './task-tracker';
 import { ServerTools } from '../server-tools';
 import { ToolRpcRequest, RpcStatusCode, RPC_HEADERS } from './models';
 
@@ -315,6 +315,37 @@ describe('RpcServerDispatcher', () => {
       expect(res.data).toEqual({ foo: 'bar' });
       expect(mockHandle.fetchCount).toBe(1);
    });
+
+   it('轮询读到 aborted 条目：响应保持 408，不得被 `handleError` 折成 504（规范 §状态码，issue #13）', async () => {
+      // 规范写得很明：408 只出现在轮询路径（`rpcTask.get` 读到 aborted 任务）与账本内部的 RpcError 上；
+      // 504 是「同步调用被硬死线掐掉」。两者共用一个 code，所以 `handleError` 必须能分辨。
+      const tracker = new RpcActiveTaskTracker()
+      const d = new RpcServerDispatcher({ tracker, registry })
+      const handle = new RpcActiveTaskHandle('poll-me', new Promise(() => {}), new AbortController(), false, () => {}, 5000)
+      tracker.add('poll-me', handle)
+      handle.abort('client cancelled')
+
+      const res = await d.dispatch({
+         apiUrl: 'http://test', toolId: 'rpcTask', resId: 'poll-me', requestId: 'poll-req',
+         params: {}, headers: { [RPC_HEADERS.ACT]: 'get' }
+      } as ToolRpcRequest)
+
+      expect(res.status, '轮询路径上的终态不能被改写成 504「响应超时」').toBe(RpcStatusCode.TERMINATED)
+      expect(res.error?.code).toBe(RpcStatusCode.TERMINATED)
+
+      // 对照：同步调用被硬死线掐掉仍走 504（不被这次改动影响）
+      const syncTool: any = { run: (_p: any, ctx: any) => new Promise((_r, rej) => {
+         ctx.signal.addEventListener('abort', () => rej(ctx.signal.reason))
+      }) }
+      registry.get = vi.fn().mockReturnValue(syncTool)
+      const sync = await d.dispatch({
+         apiUrl: 'http://test', toolId: 'slowTool', requestId: 'sync-req',
+         params: {}, headers: { [RPC_HEADERS.TIMEOUT]: '20' }
+      } as ToolRpcRequest)
+      expect(sync.status, '硬死线路径仍是 504').toBe(RpcStatusCode.GATEWAY_TIMEOUT)
+
+      tracker.stop()
+   })
 
    it('should pass context including headers, requestId, traceId, signal, and raw objects', async () => {
       const mockRun = vi.fn().mockImplementation((params, ctx) => {
