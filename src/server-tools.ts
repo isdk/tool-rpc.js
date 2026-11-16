@@ -61,12 +61,19 @@ export class ServerTools extends ToolFunc {
       this.ctx = context;
     }
 
-    if (this.enableLegacyCompat && context) {
+    // legacy compat 注入读的 ctx：调用方递的优先，否则读自己（影子实例）身上的。
+    // dispatcher 现在只 `with(context)`、不再把 context 当第二个参数递下来（issue #14），
+    // 所以这条回退就是 `_req`/`_res`/`_signal` 不丢的那根线。
+    const compatCtx = context || this.ctx;
+
+    if (this.enableLegacyCompat && compatCtx) {
       // 集中管理：将新架构信息回灌给旧版 Params，适配那些仍依赖 params 内部数据的旧工具。
-      injectV1ContextToParams(params, context);
-      bridgeContextToV1Params(context, params);
+      injectV1ContextToParams(params, compatCtx);
+      bridgeContextToV1Params(compatCtx, params);
     }
 
+    // 往下传的必须仍是调用方的 `context`，不是 compatCtx：把 `this.ctx` 补进去等于告诉
+    // tool-func「这一层还要隔离」，一次调用就会开两个调用作用域（issue #14）。
     // 如果没有重写 func，则调用基类的 run，它会处理 positional 参数等逻辑。
     return super.run(params, context);
   }

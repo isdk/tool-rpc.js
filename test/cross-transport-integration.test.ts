@@ -131,6 +131,34 @@ describe('Cross-Transport Integration (HTTP + Mailbox)', () => {
       isApi: true,
     })
 
+    // pre-102 探针（issue #14）：软超时拉得足够长，abort 一定落在 102 之前。
+    // 账本从 `dispatch` 一进来就登记（dispatcher.ts 的 trackTask），所以连接态的取消也该到服务端。
+    ServerTools.register({
+      name: 'bg-probe-pre102',
+      timeout: { value: 1500, keepAliveOnTimeout: true },
+      func: async function(this: any) {
+        const key = (this as any).ctx?.requestId
+        const state = ((globalThis as any).__BgProbe[key] ||= { started: true, aborted: false, finished: false })
+        return new Promise<string>((resolve, reject) => {
+          const timer = setTimeout(() => {
+            state.finished = true
+            resolve('bg-done')
+          }, 2000)
+          const signal = this.ctx?.signal
+          if (signal) {
+            signal.addEventListener('abort', () => {
+              clearTimeout(timer)
+              state.aborted = true
+              const err = new Error('Aborted by signal')
+              err.name = 'AbortError'
+              reject(err)
+            }, { once: true })
+          }
+        })
+      } as any,
+      isApi: true,
+    })
+
     // ── Mailbox Transport ──
     mailbox = new Mailbox()
     mailbox.registerProvider(new MemoryProvider())
@@ -499,14 +527,15 @@ describe('Cross-Transport Integration (HTTP + Mailbox)', () => {
       label: string,
       start: (reqId: string, signal: AbortSignal) => Promise<unknown>,
       transportStillWorks: () => Promise<unknown>,
+      /** 取消前等多久：250ms = 已进 102；80ms（配 1500ms 软超时）= 还在连接态 */
+      settleMs = 250,
     ) {
       const reqId = `${label}-cancel-${Date.now().toString(36)}`
       const controller = new AbortController()
       const call = start(reqId, controller.signal)
       call.catch(() => {}) // 取消的 rejection 由断言那侧负责
 
-      // 让调用确实落到 102 轮询里（软超时 100ms，retry-after 1000ms）
-      await settle(250)
+      await settle(settleMs)
       const pending = (RpcServerDispatcher.instance.tracker as any).tasks as Map<string, unknown>
       expect(pending.has(reqId), `${label}: 取消前任务应在后台账本里`).toBe(true)
 
@@ -542,6 +571,33 @@ describe('Cross-Transport Integration (HTTP + Mailbox)', () => {
           headers: { 'req-id': reqId },
         }),
         async () => await mailboxClient.fetch('echo', { msg: 'alive-after-cancel' }) === 'alive-after-cancel',
+      )
+    })
+
+    // pre-102（issue #14）：调用还在连接态就 abort。判据不是「曾收到 102」而是「已登记账本」，
+    // 而两输 transport 都不能靠物理断连兼这个（HTTP 的 rawRes.close 只覆盖 ReadableStream 分支，
+    // mailbox 根本没有断连概念）——所以这条只能靠 `$cancel`，也因此必须单独测。
+    it('HTTP: aborting a call before the 102 still stops the server-side task', async () => {
+      await expectBackgroundCancelWasNotSilent(
+        'http-pre102',
+        (reqId, signal) => httpClient.fetch('bg-probe-pre102', {}, 'run', undefined, {
+          signal,
+          headers: { 'req-id': reqId },
+        }),
+        async () => await httpClient.fetch('echo', { msg: 'alive-after-pre102-cancel' }) === 'alive-after-pre102-cancel',
+        80,
+      )
+    })
+
+    it('Mailbox: aborting a call before the 102 still stops the server-side task', async () => {
+      await expectBackgroundCancelWasNotSilent(
+        'mailbox-pre102',
+        (reqId, signal) => mailboxClient.fetch('bg-probe-pre102', {}, 'run', undefined, {
+          signal,
+          headers: { 'req-id': reqId },
+        }),
+        async () => await mailboxClient.fetch('echo', { msg: 'alive-after-pre102-cancel' }) === 'alive-after-pre102-cancel',
+        80,
       )
     })
   })

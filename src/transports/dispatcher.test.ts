@@ -226,7 +226,7 @@ describe('RpcServerDispatcher', () => {
       expect(res.error?.message).toBe('Primitive Error String');
    });
 
-   it('should call tool.cleanup when task is aborted', async () => {
+   it('should NOT call tool.cleanup on abort — release belongs to the tool (issue #14)', async () => {
       let cleanupCalled = false;
       const mockCleanup = vi.fn().mockImplementation(() => { cleanupCalled = true; });
       const mockRun = vi.fn().mockReturnValue(new Promise(() => { })); // Hangs
@@ -244,11 +244,11 @@ describe('RpcServerDispatcher', () => {
       const handle = dispatcher.tracker.get('cleanup-req');
       handle?.abort('Manual abort');
 
-      expect(cleanupCalled).toBe(true);
-      expect(mockCleanup).toHaveBeenCalledWith(
-         expect.objectContaining({ foo: 'bar' }), 
-         expect.objectContaining({ requestId: 'cleanup-req' })
-      );
+      // 不再代调：`cleanup(params, ctx)` 与 tool-func 的 `cleanup(this)` 不是同一个契约，
+      // 且注册类装了 `makeToolFuncLifecycle` 时同一次中止会被调两次。释放交还工具自己
+      // （per-call `cleanup` 或流式 `onClose('cancel')`），见 cleanup-lifecycle.test.ts。
+      expect(cleanupCalled, 'RPC 不代调工具自己的 cleanup').toBe(false);
+      expect(handle?.status, '但中止本身要记账').toBe('aborted');
    });
 
    it('should be immediately visible in tracker once dispatched', async () => {

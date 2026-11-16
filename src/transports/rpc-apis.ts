@@ -119,13 +119,16 @@ export class RpcApisResource extends ServerTools {
    * `act: 'get'` 且带 `resId` → 只回那一个工具；其余情况回全量清单。
    */
   run(params: any, context?: ToolRpcContext) {
-    const registry: any = context?.registry ?? context?.dispatcher?.registry;
+    // 主路是 `this.ctx`：dispatcher 只 `with(context)` 建影子实例，不再把 context 当第二个参数
+    // 递下来（issue #14：否则一次调用会开两个调用作用域）。第二个参数留给直接调 `run(params, ctx)` 的调用方。
+    const ctx = context || this.ctx;
+    const registry: any = ctx?.registry ?? ctx?.dispatcher?.registry;
     if (!registry) {
       throw new RpcError('Discovery: no tool registry mounted for this route', RpcStatusCode.INTERNAL_ERROR);
     }
 
-    const resId = context?.resId ?? params?.resId;
-    if (context?.act === 'get' && resId) {
+    const resId = ctx?.resId ?? params?.resId;
+    if (ctx?.act === 'get' && resId) {
       const tool = typeof registry.get === 'function' ? registry.get(resId) : registry[resId];
       if (!tool) {
         throw new RpcError(`Tool not found: ${resId}`, RpcStatusCode.NOT_FOUND);

@@ -372,6 +372,10 @@ p2.task.abort('用户停止') // → POST /rpcTask/:req-id?act=$cancel
   复用任何一个都会让这条通知在路上就死。这就是这条路径过去的“静默失效”——调用方以为自己取消了，服务端还在跑。
 - 取消是逻辑的，不是物理的：传输层仍在线，同一条通道上的其它调用照走。
 - 服务端真的停下来，前提是工具监听 `this.ctx.signal`。
+- 服务端**释放资源**（关连接、归还句柄）是工具自己的事，RPC 不代调钩子：非流式走 per-call `cleanup`，而它只有
+  你在**注册类上自己** `makeToolFuncLifecycle(ServerTools)` 才生效（RPC 不代装能力，也不代调 `tool.cleanup(params, ctx)`，
+  那与 tool-func 的 `cleanup(this)` 不是同一个契约）；流式工具走建流时挂的 `onClose(status, reason)`，
+  取消时 `status === 'cancel'`（这条不需要 ability）。见规范 `tool-rpc-timeout-spec.cn.md` §5.2.1。
 - `makeClientToolRpcCancelable` 是 opt-in 的（底层默认多任务并发，并且它**不**接管超时——RPC 只有一套死线，见上文）。
   需要 `p.task.abort()` 就用它；否则一个普通的 `AbortSignal` 已经覆盖取消。
 

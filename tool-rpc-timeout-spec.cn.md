@@ -139,7 +139,23 @@ export interface RemoteFuncItem extends BaseFuncItem {
   - **客户端取消**: 当用户在客户端触发 `AbortSignal` 时：
     1. 传输层立即尝试物理切断当前连接。
     2. 若任务已在后台执行（曾收到过 102），传输层必须向服务端发送 `POST /rpcTask/:requestId?act=$cancel`。
-  - **服务端响应**: `RpcActiveTaskTracker` 接收到取消请求后，立即强制终止对应任务，触发任务的 `cleanup` 钩子并清理账本记录。
+  - **服务端响应**: `RpcActiveTaskTracker` 接收到取消请求后，立即强制终止对应任务并清理账本记录。
+    任务真的停下来，前提是工具自己监听 `this.ctx.signal`（§5.1）。
+
+### 5.2.1 资源释放：`cleanup` / `onClose` 属工具自己，RPC 不代调
+
+- **per-call `cleanup`** 由 `@isdk/tool-func` 的 `makeToolFuncLifecycle` 触发，而它**只在显式安装它的注册类上生效**
+  （`makeToolFuncLifecycle(ServerTools)`）。服务端 RPC 既不代装这个能力，也不代调 `tool.cleanup(params, ctx)`：
+  后者与 tool-func 的 `cleanup(this)` 不是同一个契约——dispatcher 手里只有 `params`/`ctx`，没有真正执行本次调用的
+  那层影子实例，释放不到本次申请的资源。未装 ability 时那个钩子从来不会跑；装了之后 RPC 再补一次，
+  就等于破坏 tool-func 承诺的 exactly-once。
+- **一次调用只许开一个调用作用域**：`RpcServerDispatcher.performExecution` 用 `tool.with(context)` 建影子实例后，
+  **不得**再把同一个 `context` 作为第二个参数递下去——那会让 tool-func 按 `ctx` 再隔离一层，两个作用域都自认是
+  owner，`cleanup` 跑两次。工具读上下文走 `this.ctx`；legacy compat 的 `_req`/`_res`/`_signal` 由 `ServerTools.run`
+  回退到 `this.ctx` 注入。只有**自定义注册表**（没有 tool-func 的 `with`）才把 ctx 作为第二个参数收到。
+- **流式工具**的释放走它建流时挂的 `onClose(status, reason)`（`'final' | 'error' | 'cancel'`）：账本中止时
+  `RpcActiveTaskHandle` 会 `outputStream.cancel(reason)`，取消沿流链上传到工具那层，`status` 为 `'cancel'`。
+  这条与 lifecycle ability 无关，不需要 `makeToolFuncLifecycle`。
 
 ### 5.3 资源释放
 

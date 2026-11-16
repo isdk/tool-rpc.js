@@ -120,7 +120,7 @@ export class RpcServerDispatcher {
       const executionPromise = this.performExecution(tool, params, context);
 
       // 4. [注册阶段]：立即登记到 Tracker，确保从执行那一刻起全链路可见
-      this.trackTask(request.requestId, executionPromise, abortController, tool, params, context);
+      this.trackTask(request.requestId, executionPromise, abortController, tool);
 
       // 5. [等待阶段]：处理执行结果与死线控制 (包含 102 处理)
       const response = await this.waitForResult(request, executionPromise, abortController, timeoutConfig);
@@ -239,13 +239,28 @@ export class RpcServerDispatcher {
 
   /**
    * [执行阶段] 触发业务逻辑
+   *
+   * 影子实例只建一次。`with(context)` 已经把 ctx 挂在 runner 上；再把同一个 context 作为
+   * 第二个参数递进去，tool-func 的 `_shouldIsolate(ctx truthy)` 会再开一层影子，于是一次调用
+   * 开了**两个调用作用域**（两个层都自认是 owner）——per-call `cleanup` 就跟着跑两次（issue #14）。
+   *
+   * 不能再“随手删”：legacy compat 的 `_req`/`_res`/`_signal` 注入过去依赖第二个参数，
+   * 现在由 `ServerTools.run` 回退到 `this.ctx` 补上（见 `server-tools.ts`）。
+   * 非 tool-func 的自定义注册表没有 `with`，它的 ctx 只能继续走第二个参数。
    */
   private performExecution(tool: any, params: any, context: ToolRpcContext): Promise<any> {
-    // 利用 tool-func 的影子实例机制隔离上下文，防止并发冲突
-    const runner = (typeof tool.with === 'function') ? tool.with(context) : tool;
+    if (typeof tool.with === 'function') {
+      // 利用 tool-func 的影子实例机制隔离上下文，防止并发冲突（到此为止，不再往下递 ctx）
+      const runner: any = tool.with(context);
+      try {
+        return Promise.resolve(runner.run ? runner.run(params) : runner(params));
+      } catch (syncError) {
+        return Promise.reject(syncError);
+      }
+    }
 
     try {
-      return Promise.resolve(runner.run ? runner.run(params, context) : runner(params, context));
+      return Promise.resolve(tool.run ? tool.run(params, context) : tool(params, context));
     } catch (syncError) {
       return Promise.reject(syncError);
     }
@@ -253,21 +268,29 @@ export class RpcServerDispatcher {
 
   /**
    * [注册阶段] 向账本登记任务
+   *
+   * 注：handle 的 `onCleanup` 是账本自己的收尾钩子（中止时、流关闭时都会跑），
+   * 它**不**代调工具的 `tool.cleanup(params, ctx)`（issue #14）：
+   * - 那个签名与 tool-func 的 `cleanup(this)` 不是同一个契约（这边手里只有 params/ctx，没有真正
+   *   执行本次调用的影子实例，释放不到本次申请的资源）；
+   * - 注册类自己装了 `makeToolFuncLifecycle` 时，同一次中止会被再补一次（恰好破坏 exactly-once）；
+   * - 没装（默认 `ServerTools`）时，这条代调从来打不到——选项里的 `cleanup` 连实例都上不了。
+   *
+   * 资源释放归工具自己：tool-func 的 per-call `cleanup`（由注册类 `makeToolFuncLifecycle(...)` 启用）
+   * 或流式工具的 `onClose(status)`。RPC 不代装能力，也不代调钩子。
    */
   private trackTask(
     requestId: string,
     promise: Promise<any>,
     aborter: AbortController,
     tool: any,
-    params: any,
-    context: ToolRpcContext
   ) {
     const handle = new RpcActiveTaskHandle(
       requestId,
       promise,
       aborter,
       !!tool.stream,
-      () => { if (tool.cleanup) tool.cleanup(params, context); },
+      () => {},
       tool.retention,
       this.maxTaskRuntimeMs
     );

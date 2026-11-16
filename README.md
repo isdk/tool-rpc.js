@@ -382,6 +382,12 @@ p2.task.abort('user stopped') // → POST /rpcTask/:req-id?act=$cancel
 - Cancellation is logical, not physical: the transport stays online and other calls on the same channel
   keep working.
 - The server actually stops only if the tool observes `this.ctx.signal`.
+- Releasing resources on the server (closing connections, returning handles) is the tool's own job — the RPC side
+  never calls release hooks for it. Non-stream tools use the per-call `cleanup`, which only runs if **you** install
+  it on the registry class (`makeToolFuncLifecycle(ServerTools)`); the RPC side neither installs the ability nor
+  calls `tool.cleanup(params, ctx)` (that signature is not tool-func's `cleanup(this)` contract). Stream tools use
+  the `onClose(status, reason)` they attach when they build the stream — on cancellation `status === 'cancel'`
+  (no ability needed). See `tool-rpc-timeout-spec.cn.md` §5.2.1.
 - `makeClientToolRpcCancelable` is opt-in (multi-task under the hood, and it does **not** take over the
   timeout — RPC keeps exactly one deadline, see above). Use it when you want `p.task.abort()`; otherwise
   a plain `AbortSignal` already covers cancellation.
