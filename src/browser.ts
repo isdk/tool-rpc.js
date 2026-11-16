@@ -2,6 +2,7 @@
 // No Node.js-only server modules (http-server, mailbox-server, etc.) are included.
 export * from './consts'
 export * from './client-tools'
+export * from './client-tools-cancelable'
 export * from './rpc-methods-client-tool'
 export * from './res-client-tools'
 // Abstract server-side services (browser-compatible)

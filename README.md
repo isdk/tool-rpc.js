@@ -357,6 +357,35 @@ This is a UX-friendly hint (an advisory signal, not an enforced constraint). Cli
 - **Simulated progress**: move a progress bar smoothly across the `expectedDuration` window.
 - **Smart retries**: if the call exceeds the estimate and the task is idempotent, the client may fire a concurrent redundant request.
 
+### 3. Cancelling a Call
+
+Two entry points; both end up on the same transport path (in flight → the connection is cut and the
+server sees the physical close; after a `102` → `POST /rpcTask/:req-id?act=$cancel`):
+
+```typescript
+// 1) Bring your own signal — works on any ClientTools, nothing to enable
+const controller = new AbortController()
+const p = MyApi.get('generate').run(params, { signal: controller.signal })
+controller.abort()
+
+// 2) A task handle shaped like a local cancellable tool — opt in
+makeClientToolRpcCancelable(MyApi)
+const p2 = MyApi.get('generate').run(params)
+p2.task.abort('user stopped') // → POST /rpcTask/:req-id?act=$cancel
+```
+
+- Either way the call rejects with an `AbortError`, and the server drops the ledger entry as soon as
+  `$cancel` lands — no background burn, no residue waiting for the 60s sweep.
+- The cancel notification deliberately carries **no** caller signal and **no** business deadline: it is
+  issued _after_ the caller's signal has already aborted, and reusing either one kills the notification
+  in transit. That is the silent failure this path used to have — the caller believed the task stopped.
+- Cancellation is logical, not physical: the transport stays online and other calls on the same channel
+  keep working.
+- The server actually stops only if the tool observes `this.ctx.signal`.
+- `makeClientToolRpcCancelable` is opt-in (multi-task under the hood, and it does **not** take over the
+  timeout — RPC keeps exactly one deadline, see above). Use it when you want `p.task.abort()`; otherwise
+  a plain `AbortSignal` already covers cancellation.
+
 ## 🧠 Execution Context and Shadow Instances
 
 To keep concurrent calls safe while decoupling business logic from environment details, the library uses a _prototype-chain shadow instance_ mechanism.
@@ -556,7 +585,7 @@ The architecture is built around a few key interfaces:
 - **`IClientToolTransport`**: The interface that a client-side transport must implement. Its core responsibilities are:
   1. **Loading API Definitions**: Call the `loadApis()` method, which accesses the server's discovery endpoint to get the definitions of all tools.
   2. **Executing Remote Calls**: Implement the `fetch()` method, which is responsible for serializing the client's tool call (function name and parameters), sending it to the server's RPC endpoint, and processing the response.
-  3. **Background Lifecycle (V2)**: Support for **Polling (102 Processing)** and **Logical Cancellation** linked to `AbortSignal`.
+  3. **Background Lifecycle (V2)**: Support for **Polling (102 Processing)** and **Logical Cancellation** linked to `AbortSignal` (see _Cancelling a Call_).
 
 ### Built-in Transports
 

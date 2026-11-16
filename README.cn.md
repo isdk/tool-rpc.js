@@ -351,6 +351,30 @@ V2 架构引入了**影子实例**机制，彻底解决了异步环境下的 `th
 - **UI 模拟进度**: 在 `expectedDuration` 期间平滑移动进度条。
 - **智能重试**: 若超过预期耗时且任务幂等，客户端可选择发起并发冗余请求。
 
+### 3. 取消一次调用
+
+两个入口，底下是同一条传输层路径（连接态 → 切连接，服务端看到物理断开；曾回 `102` → `POST /rpcTask/:req-id?act=$cancel`）：
+
+```typescript
+// 1）自带 signal：任何 ClientTools 都能用，不需要开能力
+const controller = new AbortController()
+const p = MyApi.get('generate').run(params, { signal: controller.signal })
+controller.abort()
+
+// 2）要和本地可取消任务同形的 `task` 句柄：显式开能力
+makeClientToolRpcCancelable(MyApi)
+const p2 = MyApi.get('generate').run(params)
+p2.task.abort('用户停止') // → POST /rpcTask/:req-id?act=$cancel
+```
+
+- 两种写法都会以 `AbortError` 拒绝；`$cancel` 一到位，服务端立即注销账本条目——不后台照跑，也不留一条等 60s 扫描的残留。
+- 取消通知故意**不带**调用方的 signal、也**不继承**业务死线：它是在调用方的 signal **已经 abort 之后**才发的，
+  复用任何一个都会让这条通知在路上就死。这就是这条路径过去的“静默失效”——调用方以为自己取消了，服务端还在跑。
+- 取消是逻辑的，不是物理的：传输层仍在线，同一条通道上的其它调用照走。
+- 服务端真的停下来，前提是工具监听 `this.ctx.signal`。
+- `makeClientToolRpcCancelable` 是 opt-in 的（底层默认多任务并发，并且它**不**接管超时——RPC 只有一套死线，见上文）。
+  需要 `p.task.abort()` 就用它；否则一个普通的 `AbortSignal` 已经覆盖取消。
+
 ## 🧠 执行上下文 (Context) 与 影子实例
 
 为了确保并发安全并解耦业务逻辑与环境信息，项目采用了“原型链影子实例”机制。
@@ -550,7 +574,7 @@ import { ClientTools } from '@isdk/tool-rpc'
 - **`IClientToolTransport`**: 客户端传输必须实现的接口。其核心职责是：
   1. **加载 API 定义**: 调用 `loadApis()` 方法，该方法会访问服务器的发现端点以获取所有工具的定义。
   2. **执行远程调用**: 实现 `fetch()` 方法，该方法负责将客户端的工具调用（函数名和参数）序列化，发送到服务器的 RPC 端点，并处理响应。
-  3. **后台生命周期 (V2)**: 支持 **102 Processing 轮询** 以及与本地 `AbortSignal` 联动的远程中止。
+  3. **后台生命周期 (V2)**: 支持 **102 Processing 轮询** 以及与本地 `AbortSignal` 联动的远程中止（见「取消一次调用」）。
 
 ### 内置传输实现
 

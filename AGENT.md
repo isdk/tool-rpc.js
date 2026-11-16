@@ -291,6 +291,48 @@ while (!finished) {
 await rpcTask.cancel({ resId: taskId })
 ```
 
+**取消的两条硬规定**（这两条各制造过一次“静默失效”，改动时别放开）：
+
+1. **取消通知不带本次调用的 signal，也不继承业务死线**。abortListener 是在调用方的 signal **已经 abort 之后**才跑的：
+   把那份 signal 原样透传，HTTP 会把它接到请求的 AbortController 上，mailbox 见到 aborted 的 signal 直接拒绝，
+   外面那层 `.catch(() => {})` 再把 rejection 吞掉——服务端什么都不知道，后台任务照跑
+   （见 `client.ts` 的 `cancelNotificationOptions`）。同理，进后台态意味着软超时已到，
+   拿那点时间再赌一次网络往返等于把这条通知的生死交给一个已经过期的死线。
+2. **`$cancel` 之后要注销账本条目**。`handle.abort()` 只跑工具的 cleanup 钩子，不 `tracker.remove()`；
+   而原来那次 `dispatch()` 早在返回 102 时就结束了，`checkImmediateCleanup` 不会再跑，
+   残留条目只能等 tracker 的 60s 兜底扫描。已 aborted 的任务被 GET 只会回 TERMINATED，留着没有取回价值。
+   （不是所有 abort 都能立刻删：硬死线 / Background Guard 中止的任务，客户端还要靠轮询读到终态，
+   所以这条只在“客户端显式取消”这个入口上生效。）
+
+#### 客户端取消：`AbortSignal` 与 `makeClientToolRpcCancelable`
+
+两个入口，底下是同一条传输层路径（连接态切连接；曾回 `102` 则发 `$cancel`）：
+
+```typescript
+// 1）自带 signal：任何 ClientTools 都能用，不需要开能力
+const controller = new AbortController()
+const p = MyApi.get('generate').run(params, { signal: controller.signal })
+controller.abort()
+
+// 2）要和本地可取消任务同形（`p.task.abort(reason)`）：显式开能力
+makeClientToolRpcCancelable(MyApi)
+const p2 = MyApi.get('generate').run(params)
+p2.task.abort('用户停止')
+```
+
+- 能力是 **opt-in** 的：tool-func 的 `makeToolFuncCancelable` 只往类上塞方法，`func` 由工具作者自己写；
+  而 `ClientTools.func` 是框架写死的（转发到 `fetch`），发现出来的 stub 走的正是它——用户没有 `func` 可写。
+  所以 tool-rpc 自己提供包装器（`client-tools-cancelable.ts`），它同时做能力注入和 `func` / `fetch` 包装。
+- 包装器必须把内部 aborter 的 signal 灌给传输层：tool-func 的信号联动方向是**外部 → 内部**
+  （`ctx.signal` 链进 aborter），它不会把 aborter 的 signal 写回 `ctx.signal`。
+  不接这一根线，`task.abort()` 只断本地 promise，服务端照跑。
+- 默认 `AsyncFeatures.MultiTask`：单任务模式下同一个 stub 上第二次并发 `run()` 会抛 `The task is running`。
+- **不**把 `timeout` 交给 tool-func 的 aborter：RPC 的死线只有一套（`rpc-timeout` + `RpcDeadlineGuard`），
+  再叠一层“整个任务链”的定时器就是第二套死线。`task.abort()` 只表示取消，不表示超时。
+- tool-func 注入的本地 `aborter` 不上 wire（`params.aborter` 会被序列化成一个平白多出来的 `aborter: {}`，
+  污染参数校验，还可能撞上服务端注入的 `_signal`）。
+- 服务端要真的停下来，工具必须监听 `this.ctx.signal`（`tool-rpc-timeout-spec.cn.md` §5.1）。
+
 ### 4.3 使用 Mailbox 传输层
 
 Mailbox 传输层适用于跨进程/线程通信，无需 HTTP 服务器。需要安装 `@mboxlabs/mailbox` 包。
@@ -577,7 +619,7 @@ Mailbox 在严格模式下**必须**带 `req-id` header（否则 400），非严
 
 浏览器入口导出的模块包括：
 
-- **客户端工具**: `ClientTools`, `RpcMethodsClientTool`, `ResClientTools`
+- **客户端工具**: `ClientTools`, `RpcMethodsClientTool`, `ResClientTools`, `makeClientToolRpcCancelable`
 - **客户端传输**: `ClientToolTransport`, `HttpClientToolTransport`, `IClientToolTransport`
 - **抽象服务端类**: `ServerTools`, `RpcMethodsServerTool`, `ResServerTools`
 - **传输基础设施**:

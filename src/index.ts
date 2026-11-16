@@ -1,5 +1,6 @@
 export * from './consts'
 export * from './client-tools'
+export * from './client-tools-cancelable'
 export * from './server-tools'
 export * from './rpc-methods-client-tool'
 export * from './rpc-methods-server-tool'
