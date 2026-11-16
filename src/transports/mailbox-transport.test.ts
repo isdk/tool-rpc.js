@@ -105,12 +105,16 @@ describe('MailboxServerTransport / MailboxClientTransport V2 Test', () => {
   });
 
   it('should call remote tool and get result', async () => {
+    await ClientTools.loadFrom();
     const calculator = ClientTools.get('calculator');
     const result = await calculator!.run({ a: 10, b: 32 });
     expect(result).toBe(42);
   });
 
   it('should handle remote structured errors', async () => {
+    // 存根自己备：以前靠前面某条用例的 `loadFrom()` 把存根留在 `ClientTools.items` 里，
+    // 重排后 `ClientTools.get('errorTool')` 是 undefined（`Cannot read properties of undefined`）。
+    await ClientTools.loadFrom();
     const errorTool = ClientTools.get('errorTool');
     try {
       await errorTool!.run({});
@@ -142,9 +146,12 @@ describe('MailboxServerTransport / MailboxClientTransport V2 Test', () => {
   });
 
   it('should support discovery via "list" action using headers', async () => {
+    // 断言的工具自己注册。以前断的是 `whoami`——那是隔壁
+    // 「should allow tool to access sender information」注册的，重排到它前面就红。
+    new ServerTools({ name: 'discoveryProbe', isApi: true, func: () => 'probe' }).register();
     const items = await clientTransport.fetch('', {}, 'list');
     expect(items).toHaveProperty('calculator');
-    expect(items).toHaveProperty('whoami');
+    expect(items).toHaveProperty('discoveryProbe');
   });
 
   it('should support RESTful style call with resId via Headers', async () => {

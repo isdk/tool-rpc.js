@@ -196,12 +196,22 @@ describe('Comprehensive Pure V2 Integration (Streaming, Polling, Errors)', () =>
           return { resId: context.resId, act: context.act };
         }
       }
-      httpDispatcher.registry.get = (id: string) => id === 'meta' ? new MetaTool('meta') : undefined;
+      // 换路由表必须还原：`httpDispatcher.registry` 与 mailbox 侧、与 beforeAll 建的
+      // streamTool/longTool/errorTool 是**同一个对象**。不还原的话，shuffle 把这条排到前面时
+      // 其余四条全变 404（实测 `Tool not found: longTool`、`expected 404 to be 202`）。
+      const registry: any = httpDispatcher.registry
+      const originalGet = registry.get
+      registry.get = (id: string) => id === 'meta' ? new MetaTool('meta') : undefined;
 
-      const resp = await fetch(`http://localhost:${httpPort}/api/meta/res-abc`, {
-        headers: { 'rpc-act': 'my-act' }
-      });
-      const data = await resp.json();
+      let data: any
+      try {
+        const resp = await fetch(`http://localhost:${httpPort}/api/meta/res-abc`, {
+          headers: { 'rpc-act': 'my-act' }
+        });
+        data = await resp.json();
+      } finally {
+        registry.get = originalGet
+      }
       expect(data.resId).toBe('res-abc');
       expect(data.act).toBe('my-act');
     });

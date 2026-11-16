@@ -490,29 +490,31 @@ describe('Mailbox Provider Integration (Memory + File)', () => {
    * 它们属于 provider，基类代劳不了。
    */
   describe('FileProvider Peek (只读快照)', () => {
+    // 这一段不共用 `fileAddr1`：`--sequence.shuffle` 会把段内用例也重排，
+    // 上一条投的信会被下一条当成"本该有的那两条"（实测 `expected 3 to be 2`）。
     beforeAll(() => {
       mailbox = createFreshMailbox()
-      fileAddr1 = uniqueAddr('file:///tmp/mailbox/peek')
     })
 
     it('peek 返回副本数组，一条不取走：unreadCount 不动，紧接着普通 fetch 还能取到同一份', async () => {
-      await mailbox!.post({ from: 'file:///tmp/s', to: fileAddr1, body: { n: 1 } })
-      await mailbox!.post({ from: 'file:///tmp/s', to: fileAddr1, body: { n: 2 } })
+      const peekAddr = uniqueAddr('file:///tmp/mailbox/peek')
+      await mailbox!.post({ from: 'file:///tmp/s', to: peekAddr, body: { n: 1 } })
+      await mailbox!.post({ from: 'file:///tmp/s', to: peekAddr, body: { n: 2 } })
       await new Promise(resolve => setTimeout(resolve, 150))
 
-      const before = await fileProvider.status(new URL(fileAddr1))
+      const before = await fileProvider.status(new URL(peekAddr))
       expect(before.unreadCount).toBe(2)
 
-      const seen = await mailbox!.fetch(fileAddr1, { peek: true })
+      const seen = await mailbox!.fetch(peekAddr, { peek: true })
       expect(Array.isArray(seen)).toBe(true)
       expect(seen.map(m => m.body)).toEqual([{ n: 1 }, { n: 2 }])
       // 只读快照不交付，所以没有东西可以处置：给个句柄就是让人 ack 一条从没送出去的信
       expect((seen[0] as unknown as AckableMailMessage).ack).toBeUndefined()
 
-      const after = await fileProvider.status(new URL(fileAddr1))
+      const after = await fileProvider.status(new URL(peekAddr))
       expect(after.unreadCount).toBe(before.unreadCount)
 
-      const pulled = await mailbox!.fetch(fileAddr1)
+      const pulled = await mailbox!.fetch(peekAddr)
       expect(pulled!.body).toEqual({ n: 1 })
     })
 
@@ -540,16 +542,17 @@ describe('Mailbox Provider Integration (Memory + File)', () => {
     })
 
     it('peek + manualAck 是矛盾选项，必须报错而不是默默取走一条', async () => {
-      await mailbox!.post({ from: 'file:///tmp/s', to: fileAddr1, body: { contradictory: true } })
+      const contradictionAddr = uniqueAddr('file:///tmp/mailbox/peek-contradiction')
+      await mailbox!.post({ from: 'file:///tmp/s', to: contradictionAddr, body: { contradictory: true } })
       await new Promise(resolve => setTimeout(resolve, 150))
-      const unread = (await fileProvider.status(new URL(fileAddr1))).unreadCount
+      const unread = (await fileProvider.status(new URL(contradictionAddr))).unreadCount
 
       await expect(
-        fileProvider.fetch(new URL(fileAddr1), { peek: true, manualAck: true }),
+        fileProvider.fetch(new URL(contradictionAddr), { peek: true, manualAck: true }),
       ).rejects.toThrow(InvalidFetchOptionsError)
 
       // 报错不算完成：报错了还把东西取走，调用方看到的仍然是个空队列
-      expect((await fileProvider.status(new URL(fileAddr1))).unreadCount).toBe(unread)
+      expect((await fileProvider.status(new URL(contradictionAddr))).unreadCount).toBe(unread)
     })
 
     it('peek 不创造地址：没投过也没订过，问过之后仍然是 unknown / exists:false', async () => {
