@@ -644,8 +644,28 @@ describe('HttpClientToolTransport Integration', () => {
     })
 
     describe('Timeout & Abort', () => {
+      // 这两条走的是 `ClientTools` 存根的 `run()`，而存根过去靠**兄弟 describe**
+      // （`End-to-End via ClientTools` 里的 `loadFrom()`）的副作用注册：单独跑这一段
+      // （`-t "Timeout & Abort"`）时 `ClientTools.get(...)` 是 undefined，
+      // 失败信息变成 `expected undefined to be 504` / `expected 'TypeError' to be 'AbortError'`
+      // —— 真正的断言根本没跑到。存根改成自己备齐。
+      let slowTool: any
+      let delayTool: any
+
+      beforeAll(() => {
+        RpcClientTransportManager.instance.register(new HttpClientToolTransport(apiRoot))
+        ClientTools.apiUrl = apiRoot
+        ClientTools.loadFromSync({
+          'echo': { name: 'echo' } as any,
+          'delay-tool': { name: 'delay-tool' } as any,
+        }, apiRoot)
+        slowTool = ClientTools.get('echo')
+        delayTool = ClientTools.get('delay-tool')
+        expect(slowTool, '存根必须自备：不能依赖别的 describe 的执行顺序').toBeDefined()
+        expect(delayTool, '存根必须自备：不能依赖别的 describe 的执行顺序').toBeDefined()
+      })
+
       it('should abort with 504 on client-side timeout', async () => {
-        const slowTool = ClientTools.get('echo')!
         try {
           // Server can't possibly respond in 1ms
           await slowTool.run({ msg: 'fast?' }, { timeout: 1 })
@@ -659,8 +679,6 @@ describe('HttpClientToolTransport Integration', () => {
       it('should handle AbortSignal interruption', async () => {
         const controller = new AbortController()
         // Use delay-tool which waits 500ms — enough time for abort to fire
-        const delayTool = ClientTools.get('delay-tool')!
-
         // Abort before the slow request completes
         setTimeout(() => controller.abort(), 50)
 
