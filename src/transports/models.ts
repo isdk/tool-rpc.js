@@ -194,6 +194,10 @@ export class RpcError extends Error {
    * 这条错误是「账本里已经躺着的终态」，不是本次调用自己的失败（issue #13）。
    * `handleError()` 见到它就不再做 408 → 504 的折算：那折算是给「同步调用被硬死线掐掉」用的，
    * 而规范 §状态码 写明 408 只出现在轮询路径（`rpcTask.get` 读到 aborted 条目）上。
+   *
+   * 实现细节，不是协议：只有 `RpcTaskResource.get` 抛的终态错误带它，只有同进程的 `handleError()` 读它。
+   * 出线的是 `handleError` 重建的 `error` 负载（code / status / message），这个标记不上 wire；
+   * 客户端和业务工具都不该设、也不该依赖（账本的 102 `Keep Polling` 就故意不带，见规范 §5.2.2）。
    */
   public isTaskState?: boolean;
 

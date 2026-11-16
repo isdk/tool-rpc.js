@@ -118,6 +118,8 @@ export interface RemoteFuncItem extends BaseFuncItem {
     **注意区分两条路径**：同步调用里硬死线会被 `handleError()` 再映射为 **504**（`status: 'timeout'`）；
     408 只出现在**轮询路径**（`rpcTask.get` 读到 `aborted` 任务）和账本内部的 `RpcError` 上。
     轮询路径上读到的 408 必须**原样返回**：它已是任务终态，客户端需要它来区分「被掐了」与「服务端没及时回」（§5.2.2）。
+    **部署侧注意**：HTTP 408 在语义上是「客户端可以原样重试」。端点经过公网代理 / 网关时，要么确认它不会自己重试 408，
+    要么把「能不能重放」这件事交给负载里的业务状态，不要靠 HTTP 码外传——服务端发 408 并不表示这次请求可以重放。
   - **409 Conflict**: `requestId` 冲突。表示该 ID 的任务已在账本中激活。
   - **504 Gateway Timeout**: 客户端等待超时，且任务不具备后台维持能力。
   - **错误负载**: 返回标准响应对象 `{ status: 504, error: { code: 504, message: 'TIMEOUT', ... } }`。
@@ -135,6 +137,11 @@ export interface RemoteFuncItem extends BaseFuncItem {
 - **保留名**: 框架读写到 `params` 上的名字（`_req` / `_res` / `_signal`，实现里是 `RPC_PARAM_KEYS`）都是保留的：
   只读，而且业务参数里已经有同名键时框架不覆盖。客户端这一侧 `params.aborter` 同样是保留名（tool-func 用来挂本地
   任务句柄）：拿它当业务参数会被当场拒，而且它不会上 wire。
+  **RPC 客户端这条路不接受 `params.aborter`，连原生 `AbortController` 也不收**：要联动自己的取消，把信号挂在调用上——
+  `run(params, { signal })`（即 `fetchOptions.signal`）；它会中止本次请求，并在任务已登记账本时触发 `$cancel`（§5.2）。
+  tool-func 的**本地调用路径**（不经 RPC）仍然支持经 `params.aborter` 传外部 `AbortController`
+  （见 `@isdk/tool-func` 的 `src/utils/cancelable-ability.cn.md`）。RPC 这边关掉它，是因为 `makeClientToolRpcCancelable`
+  自己要占这个键挂本地句柄：两个句柄挂在同一个 `params` 上，谁说了算没有答案。
 - **行为**: 当传输层触发超时（或客户端断开连接）且 `keepAliveOnTimeout` 为 `false` 时，该信号会被触发 (`abort`)。工具函数内部应通过监听此信号来停止耗时操作（如停止 AI 模型生成、中断 DB 查询）。
 
 ### 5.2 物理与逻辑中止联动 (V2)
@@ -186,13 +193,19 @@ export interface RemoteFuncItem extends BaseFuncItem {
   | --- | --- | --- |
   | 默认（`None`） | 当场注销 | **404** |
   | 数值 `N` ms | 保留至 `取消时刻 + N` | 期内 **408**（终态），期后 404 |
-  | `'once'` | 保留至被读到一次（或 `onceFallbackMs` 兜底） | **408** |
+  | `'once'` | 保留至被读到一次，或 `onceFallbackMs`（默认 `3600000`，即 1 小时）兜底 | **408** |
   | `Permanent` | 保留（§6.1「永不淘汰」） | **408** |
 
 - **条目注销之后再收到 `GET` 或 `$cancel` 应回 404；客户端必须把它当成「服务端已经收下、这事翻篇了」，
   不得当成取消失败**：取消通知是 fire-and-forget，而默认策略下条目当场注销。
 - **轮询读到的终态不得被折算成 504**：`RpcTaskResource.get` 抛的 408 是「账本里躺着的状态」，不是本次轮询调用超时
   （实现上用 `RpcError.isTaskState` 标记），与 §4.2 「408 只出现在轮询路径」一致。
+- **同一个 `req-id` 在保留期内不能重投**：`RpcActiveTaskTracker.add` 只看条目在不在账本上，不看它是不是终态，
+  撞上一条被取消但仍留在保留期里的条目就是 **409**。取消不等于「这个 id 翻篇了」——重投必须换 `req-id`。
+  （默认 `None` 当场注销，所以撞不上；`Permanent` 则表示那个 id 永久占位。）
+- **`isTaskState` 是实现细节，不是协议**：只有账本 `get` 抛出的终态错误带它，作用是躲开 `handleError` 的 408 → 504 折算。
+  它不出线协议（出线的是 `handleError` 重建出来的 `error` 负载），客户端与业务工具都不该设、也不该依赖。
+  账本的 102（`Keep Polling`）**不带**这个标记——只有终态带；102 走 §4.2 的 102 分支。
 - `retention` 是**实例字段**：`ServerTools.register({ retention: 5000, ... })` 会被 tool-func 的 schema 过滤掉
   （`tool.retention` 始终 `undefined`）。要生效得注册实例（自己 `new` 一个带 `retention = 5000` 类字段的
   `ServerTools` 子类，再 `ServerTools.register(inst)`），或在注册后直接写到实例上。

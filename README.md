@@ -405,7 +405,7 @@ constants (`RPC_SPECIAL_ACTIONS` / `RPC_PARAM_KEYS`, exported from the package e
 
 | Name | Written by | What the business side must know |
 | --- | --- | --- |
-| `params.aborter` | tool-func, carrying the local task handle of a cancelable task (`makeClientToolRpcCancelable`) | **Do not use it as a business parameter**: a real value is rejected up front (`params.aborter is reserved ...`), and it never goes on the wire |
+| `params.aborter` | tool-func, carrying the local task handle of a cancelable task (`makeClientToolRpcCancelable`) | **Do not use it as a business parameter**: a real value is rejected up front (`params.aborter is reserved ...`) — even a native `AbortController` — and it never goes on the wire. To link your own cancellation, put the signal on the call: `run(params, { signal })` |
 | `params._req` / `params._res` / `params._signal` | server-side legacy compat (`enableLegacyCompat`) | read-only; the framework never overwrites a key the caller already set |
 | act `$cancel` | the client's cancellation notification | don't name a tool method `$cancel`; build requests with `RPC_SPECIAL_ACTIONS.CANCEL` |
 

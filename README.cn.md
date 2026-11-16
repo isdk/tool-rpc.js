@@ -390,7 +390,7 @@ p2.task.abort('用户停止') // → POST /rpcTask/:req-id?act=$cancel
 
 | 名字 | 谁写它 | 业务侧须知 |
 | --- | --- | --- |
-| `params.aborter` | tool-func 给可取消任务挂的本地句柄（`makeClientToolRpcCancelable`） | **别拿它当业务参数**：放真值会当场拒（`params.aborter is reserved ...`）；它不会上 wire |
+| `params.aborter` | tool-func 给可取消任务挂的本地句柄（`makeClientToolRpcCancelable`） | **别拿它当业务参数**：放真值会当场拒（`params.aborter is reserved ...`），连原生 `AbortController` 也不收；它不会上 wire。要联动自己的取消，把信号挂在调用上：`run(params, { signal })` |
 | `params._req` / `params._res` / `params._signal` | 服务端 legacy compat（`enableLegacyCompat`） | 只读；业务参数里已有同名键时框架不覆盖 |
 | act `$cancel` | 客户端的取消通知 | 别把工具方法叫 `$cancel`；自己构造请求时用 `RPC_SPECIAL_ACTIONS.CANCEL` |
 

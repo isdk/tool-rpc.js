@@ -102,7 +102,8 @@ export function makeClientToolRpcCancelable<T extends typeof ClientTools>(
       delete conflictParam[RPC_PARAM_KEYS.ABORTER];
       return this.runAsyncCancelableTask(conflictParam, async () => {
         throw new Error(
-          `params.${RPC_PARAM_KEYS.ABORTER} is reserved by makeClientToolRpcCancelable (it carries the local task handle). Rename your parameter.`)
+          `params.${RPC_PARAM_KEYS.ABORTER} is reserved by makeClientToolRpcCancelable (it carries the local task handle). ` +
+            `Rename your parameter, or link your own cancellation via run(params, { signal }) (fetchOptions.signal).`)
       });
     }
 

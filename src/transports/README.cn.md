@@ -481,6 +481,25 @@ HTTP 上跑通它不需要子类化 transport，成对配两行就够：
 5.  业务代码接收到 `ctx.signal` 信号，物理停止执行。
 6.  `Immediate Cleanup` 机制介入，回收账本资源。
 
+### 10.1 资源释放：`cleanup` / `onClose` 属工具自己，RPC 不代调
+
+上面那条链只保证**中止**（`ctx.signal` 被 abort），不保证**释放**。释放归工具自己：
+
+- **非流式**：per-call `cleanup` 由 `@isdk/tool-func` 的 `makeToolFuncLifecycle` 触发，而它**只在显式安装它的注册类上生效**：
+  `const MyServerTools = makeToolFuncLifecycle(ServerTools)`。默认的 `ServerTools` 没装这个能力，声明了 `cleanup` 也从来不会跑。
+  服务端 RPC 既不代装能力，也不代调 `tool.cleanup(params, ctx)`：dispatcher 手里只有 `params`/`ctx`，没有真正执行本次调用的
+  那层影子实例，释放不到本次申请的资源；而注册类自己装了 ability 时再补一次，恰好破坏 tool-func 承诺的 exactly-once。
+- **一次调用只开一个调用作用域**：`RpcServerDispatcher.performExecution` 用 `tool.with(context)` 建影子实例之后，不再把同一个
+  `context` 作为第二个参数往下递——那会让 tool-func 再隔离一层，两个作用域都自认 owner，`cleanup` 跟着跑两次。工具读上下文
+  走 `this.ctx`；legacy compat 的 `_req` / `_res` / `_signal` 由 `ServerTools.run` 回退到 `this.ctx` 注入。**只有自定义注册表**
+  （没有 tool-func 的 `with`）才把 ctx 作第二个参数收。
+- **流式**：走工具建流时挂的 `onClose(status, reason)`。账本中止时 `RpcActiveTaskHandle` 会 `outputStream.cancel(reason)`，
+  取消沿流链上传到工具那层，`status` 为 `'cancel'`。这条与 lifecycle ability 无关，不需要 `makeToolFuncLifecycle`。
+
+跨 transport 还有一条必须写清的不变量：**物理断连不能用来兼取消**。HTTP 的 `rawRes.close` 只覆盖 ReadableStream 那一支，
+mailbox 则根本没有断连这个概念——所以已登记账本的任务，取消只能靠显式的 `$cancel`。账本条目在取消之后的去留、
+`'once'` 的 1 小时兜底、以及「保留期内同一个 req-id 重投会撞 409」，见规范 `tool-rpc-timeout-spec.cn.md` §5.2.2。
+
 ---
 
 ## 11. 工具类继承体系
