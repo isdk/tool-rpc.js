@@ -145,8 +145,11 @@ describe('ClientTools', () => {
       const tool = srv.get('testTool') as any;
 
       // Mock getClient to check options
-      const getClientSpy = vi.spyOn(RpcClientTransportManager.instance, 'getClient').mockImplementation((url, options) => {
-        return { fetch: async () => options } as any;
+      // 类级 fetchOptions 是**每次调用**传给 `transport.fetch(...)` 的，不再作为 `getClient`
+      // 的构造默认值（实例按 apiUrl 缓存，构造默认会把首个调用方的 timeout / 凭证
+      // 变成这个地址后续所有调用的默认值）。
+      const getClientSpy = vi.spyOn(RpcClientTransportManager.instance, 'getClient').mockImplementation(() => {
+        return { fetch: async (_name: string, _args: any, _act: any, _sub: any, options: any) => options } as any;
       });
 
       const usedOptions = await tool.run();

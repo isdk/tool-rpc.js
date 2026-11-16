@@ -85,6 +85,13 @@ export abstract class ClientToolTransport extends ToolTransport implements IClie
 
   async fetch(name: string, args?: any, act?: ActionName | string, subName?: any, fetchOptions?: any, toolTimeout?: any) {
     fetchOptions = { ...this.options, ...fetchOptions };
+    // headers 单独复制一份：下面的协商要往 `fetchOptions.headers` 上写
+    // `rpc-timeout` / `rpc-expected-duration` 等。不复制的话，调用方没传 headers 时
+    // 这个属性就是 `this.options.headers` 本身——框架 header 会被写进实例默认值，
+    // 之后这个 apiUrl 的每次调用都带着上一次的痕迹。
+    if (fetchOptions.headers) {
+      fetchOptions.headers = { ...fetchOptions.headers };
+    }
 
     // [Timeout Negotiation]
     // 1. User Override (from fetchOptions)
@@ -129,12 +136,15 @@ export abstract class ClientToolTransport extends ToolTransport implements IClie
     // 4. Apply back to fetchOptions & Headers
     if (finalTimeout !== undefined || finalIdleTimeout !== undefined) {
       // Ensure fetchOptions.timeout is updated (for client-side transport timeout logic)
-      if (typeof fetchOptions.timeout !== 'object' || fetchOptions.timeout === null) {
-        fetchOptions.timeout = { value: finalTimeout };
-      } else {
-        if (finalTimeout !== undefined) fetchOptions.timeout.value = finalTimeout;
+      // 协商结果写进一个**新对象**，不就地改传进来的那个：它可能是调用方的对象，
+      // 也可能同时是 transport 实例的默认值（见 base.ts 的构造）。
+      const prevTimeout = (typeof fetchOptions.timeout === 'object' && fetchOptions.timeout !== null)
+        ? fetchOptions.timeout
+        : undefined;
+      fetchOptions.timeout = { ...prevTimeout };
+      if (finalTimeout !== undefined) {
+        fetchOptions.timeout.value = finalTimeout;
       }
-
       if (finalIdleTimeout !== undefined) {
         fetchOptions.timeout.streamIdleTimeout = finalIdleTimeout;
       }

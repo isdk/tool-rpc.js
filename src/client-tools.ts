@@ -190,12 +190,19 @@ export class ClientTools extends ToolFunc {
   async fetch(objParam?: any, act?: ActionName, subName?: any, fetchOptions?: any) {
     // Merge fetchOptions with this.ctx (from tool-func) and class-level defaults
     const classDefaults = (this.constructor as any).fetchOptions;
-    fetchOptions = defaultsDeep(fetchOptions, this.ctx, this.fetchOptions, classDefaults)
+    // 先复制一份再合并：`defaultsDeep` 会**就地改**第一个参数，直接拿调用方传的对象当目标，
+    // 等于把本次调用的 header / timeout 写回调用方的对象上（复用一个 options 就会累积）。
+    fetchOptions = defaultsDeep({ ...fetchOptions }, this.ctx, this.fetchOptions, classDefaults)
     const apiUrl = fetchOptions.apiUrl || this.apiUrl;
     if (!apiUrl) {
       throwError('apiUrl is required for ClientTools.fetch', 'ClientTools');
     }
-    const transport = RpcClientTransportManager.instance.getClient(apiUrl, fetchOptions);
+    // 建 transport 只按地址，不把本次调用的 fetchOptions 递进去当构造默认值。
+    // 实例是按 apiUrl 缓存的：谁先调用，谁的 timeout / 凭证（`headers.authorization`）
+    // 就成了这个地址后续所有调用的默认值——跨调用方串线（test/per-call-options-isolation.test.ts）。
+    // 本次调用的选项在下面 `transport.fetch(..., fetchOptions, ...)` 里传，构造选项走
+    // `RpcClientTransportManager.instance.register(transport)` 或 `bindScheme(Class)`。
+    const transport = RpcClientTransportManager.instance.getClient(apiUrl);
     const result = await transport.fetch(this.name!, objParam, act, subName, fetchOptions, this.timeout)
     return result
   }

@@ -504,6 +504,12 @@ HTTP 上跑通它不需要子类化 transport，成对配两行就够：
   `RpcClientTransportManager.getClient(apiUrl)` 按 scheme 自建（自定义协议先 `RpcClientTransportManager.bindScheme(scheme, Class)`）。
 - 已经自己构好了 transport 实例：见 §12.3。
 
+`getClient(apiUrl, options?)` 的 `options` 只在「按 scheme 新建实例」那一刻用作构造参数，而实例是按 apiUrl
+缓存的 —— 所以**本次调用的 `fetchOptions` 不传进去当构造默认值**。传了会怎样：谁先调用，谁的 `timeout`、
+`headers.authorization` 就成了这个地址后续所有调用的默认值（实测第二次调用带上了第一个调用方的 Bearer）。
+每次调用的选项走 `transport.fetch(name, args, act, subName, fetchOptions, toolTimeout)`；
+地址级的构造选项走 `register(transport)` 或 `bindScheme(scheme, Class)`。
+
 ### 12.1 服务连接模式 (Service Connection Pattern)
 
 适用于“一个业务类需要对接多个后端实例”的场景。通过 `connect` 工厂方法，可以为同一个业务定义产生多个物理隔离的连接实例。

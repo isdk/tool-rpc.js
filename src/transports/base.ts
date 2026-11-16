@@ -57,7 +57,13 @@ export abstract class ToolTransport implements IToolTransport {
   public manager: RpcClientTransportManager;
 
   constructor(options?: ToolTransportOptions) {
-    this.options = options;
+    // **存副本，别存引用**：调用方传进来的 options 随后会被超时协商就地改写
+    // （`timeout` 变成 `{ value }`、`headers` 上塞 `rpc-timeout`/`req-id`）。
+    // 而 transport 实例是按 apiUrl 缓存的（`RpcClientTransportManager.getClient`），
+    // 引用一旦被存下来，"本次调用"的 timeout / 凭证就成了这个地址后续所有调用的默认值——
+    // 上一个调用方的 Bearer 会串到下一个调用方身上（见 test/per-call-options-isolation.test.ts）。
+    // 嵌套的 `timeout` / `headers` 由 `ClientToolTransport.fetch()` 那边负责复制。
+    this.options = options ? { ...options } : options;
     this.manager = options?.manager || RpcClientTransportManager.instance;
     if (options?.apiUrl) {
       this.apiUrl = options.apiUrl;
