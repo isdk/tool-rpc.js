@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest'
 import { withReservedPort } from './helpers/ports'
 import { ToolFunc } from '@isdk/tool-func'
 import { Mailbox } from '@mboxlabs/mailbox';
@@ -78,6 +78,15 @@ describe('identity end-to-end over HTTP', () => {
   let client: HttpClientToolTransport
   let apiRoot: string
   const verified: string[] = []
+
+  // `whoamiCalls` 是模块级计数，`resetRegistries()` 只在 beforeAll 里归零一次；
+  // `verified` 也是同段用例共享的数组。vitest 的 `--sequence.shuffle` 会把同段用例重排，
+  // 于是「不带凭证 → 工具一次都不跑」会捡到上一段的计数（实测 `expected 4 to be 0`、
+  // `expected ['forged','e2e-token',…] to deeply equal ['e2e-token']`）。计数器按用例归零。
+  beforeEach(() => {
+    whoamiCalls = 0
+    verified.length = 0
+  })
 
   const bearerPolicy = () => new RpcBearerPolicy({
     allowAnonymous: false,
@@ -181,20 +190,29 @@ describe('identity end-to-end over HTTP', () => {
   })
 
   it('ClientTools 走完整客户端栈（loadFrom + run）：带默认凭证的调用正常返回', async () => {
-    ClientTools.fetchOptions = { headers: { authorization: 'Bearer e2e-token' } }
-    await ClientTools.loadFrom()
+    // `connect()` 出的子类自带独立 items / fetchOptions（`BoundService.items = {}`）。
+    // 用基类静态表的话：存根与凭证都是**进程级**的，别的 describe 会捡到，
+    // 本段也会被别的 describe 捡到 —— shuffle 下随机红。
+    const Authed = ClientTools.connect(client.apiUrl)
+    Authed.fetchOptions = { headers: { authorization: 'Bearer e2e-token' } }
+    await Authed.loadFrom()
 
-    const result = await ClientTools.get('whoami')!.run({})
+    const result = await Authed.get('whoami')!.run({})
     expect(result.identityId).toBe('user-alice')
     expect(result.attributes).toEqual({ scope: ['read'] })
   })
 
   it('ClientTools 不带凭证时把 401 原样抛给调用方', async () => {
-    ClientTools.fetchOptions = {}
+    // 以前这条靠**上一条用例**的 `loadFrom()` 留在基类静态表里的存根：
+    // shuffle 下它是 undefined，报错 `Cannot read properties of undefined`，
+    // 再被断言吃成"401 不对"。存根与凭证都自己备。
+    const Anon = ClientTools.connect(client.apiUrl)
+    Anon.fetchOptions = {}
+    Anon.loadFromSync({ whoami: { name: 'whoami' } as any }, client.apiUrl)
 
     let thrown: any
     try {
-      await ClientTools.get('whoami')!.run({})
+      await Anon.get('whoami')!.run({})
     } catch (err) {
       thrown = err
     }

@@ -27,6 +27,12 @@ describe('HttpClientToolTransport Integration', () => {
     Object.setPrototypeOf(clientItems, ToolFunc.items)
     ClientTools.items = clientItems
 
+    // scheme 绑定是**进程级静态**（`RpcClientTransportManager.schemeRegistry`）。
+    // 以前它只在 `Transport Caching` 的 beforeAll 里绑、在它的 afterAll 里清 ——
+    // 于是"谁能跑起来"取决于 describe 的先后顺序（`--sequence.shuffle` 下随机红：
+    // `Unsupported URL scheme: http`）。绑定归文件级管；需要临时改 scheme 的段落自己恢复。
+    RpcClientTransportManager.bindScheme('http', HttpClientToolTransport)
+
     // Setup Dispatcher Registry
     RpcServerDispatcher.instance.registry = ServerTools
 
@@ -190,6 +196,7 @@ describe('HttpClientToolTransport Integration', () => {
     ToolFunc.items = {}
     ServerTools.items = {}
     ClientTools.items = {}
+    RpcClientTransportManager.clearSchemes()
   })
 
   describe('Transport Construction', () => {
@@ -403,6 +410,9 @@ describe('HttpClientToolTransport Integration', () => {
     })
   })
 
+  // 这一段刻意测**基类静态入口**（`ClientTools.apiUrl` + `ClientTools.loadFrom()`，
+  // 即废弃的 `setTransport` 那套写法的现行替身）。它是唯一允许往基类静态表塞存根的段落；
+  // 别的 describe 不许捡它的副作用——要存根就 `connect()` 自建作用域。
   describe('End-to-End via ClientTools', () => {
     beforeAll(async () => {
       const client = new HttpClientToolTransport(apiRoot)
@@ -448,9 +458,8 @@ describe('HttpClientToolTransport Integration', () => {
       RpcClientTransportManager.bindScheme('http', HttpClientToolTransport)
     })
 
-    afterAll(() => {
-      RpcClientTransportManager.clearSchemes()
-    })
+    // 不在这里 clearSchemes()：scheme 表是进程级静态，清了会波及后面的 describe。
+    // 收尾交给文件级 afterAll（见文件顶部）。
 
     it('should return cached instance for same apiUrl', () => {
       const t1 = RpcClientTransportManager.instance.getClient(apiRoot)
@@ -563,8 +572,11 @@ describe('HttpClientToolTransport Integration', () => {
     })
 
     it('should stream via full ClientTools path with { stream: true }', async () => {
-      // Go through ClientTools (transport registered by apiUrl in the earlier section)
-      const streamTool = ClientTools.get('stream-tool')!
+      // 原来那句注释 "transport registered by apiUrl in the earlier section" 就是在自认
+      // 依赖兄弟 describe。作用域自己备齐（connect() 出的子类有独立 items）。
+      const Srv = ClientTools.connect(apiRoot)
+      await Srv.loadFrom(undefined, { apiUrl: apiRoot })
+      const streamTool = Srv.get('stream-tool')!
       const res = await streamTool.run({ stream: true })
 
       // When stream: true is in args, executeWithPolling returns the raw Response
@@ -644,23 +656,23 @@ describe('HttpClientToolTransport Integration', () => {
     })
 
     describe('Timeout & Abort', () => {
-      // 这两条走的是 `ClientTools` 存根的 `run()`，而存根过去靠**兄弟 describe**
-      // （`End-to-End via ClientTools` 里的 `loadFrom()`）的副作用注册：单独跑这一段
-      // （`-t "Timeout & Abort"`）时 `ClientTools.get(...)` 是 undefined，
-      // 失败信息变成 `expected undefined to be 504` / `expected 'TypeError' to be 'AbortError'`
-      // —— 真正的断言根本没跑到。存根改成自己备齐。
+      // 这两条要的是 `run()` 这一层的存根。以前靠兄弟 describe（`End-to-End via ClientTools`
+      // 的 `loadFrom()`）的副作用注册：单独跑这一段（`-t "Timeout & Abort"`）时
+      // `ClientTools.get(...)` 是 undefined，失败变成 `expected undefined to be 504` /
+      // `expected 'TypeError' to be 'AbortError'`——断言其实在测"存根在不在"。
+      // 现在用 `connect()` 建自己的作用域：`ClientTools.connect` 里 `BoundService.items = {}
+      // // Scope isolation for discovered stubs`，不碰基类的静态表，也就不受别的 describe 顺序影响。
       let slowTool: any
       let delayTool: any
 
       beforeAll(() => {
-        RpcClientTransportManager.instance.register(new HttpClientToolTransport(apiRoot))
-        ClientTools.apiUrl = apiRoot
-        ClientTools.loadFromSync({
+        const Srv = ClientTools.connect(apiRoot)
+        Srv.loadFromSync({
           'echo': { name: 'echo' } as any,
           'delay-tool': { name: 'delay-tool' } as any,
         }, apiRoot)
-        slowTool = ClientTools.get('echo')
-        delayTool = ClientTools.get('delay-tool')
+        slowTool = Srv.get('echo')
+        delayTool = Srv.get('delay-tool')
         expect(slowTool, '存根必须自备：不能依赖别的 describe 的执行顺序').toBeDefined()
         expect(delayTool, '存根必须自备：不能依赖别的 describe 的执行顺序').toBeDefined()
       })
