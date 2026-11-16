@@ -187,4 +187,12 @@ describe('makeClientToolRpcCancelable (issue #11)', () => {
       expect(keys, `客户端本地句柄 ${leaked} 不该发到服务端`).not.toContain(leaked)
     }
   })
+
+  it('调用方留的假值 `aborter` 不算保留名冲突，但同样不上 wire（issue #15）', async () => {
+    // 真值会被 `makeClientToolRpcCancelable` 先一步拒（见 `test/reserved-names.test.ts`）；
+    // 假值走的是另一条：当作没这个键，注入的本地句柄照旧被摘掉。
+    const keys = await stubOf(CancelableClient, 'keys-echo').run({ a: 1, aborter: 0 })
+    expect(keys).toContain('a')
+    expect(keys, '本地句柄不该因为一个假值而漏到服务端').not.toContain('aborter')
+  })
 })

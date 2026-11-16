@@ -1,5 +1,6 @@
 import { AsyncFeatures, makeToolFuncCancelable, type TaskAbortController, type TaskPromise } from '@isdk/tool-func';
 import { ClientTools } from './client-tools';
+import { RPC_PARAM_KEYS } from './consts';
 
 /**
  * `makeClientToolRpcCancelable` 的选项。
@@ -88,6 +89,23 @@ export function makeClientToolRpcCancelable<T extends typeof ClientTools>(
   proto.fetch = function (this: any, objParam?: any, act?: any, subName?: any, fetchOptions?: any): TaskPromise<any> {
     // 下面的 runTask 是箭头函数：它词法上就拿着这里的 `this`（本次调用的 runner，
     // 可能是 shadow 实例），不需要 `const self = this`。
+
+    // `aborter` 是保留名（issue #15）：tool-func 要把本地任务句柄挂在 `params.aborter` 上。
+    // 调用方拿它当业务参数时，往下走只会听到 tool-func 一句没头没尾的
+    // `aborter should be an AbortController`——看不出自己踩了协议里的保留名。先一步说清。
+    // 假值（包括 `0` / `''` / `null`）不算踩：注入的本地句柄本来就会被 `stripLocalAborter` 摘掉。
+    if (objParam && typeof objParam === 'object' && !Array.isArray(objParam)
+      && objParam[RPC_PARAM_KEYS.ABORTER]) {
+      // 先把那个键摘掉再开任务（`runAsyncCancelableTask` 自己会先校 `params.aborter`，
+      // 带着它进去就只能听到 tool-func 那句），保留 TaskPromise 的形状：`p.task` 仍在。
+      const conflictParam = { ...objParam };
+      delete conflictParam[RPC_PARAM_KEYS.ABORTER];
+      return this.runAsyncCancelableTask(conflictParam, async () => {
+        throw new Error(
+          `params.${RPC_PARAM_KEYS.ABORTER} is reserved by makeClientToolRpcCancelable (it carries the local task handle). Rename your parameter.`)
+      });
+    }
+
     return this.runAsyncCancelableTask(objParam, async (params: any, aborter: TaskAbortController) => {
       // tool-func 把句柄挂在 params 上（`params.aborter = aborter`），而 RPC 的 params
       // 是要序列化发到服务端的：本地 AbortController 上 wire 会变成一个平白多出来的
@@ -119,8 +137,8 @@ export function makeClientToolRpcCancelable<T extends typeof ClientTools>(
 /** 摘掉 tool-func 注入的本地句柄，别让它上 wire（见 `makeClientToolRpcCancelable`）。 */
 function stripLocalAborter(params: any) {
   if (!params || typeof params !== 'object' || Array.isArray(params)) {return params;}
-  if (!('aborter' in params)) {return params;}
-  const { aborter: _localAborter, ...rest } = params;
+  if (!(RPC_PARAM_KEYS.ABORTER in params)) {return params;}
+  const { [RPC_PARAM_KEYS.ABORTER]: _localAborter, ...rest } = params;
   return rest;
 }
 

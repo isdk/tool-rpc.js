@@ -383,6 +383,17 @@ p2.task.abort('用户停止') // → POST /rpcTask/:req-id?act=$cancel
 - `makeClientToolRpcCancelable` 是 opt-in 的（底层默认多任务并发，并且它**不**接管超时——RPC 只有一套死线，见上文）。
   需要 `p.task.abort()` 就用它；否则一个普通的 `AbortSignal` 已经覆盖取消。
 
+#### 保留名（`params` 上的隐式协议名）
+
+下面几个名字不在类型里，但确实是协议的一部分。实现里它们是常量（`RPC_SPECIAL_ACTIONS` /
+`RPC_PARAM_KEYS`，从包入口导出）：
+
+| 名字 | 谁写它 | 业务侧须知 |
+| --- | --- | --- |
+| `params.aborter` | tool-func 给可取消任务挂的本地句柄（`makeClientToolRpcCancelable`） | **别拿它当业务参数**：放真值会当场拒（`params.aborter is reserved ...`）；它不会上 wire |
+| `params._req` / `params._res` / `params._signal` | 服务端 legacy compat（`enableLegacyCompat`） | 只读；业务参数里已有同名键时框架不覆盖 |
+| act `$cancel` | 客户端的取消通知 | 别把工具方法叫 `$cancel`；自己构造请求时用 `RPC_SPECIAL_ACTIONS.CANCEL` |
+
 ## 🧠 执行上下文 (Context) 与 影子实例
 
 为了确保并发安全并解耦业务逻辑与环境信息，项目采用了“原型链影子实例”机制。

@@ -121,6 +121,9 @@ export interface RemoteFuncItem extends BaseFuncItem {
   - **409 Conflict**: `requestId` 冲突。表示该 ID 的任务已在账本中激活。
   - **504 Gateway Timeout**: 客户端等待超时，且任务不具备后台维持能力。
   - **错误负载**: 返回标准响应对象 `{ status: 504, error: { code: 504, message: 'TIMEOUT', ... } }`。
+- **保留的 act 名**: `$cancel` 是协议自己占用的 act（实现里是常量 `RPC_SPECIAL_ACTIONS.CANCEL`，从包入口导出）。
+  它不是工具名的一部分：把工具方法叫 `$cancel` 就是接管取消端点。这个 act 与账本端点上的同名方法是成对的，
+  改一处必须两处一起改。
 
 ---
 
@@ -129,6 +132,9 @@ export interface RemoteFuncItem extends BaseFuncItem {
 ### 5.1 AbortSignal 注入
 
 - **服务端**: `ServerTools.run(params)` 的 `params` 中必须注入 `_signal: AbortSignal`。同时，业务逻辑可以通过 `this.ctx.signal` 访问该信号。
+- **保留名**: 框架读写到 `params` 上的名字（`_req` / `_res` / `_signal`，实现里是 `RPC_PARAM_KEYS`）都是保留的：
+  只读，而且业务参数里已经有同名键时框架不覆盖。客户端这一侧 `params.aborter` 同样是保留名（tool-func 用来挂本地
+  任务句柄）：拿它当业务参数会被当场拒，而且它不会上 wire。
 - **行为**: 当传输层触发超时（或客户端断开连接）且 `keepAliveOnTimeout` 为 `false` 时，该信号会被触发 (`abort`)。工具函数内部应通过监听此信号来停止耗时操作（如停止 AI 模型生成、中断 DB 查询）。
 
 ### 5.2 物理与逻辑中止联动 (V2)

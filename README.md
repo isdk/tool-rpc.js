@@ -398,6 +398,17 @@ p2.task.abort('user stopped') // → POST /rpcTask/:req-id?act=$cancel
   timeout — RPC keeps exactly one deadline, see above). Use it when you want `p.task.abort()`; otherwise
   a plain `AbortSignal` already covers cancellation.
 
+#### Reserved names (implicit protocol names living in `params`)
+
+None of these show up in the types, but they are part of the wire contract. In the implementation they are
+constants (`RPC_SPECIAL_ACTIONS` / `RPC_PARAM_KEYS`, exported from the package entry):
+
+| Name | Written by | What the business side must know |
+| --- | --- | --- |
+| `params.aborter` | tool-func, carrying the local task handle of a cancelable task (`makeClientToolRpcCancelable`) | **Do not use it as a business parameter**: a real value is rejected up front (`params.aborter is reserved ...`), and it never goes on the wire |
+| `params._req` / `params._res` / `params._signal` | server-side legacy compat (`enableLegacyCompat`) | read-only; the framework never overwrites a key the caller already set |
+| act `$cancel` | the client's cancellation notification | don't name a tool method `$cancel`; build requests with `RPC_SPECIAL_ACTIONS.CANCEL` |
+
 ## 🧠 Execution Context and Shadow Instances
 
 To keep concurrent calls safe while decoupling business logic from environment details, the library uses a _prototype-chain shadow instance_ mechanism.

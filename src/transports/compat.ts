@@ -1,4 +1,5 @@
 import { ToolRpcRequest, ToolRpcContext } from "./models";
+import { RPC_PARAM_KEYS } from "../consts";
 
 export interface RpcCompatOptions {
     /** 是否开启参数桥接：允许从 params.id/act 自动填充到 Request 对象，以及反向映射 */
@@ -61,8 +62,9 @@ export function bridgeContextToV1Params(context: ToolRpcContext, params: any) {
  */
 export function injectV1ContextToParams(params: any, context: ToolRpcContext) {
     if (params && typeof params === 'object') {
-        if (context.req && params._req === undefined) params._req = context.req;
-        if (context.reply && params._res === undefined) params._res = context.reply;
-        if (context.signal && params._signal === undefined) params._signal = context.signal;
+        // 保留名（`RPC_PARAM_KEYS`）：业务参数里已经有同名键时不覆盖（`=== undefined` 那道卡）。
+        if (context.req && params[RPC_PARAM_KEYS.REQ] === undefined) params[RPC_PARAM_KEYS.REQ] = context.req;
+        if (context.reply && params[RPC_PARAM_KEYS.RES] === undefined) params[RPC_PARAM_KEYS.RES] = context.reply;
+        if (context.signal && params[RPC_PARAM_KEYS.SIGNAL] === undefined) params[RPC_PARAM_KEYS.SIGNAL] = context.signal;
     }
 }

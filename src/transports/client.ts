@@ -1,5 +1,5 @@
 import { type Funcs } from "@isdk/tool-func";
-import { ActionName } from '../consts';
+import { ActionName, RPC_SPECIAL_ACTIONS } from '../consts';
 import { IToolTransport, ToolTransport, ToolTransportOptions } from "./base";
 import { RPC_HEADERS, RPC_DEFAULTS, RPC_APIS_TOOL_ID } from "./models";
 
@@ -189,7 +189,7 @@ export abstract class ClientToolTransport extends ToolTransport implements IClie
    */
   private cancelNotificationOptions(fetchOptions: any) {
     const { signal: _cancelSignal, timeout: _cancelTimeout, ...rest } = fetchOptions;
-    return { ...rest, act: '$cancel' };
+    return { ...rest, act: RPC_SPECIAL_ACTIONS.CANCEL };
   }
 
   /**

@@ -10,6 +10,32 @@ export const ActionNames = ['get', 'post', 'put', 'delete', 'patch', 'list', 're
 export type ActionName = typeof ActionNames[number]
 
 /**
+ * 协议自己占用的 act 名（issue #15）。它们跟 `req-id`、`rpc-act` 一样是线协议的一部分：
+ * 改名字就是改协议，客户端、端点方法名、文档必须同时改。
+ *
+ * 端点那边的方法名没法用常量（路由是按方法名反查 act 的），所以两者靠
+ * `test/reserved-names.test.ts` 钉在一起。
+ */
+export const RPC_SPECIAL_ACTIONS = {
+  /** 客户端取消一个在途/后台任务：`POST /rpcTask/:resId?act=$cancel` */
+  CANCEL: '$cancel',
+} as const
+
+/**
+ * 框架会读写到 `params` 上的保留参数名（issue #15）。业务工具的参数名不要撞它们：
+ * `aborter` 上放真值会被 tool-func 的 cancelable ability 当场拒（`makeClientToolRpcCancelable`
+ * 会先一步报出「这是保留名」）。
+ */
+export const RPC_PARAM_KEYS = {
+  /** tool-func 挂在 params 上的本地取消句柄；RPC 不让它上 wire */
+  ABORTER: 'aborter',
+  /** legacy compat（`enableLegacyCompat`）：服务端把底座原生请求/响应/信号灌进 params */
+  REQ: '_req',
+  RES: '_res',
+  SIGNAL: '_signal',
+} as const
+
+/**
  * A schema object defining properties common to all remote tool functions.
  * This is used by `AdvancePropertyManager` to define how these properties are handled.
  * @internal
