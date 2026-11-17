@@ -475,6 +475,28 @@ manager.registerServer(transport)
 await manager.startAll()
 ```
 
+#### 测试隔离约定（#17）
+
+库里有不少**进程级静态**：`RpcClientTransportManager.schemeRegistry`、`ToolFunc.items` /
+`ServerTools.items` / `ClientTools.items`、`RpcServerDispatcher.instance.tracker`、
+test 里的 `globalThis.__*Probe` 与 provider 信箱。它们让用例之间隐式依赖彼此的执行顺序：
+`npx vitest run --sequence.shuffle` 下随机红，顺序跑只是碰巧绿。
+
+- **用例自备 fixture**：存根、工具、信箱地址都在自己的 `beforeAll` / 用例里建，不捡兄弟
+  describe 的副作用；缺存根就 `expect(...).toBeDefined()` 当场红，而不是在用例体里
+  抛 `TypeError`。信箱地址按用例 `uniqueAddr()`——重排也连段内一起重排。
+- **要 `ClientTools` 存根用 `connect()`**：它出的子类有独立 `items`，不往基类静态表里塞。
+  但子类经**原型链**继承基类的 `fetchOptions`——写 `ClientTools.fetchOptions = {...}` 会渗进
+  所有「隔离」作用域（凭证串味）。基类静态表只允许留给「刻意测基类入口」那一段。
+- **静态绑定归文件级**：`bindScheme` / `clearSchemes` 放在文件的 `beforeAll` / `afterAll`；
+  临时改路由表、`discoveryHandler` 一律 `try/finally` 还原。
+- **计时断言不赛跑**：死线要选在服务端追不上的一侧（即时工具配 `timeout: 1` 在 loopback 上
+  是掷硬币，实测 60 次里 9~18 次服务端先回）；断言写在 `try/catch` 外——写在 `catch` 里，
+  `expect.fail(...)` 抛的 `AssertionError` 会被自己吞掉，报成 `expected undefined to be 504`。
+- **回归栅栏**：`pnpm test` 跑两遍（顺序 + `--sequence.shuffle`），由
+  `test/test-order-independence-in-test-script.test.ts` 钉住。红了照 vitest 打的
+  `Running tests with seed "…"` 重放。
+
 ### 4.7 身份策略（Identity Policy）
 
 服务端回答「这个请求是谁」。三个文件：`identity.ts`（抽象）、`identity-session.ts`（服务端自签发会话凭证）、
