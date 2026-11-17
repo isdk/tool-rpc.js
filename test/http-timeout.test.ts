@@ -202,14 +202,19 @@ describe('Timeout and ExpectedDuration', () => {
       return originalHandler();
     };
 
+    let thrown: any
     try {
       await ClientTools.loadFrom(undefined, { timeout: 100 });
-      expect.fail('Discovery should have timed out');
-    } catch (err: any) {
-      expect(err.name).toMatch(/AbortError|Error/i);
+    } catch (err) {
+      thrown = err
+    } finally {
+      // 覆写的是**服务端上的共享对象**：不放在 finally 里，断言一红就把慢 discovery
+      // 漏给同文件后面的用例（与 #17 里 `transports-pure` 换路由表不还源同一形状）。
+      claim.discoveryHandler = originalHandler;
     }
 
-    claim.discoveryHandler = originalHandler;
+    expect(thrown, 'discovery 也要吃客户端死线').toBeInstanceOf(Error)
+    expect(thrown.name).toMatch(/AbortError|Error/i);
   });
 
   it('should handle concurrent requests with different timeouts', async () => {

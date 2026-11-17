@@ -656,50 +656,72 @@ describe('HttpClientToolTransport Integration', () => {
     })
 
     describe('Timeout & Abort', () => {
-      // 这两条要的是 `run()` 这一层的存根。以前靠兄弟 describe（`End-to-End via ClientTools`
+      // 这一段要的是 `run()` 这一层的存根。以前靠兄弟 describe（`End-to-End via ClientTools`
       // 的 `loadFrom()`）的副作用注册：单独跑这一段（`-t "Timeout & Abort"`）时
       // `ClientTools.get(...)` 是 undefined，失败变成 `expected undefined to be 504` /
       // `expected 'TypeError' to be 'AbortError'`——断言其实在测"存根在不在"。
       // 现在用 `connect()` 建自己的作用域：`ClientTools.connect` 里 `BoundService.items = {}
       // // Scope isolation for discovered stubs`，不碰基类的静态表，也就不受别的 describe 顺序影响。
-      let slowTool: any
       let delayTool: any
 
       beforeAll(() => {
         const Srv = ClientTools.connect(apiRoot)
         Srv.loadFromSync({
-          'echo': { name: 'echo' } as any,
           'delay-tool': { name: 'delay-tool' } as any,
         }, apiRoot)
-        slowTool = Srv.get('echo')
         delayTool = Srv.get('delay-tool')
-        expect(slowTool, '存根必须自备：不能依赖别的 describe 的执行顺序').toBeDefined()
         expect(delayTool, '存根必须自备：不能依赖别的 describe 的执行顺序').toBeDefined()
       })
 
       it('should abort with 504 on client-side timeout', async () => {
+        // 死线要选在**服务端追不上**的那一侧：以前这里拿即时返回的 `echo` 配 `timeout: 1`，
+        // 注释写着 "Server can't possibly respond in 1ms"——在 loopback 上是错的。
+        // 实测（同一形状重复 60 次）60 次里 9~18 次服务端先回，用例本身就是掷硬币。
+        // 现在拿 `delay-tool`（服务端真等 300ms）配 20ms 死线，余量一个数量级。
+        let thrown: any
         try {
-          // Server can't possibly respond in 1ms
-          await slowTool.run({ msg: 'fast?' }, { timeout: 1 })
-          expect.fail('Should have timed out')
-        } catch (err: any) {
-          expect(err.code).toBe(504)
-          expect(err.message).toMatch(/Timeout/i)
+          await delayTool.run({ delay: 300 }, { timeout: 20 })
+        } catch (err) {
+          thrown = err
         }
+
+        // 断言一律放在 try/catch 外：写在 catch 里，那么「没超时」时
+        // `expect.fail(...)` 抛的 AssertionError 会被自己的 catch 吞掉，
+        // 报成 `expected undefined to be 504`——失败信息说谎（#17 点名那一类）。
+        expect(thrown, '死线到点必须报错，不能跟服务端赛跑').toBeInstanceOf(Error)
+        expect(thrown.code).toBe(504)
+        expect(thrown.message).toMatch(/Timeout/i)
+      })
+
+      it('客户端死线重复多次都是 504：不靠赛跑', async () => {
+        // 上面那条只能证明“这一次”绿。死线逻辑一旦变成“跟服务端赛跑”，
+        // 单次绿看不出来（本次 #17 的残留红就是这样藏过来的）。重复探一遍。
+        const misses: string[] = []
+        for (let i = 0; i < 30; i++) {
+          try {
+            const r = await delayTool.run({ delay: 300 }, { timeout: 20 })
+            misses.push(`#${i} resolved(${JSON.stringify(r)})`)
+          } catch (err: any) {
+            if (err?.code !== 504) misses.push(`#${i} ${err?.name}/code=${err?.code}/"${err?.message}"`)
+          }
+        }
+        expect(misses, `30 次里脱钦 ${misses.length} 次`).toEqual([])
       })
 
       it('should handle AbortSignal interruption', async () => {
         const controller = new AbortController()
-        // Use delay-tool which waits 500ms — enough time for abort to fire
-        // Abort before the slow request completes
+        // delay-tool 等 500ms，50ms 上中止——余量充足够
         setTimeout(() => controller.abort(), 50)
 
+        let thrown: any
         try {
           await delayTool.run({ delay: 500 }, { signal: controller.signal })
-          expect.fail('Should have been aborted')
-        } catch (err: any) {
-          expect(err.name).toBe('AbortError')
+        } catch (err) {
+          thrown = err
         }
+
+        expect(thrown, '调用方中止必须报错').toBeInstanceOf(Error)
+        expect(thrown.name).toBe('AbortError')
       })
 
       it('should reject pre-aborted signal immediately via executeWithPolling', async () => {
@@ -707,13 +729,16 @@ describe('HttpClientToolTransport Integration', () => {
         const controller = new AbortController()
         controller.abort()
 
+        let thrown: any
         try {
           // Use client.fetch() instead of client._fetch() to trigger executeWithPolling's pre-abort check
           await client.fetch('echo', { msg: 'x' }, 'run', undefined, { signal: controller.signal })
-          expect.fail('Should have thrown')
-        } catch (err: any) {
-          expect(err.name).toBe('AbortError')
+        } catch (err) {
+          thrown = err
         }
+
+        expect(thrown, '预先中止的 signal 必须当场报错').toBeInstanceOf(Error)
+        expect(thrown.name).toBe('AbortError')
       })
     })
 
