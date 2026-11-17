@@ -379,7 +379,7 @@ p2.task.abort('用户停止') // → POST /rpcTask/:req-id?act=$cancel
 - 服务端**释放资源**（关连接、归还句柄）是工具自己的事，RPC 不代调钩子：非流式走 per-call `cleanup`，而它只有
   你在**注册类上自己** `makeToolFuncLifecycle(ServerTools)` 才生效（RPC 不代装能力，也不代调 `tool.cleanup(params, ctx)`，
   那与 tool-func 的 `cleanup(this)` 不是同一个契约）；流式工具走建流时挂的 `onClose(status, reason)`，
-  取消时 `status === 'cancel'`（这条不需要 ability）。见规范 `tool-rpc-timeout-spec.cn.md` §5.2.1。
+  取消时 `status === 'cancel'`（这条不需要 ability）。见规范 `tool-rpc-timeout-spec.cn.md` §5.2.1（英文版：`tool-rpc-timeout-spec.md`）。
 - `makeClientToolRpcCancelable` 是 opt-in 的（底层默认多任务并发，并且它**不**接管超时——RPC 只有一套死线，见上文）。
   需要 `p.task.abort()` 就用它；否则一个普通的 `AbortSignal` 已经覆盖取消。
 

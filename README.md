@@ -393,7 +393,7 @@ p2.task.abort('user stopped') // → POST /rpcTask/:req-id?act=$cancel
   it on the registry class (`makeToolFuncLifecycle(ServerTools)`); the RPC side neither installs the ability nor
   calls `tool.cleanup(params, ctx)` (that signature is not tool-func's `cleanup(this)` contract). Stream tools use
   the `onClose(status, reason)` they attach when they build the stream — on cancellation `status === 'cancel'`
-  (no ability needed). See `tool-rpc-timeout-spec.cn.md` §5.2.1.
+  (no ability needed). See `tool-rpc-timeout-spec.md` §5.2.1 (中文：`tool-rpc-timeout-spec.cn.md`).
 - `makeClientToolRpcCancelable` is opt-in (multi-task under the hood, and it does **not** take over the
   timeout — RPC keeps exactly one deadline, see above). Use it when you want `p.task.abort()`; otherwise
   a plain `AbortSignal` already covers cancellation.

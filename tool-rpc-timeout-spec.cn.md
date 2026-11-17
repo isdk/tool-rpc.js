@@ -1,5 +1,8 @@
 # @isdk/tool-rpc 超时处理规范 (Specification v1.0)
 
+> 本文件与英文版 [`tool-rpc-timeout-spec.md`](./tool-rpc-timeout-spec.md) 逐节对应，章节号完全一致
+> （所以 `§5.2.2` 在两边指同一条规则）。实现注释与代码引用最初是对着这份写的；两份要同步改。
+
 ## 1. 核心定义 (Core Definitions)
 
 ### 1.1 超时类型
@@ -164,6 +167,9 @@ export interface RemoteFuncItem extends BaseFuncItem {
   - **服务端响应**: `RpcActiveTaskTracker` 收到取消请求后强制终止对应任务（对已 aborted 的条目幂等），
     **账本条目的去留由该工具自己的 retention 策略决定**（§5.2.2）。
     任务真的停下来，前提是工具自己监听 `this.ctx.signal`（§5.1）。
+- **取消是逻辑的，不是物理的：取消之后传输层必须仍在线。** 同一条通道上的其它调用照走，transport 不得因为
+  一次取消而 `stop()`、断开长连接或关掉 mailbox。物理断连既不是取消的**手段**（上两条已经列了它盖不住的场景），
+  也不是它的**结果**：服务端靠 `$cancel` 知道该停，而不是靠“连接没了”猜。
 
 ### 5.2.1 资源释放：`cleanup` / `onClose` 属工具自己，RPC 不代调
 
