@@ -10,3 +10,5 @@ dist/
 docs/api/
 web/
 bun.lock*
+tmp.*
+temp.*
